@@ -1,6 +1,6 @@
 # Rendered manifests pattern: helm-template the addon's umbrella chart at the Freight's commit with fleet + env values
-# and commit the plain YAML to rendered/<branch>. Workers then sync plain manifests; the diff of a promotion is
-# exactly what changes on the clusters. Cluster-scoped so every addon-<name> Project shares one definition.
+# and commit plain YAML, one file per resource, to rendered/<branch>:addons/<addon>/. Workers sync that folder as a
+# plain directory (no kustomize); the diff of a promotion is exactly what changes on the clusters. Cluster-scoped so every addon-<name> Project shares one definition.
 # Output (compose-output "result"): commit = SHA now at the head of rendered/<branch>.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: ClusterPromotionTask
@@ -25,8 +25,11 @@ spec:
         checkout:
           - { commit: "${{ commitFrom(vars.repoURL).ID }}", path: ./src }
           - { branch: "rendered/${{ vars.branch }}", create: true, path: ./out }
-          # pipeline tooling comes from main: the Freight commit can predate it (or carry a stale copy)
-          - { branch: main, path: ./tools, sparse: [repos/platform-config/kargo/shared] }
+    # helm-template only adds/overwrites files: start from an empty folder so removed resources disappear.
+    # Only this addon's folder; the other addons on the branch are other pipelines' output.
+    - uses: delete
+      config:
+        path: ./out/addons/${{ vars.addon }}
     - uses: helm-template
       config:
         path: ./src/repos/platform-charts/${{ vars.chart }}
@@ -43,11 +46,8 @@ spec:
         valuesFiles:   # SPLIT: values come from platform-config, the chart (path) from platform-charts
           - ./src/repos/platform-config/addons/workers/${{ vars.addon }}/values.yaml
           - ./src/repos/platform-config/addons/workers/${{ vars.addon }}/envs/${{ vars.env }}.values.yaml
-        outPath: ./out/addons/${{ vars.addon }}/manifests.yaml
-    - uses: copy
-      config:
-        inPath: ./tools/repos/platform-config/kargo/shared/kustomization.rendered.yaml.tmpl
-        outPath: ./out/addons/${{ vars.addon }}/kustomization.yaml
+        outPath: ./out/addons/${{ vars.addon }}
+        outLayout: flat   # <group>-<kind>-<namespace>-<name>.yaml per resource: reviewable diffs, no chart subfolder
     - uses: git-commit
       config:
         path: ./out
