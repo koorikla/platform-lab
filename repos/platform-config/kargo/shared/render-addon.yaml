@@ -52,9 +52,11 @@ spec:
       config:
         path: ./out
         message: "render(${{ vars.addon }}): ${{ vars.branch }} <- ${{ commitFrom(vars.repoURL).ID }}"
+    # success() on every custom if: a custom if REPLACES the implicit "all previous steps succeeded" guard
+    # (seen live: without it push-direct ran after git-clone had errored).
     - uses: git-push
       as: push-direct
-      if: ${{ vars.pr != "true" }}
+      if: ${{ success() && vars.pr != "true" }}
       config:
         path: ./out
         maxAttempts: 20   # every addon pipeline pushes to the same rendered/<stage> branch; each attempt rebases
@@ -63,11 +65,11 @@ spec:
     # inflated into the Promotion.
     - uses: git-push
       as: push
-      if: ${{ vars.pr == "true" }}
+      if: ${{ success() && vars.pr == "true" }}
       config: { path: ./out, generateTargetBranch: true }
     - uses: git-open-pr
       as: open-pr
-      if: ${{ vars.pr == "true" }}
+      if: ${{ success() && vars.pr == "true" }}
       config:
         repoURL: ${{ vars.repoURL }}
         sourceBranch: ${{ task.outputs.push.branch }}
@@ -75,7 +77,7 @@ spec:
         title: "render(${{ vars.addon }}): ${{ vars.branch }}"
     - uses: git-wait-for-pr
       as: wait-for-pr
-      if: ${{ vars.pr == "true" && status('open-pr') != 'Skipped' }}
+      if: ${{ success() && vars.pr == "true" && status('open-pr') != 'Skipped' }}
       config:
         repoURL: ${{ vars.repoURL }}
         prNumber: ${{ task.outputs['open-pr'].pr.id }}
