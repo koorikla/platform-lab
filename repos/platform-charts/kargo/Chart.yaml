@@ -7,3 +7,8 @@ dependencies:
   - name: kargo
     version: 1.11.4
     repository: oci://ghcr.io/akuity/kargo-charts
+  # Kargo verification (AnalysisRuns) is executed by the Argo Rollouts controller. Bundled here, not a separate addon:
+  # kargo-controller detects the Rollouts CRDs only at startup, and one Argo sync applies CRDs before Deployments.
+  - name: argo-rollouts
+    version: 2.43.2
+    repository: oci://ghcr.io/argoproj/argo-helm

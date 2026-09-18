@@ -2,5 +2,8 @@ dependencies:
 - name: kargo
   repository: oci://ghcr.io/akuity/kargo-charts
   version: 1.11.4
-digest: sha256:847fd38ea672cb3f04bd621d3c6e0713bf1fafba9b0e4dc317ecaf6246aed93a
-generated: "2026-09-18T23:20:16.162863+03:00"
+- name: argo-rollouts
+  repository: oci://ghcr.io/argoproj/argo-helm
+  version: 2.43.2
+digest: sha256:7edd6e2b8cb352e8c1092dc96bd8e07fd6853f7ee3692e6829d0f3cb2d1c34a9
+generated: "2026-09-19T01:34:38.848981+03:00"

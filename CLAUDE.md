@@ -1,11 +1,12 @@
 # Context for AI-assisted work on this repo
 
 ## Goal
-Enterprise-style GitOps lab. Management cluster (hub) runs Argo CD, argocd-agent principal, Cluster API, Kargo (+ Argo Rollouts for its verification),
-OpenChoreo control plane and manages itself — including its own CAPI `Cluster` (self-hosted after a `clusterctl move`
-pivot from a throw-away k3d cluster). CAPI (k3s bootstrap/control-plane provider; CAPD infra now, OpenStack and EKS
-later) creates worker clusters per env (dev/test/prod, N clusters per env). Everything is k3s. Workers get argocd-agent
-injected at birth and are then driven from the hub. Everything declarative; `bootstrap/` is the only imperative entrypoint.
+Enterprise-style GitOps lab. Management cluster (hub) runs Argo CD, argocd-agent principal, Cluster API, Kargo
+(bundling Argo Rollouts for its verification), OpenChoreo control plane and manages itself — including its own CAPI
+`Cluster` (self-hosted after a `clusterctl move` pivot from a throw-away k3d cluster). CAPI (k3s bootstrap/control-plane
+provider; CAPD infra now, OpenStack and EKS later) creates worker clusters per env (dev/test/prod, N clusters per env).
+Everything is k3s. Workers get argocd-agent injected at birth and are then driven from the hub. Everything declarative;
+`bootstrap/` is the only imperative entrypoint.
 
 ## Invariants — do not break
 1. **Cluster name == argocd-agent name == client-cert CN == Argo CD destination name == OpenChoreo planeID.**
@@ -30,11 +31,12 @@ bootstrap.sh → k3d `bootstrap` + cert-manager/capi-operator/capi-providers (sa
 `helm template | kubectl apply`) → Cluster `mgmt` (`fleet/clusters/mgmt/mgmt.yaml`, role=management, ClusterClass
 variable `managementCluster=true`: docker.sock in nodes + LB frontend :30443) → same CAPI stack on mgmt →
 `clusterctl move -n fleet` → delete k3d → helm install `repos/platform-charts/argo-cd` (release `argocd`) → `root` app →
-`platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, principal, capi-operator, capi-providers, kargo, argo-rollouts,
-argo-cd itself) + `fleet-base` (ClusterClass, HelmChartProxies) + `fleet-clusters` appset → `cluster` chart per file →
-CAPI builds k3s cluster → CAAPH installs argo-cd (controller/repo/redis) + argocd-agent → ESO pushes client cert →
-agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) → ESO-rendered cluster secret makes the cluster selectable →
-`worker-addons` / `workloads` appsets generate labelled Applications → principal ships them → worker reconciles.
+`platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, principal, capi-operator, capi-providers,
+kargo + argo-rollouts, argo-cd itself) + `fleet-base` (ClusterClass, HelmChartProxies) + `fleet-clusters` appset →
+`cluster` chart per file → CAPI builds k3s cluster → CAAPH installs argo-cd (controller/repo/redis) + argocd-agent →
+ESO pushes client cert → agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) → ESO-rendered cluster
+secret makes the cluster selectable → `worker-addons` / `workloads` appsets generate labelled Applications → principal
+ships them → worker reconciles.
 
 ## Hub access
 Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of container `mgmt-lb`>; bootstrap re-points it).
