@@ -146,6 +146,11 @@ Deployments. Test: `hack/tests/test_argo_rollouts.sh`. Verified: "Argo Rollouts 
 
 ---
 
+> **Superseded details (2026-09-19):** no kustomize anywhere — Kargo renders folders, Argo uses `directory.recurse`;
+> identity-bound components (argocd-agent, OpenChoreo data plane, ESO store) move to the CAAPH birth kit; secrets use the
+> OpenBao pull model. See the two addenda at the end of the design doc. Tasks below that mention
+> `kustomization.rendered.yaml`, `clusterIdentity`, `templatePatch` or `kustomize.patches` follow the addenda instead.
+
 ## Phase 1 — rendered manifests for worker addons
 
 ### Task 1.1: `kargo-pipeline` chart — failing test first
