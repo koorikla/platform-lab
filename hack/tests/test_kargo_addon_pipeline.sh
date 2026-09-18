@@ -45,4 +45,4 @@ assert_fails helm template p $charts/kargo-pipeline --set name=foo --set kind=bo
 # a custom if replaces Kargo's implicit "previous steps succeeded" guard: every one must keep it explicitly
 ra=$config/kargo/shared/render-addon.yaml
 assert_yq "$ra" '[.spec.steps[] | select(has("if"))] | length > 0' true
-assert_yq "$ra" '[.spec.steps[] | select(has("if")) | .if | test("^\$\{\{ success\(\) && ")] | all' true
+assert_yq "$ra" '[.spec.steps[] | select(has("if")) | .if | test("^[$][{][{] success[(][)] && ")] | all' true
