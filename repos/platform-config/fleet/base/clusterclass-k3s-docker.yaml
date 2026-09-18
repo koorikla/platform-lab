@@ -135,6 +135,9 @@ spec:
     spec:
       preK3sCommands:
         - until curl -sfI --max-time 5 https://get.k3s.io >/dev/null; do sleep 2; done
+        # k3s-agent (Type=notify) only reports READY once CAPD removed the cloud-provider taint, but CAPD sets the
+        # providerID only after this bootstrap returns -> the install's `systemctl restart` would block until timeout.
+        - mkdir -p /etc/systemd/system/k3s-agent.service.d && printf '[Service]\nType=exec\n' > /etc/systemd/system/k3s-agent.service.d/capd.conf
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: DockerMachineTemplate
