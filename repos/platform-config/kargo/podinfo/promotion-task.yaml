@@ -9,7 +9,7 @@ spec:
   vars:
     - name: env
     - name: repoURL
-      value: https://github.com/koorikla/platform-lab.git
+      value: git@github.com:koorikla/platform-lab.git   # deploy key (hack/kargo-deploy-key.sh)
     - name: image
       value: ghcr.io/stefanprodan/podinfo
   steps:
