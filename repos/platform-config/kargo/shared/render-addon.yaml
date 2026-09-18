@@ -1,0 +1,68 @@
+# Rendered manifests pattern: helm-template the addon's umbrella chart at the Freight's commit with fleet + env values
+# and commit the plain YAML to rendered/<branch>. Workers then sync plain manifests; the diff of a promotion is
+# exactly what changes on the clusters. Cluster-scoped so every addon-<name> Project shares one definition.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ClusterPromotionTask
+metadata:
+  name: render-addon
+spec:
+  vars:
+    - { name: repoURL, value: "git@github.com:koorikla/platform-lab.git" }   # must equal the Warehouse repoURL
+    - name: addon
+    - name: chart
+    - name: namespace
+    - name: releaseName
+    - name: env          # values overlay: envs/<env>.values.yaml
+    - name: branch       # stage name; output goes to rendered/<branch>
+    - { name: pr, value: "false" }
+  steps:
+    - uses: git-clone
+      config:
+        repoURL: ${{ vars.repoURL }}
+        checkout:
+          - { commit: "${{ commitFrom(vars.repoURL).ID }}", path: ./src }
+          - { branch: "rendered/${{ vars.branch }}", create: true, path: ./out }
+    - uses: helm-template
+      config:
+        path: ./src/repos/platform-charts/${{ vars.chart }}
+        releaseName: ${{ vars.releaseName }}
+        namespace: ${{ vars.namespace }}
+        buildDependencies: true      # charts/*.tgz are gitignored; deps are pinned by Chart.lock
+        includeCRDs: true
+        kubeVersion: "1.34.11"       # k3s version of the workers (charts gate on .Capabilities.KubeVersion)
+        ignoreMissingValueFiles: true
+        valuesFiles:
+          - ./src/repos/platform-config/addons/workers/${{ vars.addon }}/values.yaml
+          - ./src/repos/platform-config/addons/workers/${{ vars.addon }}/envs/${{ vars.env }}.values.yaml
+        outPath: ./out/addons/${{ vars.addon }}/manifests.yaml
+    - uses: copy
+      config:
+        inPath: ./src/repos/platform-config/kargo/shared/kustomization.rendered.yaml
+        outPath: ./out/addons/${{ vars.addon }}/kustomization.yaml
+    - uses: git-commit
+      as: commit
+      config:
+        path: ./out
+        message: "render(${{ vars.addon }}): ${{ vars.branch }} <- ${{ commitFrom(vars.repoURL).ID }}"
+    - uses: git-push
+      if: ${{ vars.pr != "true" }}
+      config: { path: ./out }
+    # PR flow (needs a token that can open PRs; the deploy key can only push). Inside a task, earlier outputs are
+    # read via task.outputs: the step aliases get namespaced when the task is inflated into the Promotion.
+    - uses: git-push
+      as: push
+      if: ${{ vars.pr == "true" }}
+      config: { path: ./out, generateTargetBranch: true }
+    - uses: git-open-pr
+      as: open-pr
+      if: ${{ vars.pr == "true" }}
+      config:
+        repoURL: ${{ vars.repoURL }}
+        sourceBranch: ${{ task.outputs.push.branch }}
+        targetBranch: rendered/${{ vars.branch }}
+        title: "render(${{ vars.addon }}): ${{ vars.branch }}"
+    - uses: git-wait-for-pr
+      if: ${{ vars.pr == "true" }}
+      config:
+        repoURL: ${{ vars.repoURL }}
+        prNumber: ${{ task.outputs['open-pr'].pr.id }}

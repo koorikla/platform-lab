@@ -27,7 +27,8 @@ spec:
     repoURL: https://github.com/koorikla/platform-lab.git
     targetRevision: main
     path: repos/platform-config/kargo
-    directory: { recurse: true }
+    # kustomization.rendered.yaml is a file Kargo copies into rendered branches, not a resource for this cluster
+    directory: { recurse: true, exclude: shared/kustomization.rendered.yaml }
   destination: { name: in-cluster, namespace: kargo }
   syncPolicy:
     automated: { prune: true, selfHeal: true }
