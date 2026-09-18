@@ -1,0 +1,6 @@
+addon:
+  name: argo-rollouts
+  chart: argo-rollouts
+  namespace: argo-rollouts
+  releaseName: argo-rollouts
+  chartRevision: main
