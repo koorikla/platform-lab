@@ -17,9 +17,9 @@ openchoreo-control-plane:
       enabled: false
   clusterGateway:
     service:
-      type: NodePort            # VERIFY: chart may not expose a fixed nodePort; workers dial mgmt-control-plane:<nodePort>
+      type: NodePort            # VERIFY: chart may not expose a fixed nodePort; workers dial k3d-mgmt-server-0:<nodePort>
     tls:
       dnsNames:
         - cluster-gateway.openchoreo-control-plane.svc
         - cluster-gateway.openchoreo-control-plane.svc.cluster.local
-        - mgmt-control-plane
+        - k3d-mgmt-server-0

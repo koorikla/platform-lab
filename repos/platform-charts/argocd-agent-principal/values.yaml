@@ -1,5 +1,5 @@
 hub:
-  host: mgmt-control-plane     # DNS name workers use to reach the hub (kind node container on the "kind" docker network)
+  host: k3d-mgmt-server-0     # DNS name workers use to reach the hub (k3d node container on the "kind" docker network)
   principalNodePort: 30443
 
 argocd-agent-principal:

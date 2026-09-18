@@ -54,7 +54,7 @@ spec:
   valuesTemplate: |
     agentMode: managed
     auth: "mtls:any"                   # identity = CN of argocd-agent-client-tls (pushed from the hub, = {{ .Cluster.metadata.name }})
-    server: mgmt-control-plane         # keep in sync with hub.host / hub.principalNodePort of argocd-agent-principal
+    server: k3d-mgmt-server-0         # keep in sync with hub.host / hub.principalNodePort of argocd-agent-principal
     serverPort: "30443"
     destinationBasedMapping: true
     createNamespace: true
