@@ -2,7 +2,7 @@ REPO ?= https://github.com/koorikla/platform-lab.git
 OLD  := $(shell grep -m1 -oE 'https://github.com/[^ ]+\.git' bootstrap/root-app.yaml)
 CTX  := --context mgmt
 
-.PHONY: up down status ui argocd-password set-repo kubeconfig lint
+.PHONY: up down status ui argocd-password set-repo kubeconfig lint test
 up:              ## bootstrap k3d -> CAPI builds hub "mgmt" -> clusterctl move -> Argo CD + root app
 	./bootstrap/bootstrap.sh
 down:            ## workers via CAPI, then the self-hosted hub's containers (it cannot delete itself)
@@ -24,3 +24,5 @@ kubeconfig:      ## make kubeconfig CLUSTER=dev1 > dev1.kubeconfig   (server = L
 	@kubectl $(CTX) -n fleet get secret $(CLUSTER)-kubeconfig -o jsonpath='{.data.value}' | base64 -d
 lint:            ## helm lint every chart; render every addon and cluster file
 	./hack/lint.sh
+test:            ## render assertions (hack/tests/test_*.sh)
+	./hack/tests/run.sh
