@@ -99,6 +99,8 @@ spec:
   template:
     spec: {}
 ---
+# CAPD execs the bootstrap the moment systemd is up, while kindest/node's entrypoint may still be fixing DNS. The
+# bootstrap is `curl get.k3s.io | sh` (exit status = sh's), so a failed download would "succeed" without k3s.
 apiVersion: controlplane.cluster.x-k8s.io/v1beta2
 kind: KThreesControlPlaneTemplate
 metadata:
@@ -108,6 +110,8 @@ spec:
   template:
     spec:
       kthreesConfigSpec:
+        preK3sCommands:
+          - until curl -sfI --max-time 5 https://get.k3s.io >/dev/null; do sleep 2; done
         serverConfig:
           tlsSan: [0.0.0.0]
           disableComponents: [traefik]   # ingress comes from kgateway (OpenChoreo) where needed
@@ -128,7 +132,9 @@ metadata:
   namespace: fleet
 spec:
   template:
-    spec: {}
+    spec:
+      preK3sCommands:
+        - until curl -sfI --max-time 5 https://get.k3s.io >/dev/null; do sleep 2; done
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: DockerMachineTemplate
