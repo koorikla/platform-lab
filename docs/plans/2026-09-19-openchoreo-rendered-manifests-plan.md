@@ -81,26 +81,27 @@ assert_yq "$h" '[select(.kind=="PushSecret")] | length' 0
 
 **Step 4: Commit** — `git add hack/tests Makefile && git commit -m "test: render assertion harness"`
 
-### Task 0.2: Kargo git credentials (needs the user)
+### Task 0.2: Kargo git credential = repo-scoped deploy key (done by the controller, not a subagent)
 
-Kargo must push `rendered/*` branches. **The user creates the token and applies the secret; the agent never handles it.**
+Decision (user, 2026-09-19): a write-enabled **deploy key** on `koorikla/platform-lab`, created with `gh`, instead of a
+PAT. The private key never touches the repo or the terminal output.
 
-**Step 1:** Ask the user to create a fine-grained GitHub PAT: repo `koorikla/platform-lab`, *Contents: read & write*,
-*Pull requests: read & write* (prod promotions open PRs).
-
-**Step 2:** User runs (shared namespace = visible to all Kargo projects):
 ```bash
+k=$(mktemp -d)/kargo && ssh-keygen -q -t ed25519 -N '' -C kargo@platform-lab -f "$k"
+gh repo deploy-key add "$k.pub" -R koorikla/platform-lab --allow-write -t kargo-platform-lab
 kubectl --context mgmt -n kargo-shared-resources create secret generic git-platform-lab \
-  --from-literal=repoURL=https://github.com/koorikla/platform-lab.git \
-  --from-literal=username=koorikla --from-literal=password=<PAT>
+  --from-literal=repoURL=git@github.com:koorikla/platform-lab.git --from-file=sshPrivateKey="$k"
 kubectl --context mgmt -n kargo-shared-resources label secret git-platform-lab kargo.akuity.io/cred-type=git
+rm -f "$k" "$k.pub"
 ```
+Consequences for every Kargo object: `repoURL: git@github.com:koorikla/platform-lab.git` (credentials match by
+repoURL); Argo CD keeps the HTTPS URL. A deploy key cannot open PRs → prod stages push directly (`pr: "false"`)
+until a GitHub token exists; the `pr` var and PR steps stay in `render-*` for later.
+The secret is imperative state (like the bootstrap): note in CLAUDE.md that `make up` on a fresh hub needs it re-run
+(`hack/kargo-deploy-key.sh`, which wraps the commands above and first deletes an existing `kargo-platform-lab` key).
 
-**Step 3: Verify:** re-run the existing podinfo dev promotion (Kargo UI → podinfo → dev → "Promote") and check the
-Stage status no longer says `could not read Username`. Then `git fetch && git log origin/main -1` shows the Kargo commit.
-
-**Step 4:** Update `repos/platform-config/kargo/podinfo/git-credentials.yaml.example` comment to point at
-`kargo-shared-resources`. Commit.
+Verify: re-run the podinfo dev promotion after switching `repos/platform-config/kargo/podinfo/promotion-task.yaml`
+`repoURL` to the SSH URL → Stage Succeeded, `git fetch && git log origin/main -1` shows the Kargo commit.
 
 ### Task 0.3: Create the rendered branches
 
@@ -122,6 +123,19 @@ done
 ```
 
 Run it; verify `git ls-remote --heads origin 'rendered/*'` lists 4 branches. Commit the script.
+
+### Task 0.4: Argo Rollouts on the management cluster
+
+Kargo verification (AnalysisTemplates/AnalysisRuns) is executed by the Argo Rollouts controller next to Kargo.
+
+**Files:** Create `repos/platform-charts/argo-rollouts/{Chart.yaml,values.yaml}`,
+`repos/platform-config/addons/management/argo-rollouts/{addon.yaml,values.yaml}`; Test `hack/tests/test_argo_rollouts.sh`.
+- Dep: `argo-rollouts` from `oci://ghcr.io/argoproj/argo-helm` (latest chart; `helm show chart` to pin).
+- values: `argo-rollouts: { installCRDs: true, dashboard: { enabled: false } }` (keys: confirm with `helm show values`).
+- addon.yaml: `name: argo-rollouts, chart: argo-rollouts, namespace: argo-rollouts, releaseName: argo-rollouts, chartRevision: main`.
+- Test: render has `CustomResourceDefinition analysisruns.argoproj.io` and a Deployment.
+- E2E: `kubectl --context mgmt get crd analysistemplates.argoproj.io`; `mgmt-argo-rollouts` Synced/Healthy;
+  kargo-controller logs no longer warn about missing Rollouts CRDs.
 
 ---
 
@@ -147,7 +161,7 @@ assert_yq "$o" 'select(.kind=="Warehouse") | .spec.subscriptions[0].git.includeP
   'repos/platform-charts/cert-manager/,repos/platform-config/addons/workers/cert-manager/'
 assert_yq "$o" '[select(.kind=="Stage")] | map(.metadata.name) | join(",")' 'dev-canary,dev,test,prod'
 assert_yq "$o" 'select(.kind=="Stage" and .metadata.name=="dev") | .spec.requestedFreight[0].sources.stages[0]' dev-canary
-assert_yq "$o" 'select(.kind=="Stage" and .metadata.name=="prod") | .spec.promotionTemplate.spec.steps[0].vars[] | select(.name=="pr") | .value' 'true'
+assert_yq "$o" 'select(.kind=="Warehouse") | .spec.subscriptions[0].git.repoURL' 'git@github.com:koorikla/platform-lab.git'
 ```
 
 **Step 2:** `make test` → FAIL (chart missing).
@@ -165,7 +179,7 @@ chart: ""                   # addon: chart folder under repos/platform-charts
 namespace: ""               # addon: target namespace
 releaseName: ""
 image: ""                   # app: image repository (Warehouse subscription)
-repoURL: https://github.com/koorikla/platform-lab.git
+repoURL: git@github.com:koorikla/platform-lab.git   # Kargo uses the deploy key (Task 0.2)
 stages: [dev-canary, dev, test, prod]   # order = promotion order
 autoPromote: [dev-canary, dev]
 ```
@@ -228,7 +242,7 @@ spec:
             - { name: releaseName, value: {{ $.Values.releaseName }} }
             - { name: env, value: {{ splitList "-" $s | first }} }      # dev-canary renders with dev values
             - { name: branch, value: {{ $s }} }
-            - { name: pr, value: {{ eq $s "prod" | quote }} }
+            - { name: pr, value: "false" }   # deploy key can't open PRs; flip to (eq $s "prod") with a token
 {{- end }}
 ```
 
@@ -256,7 +270,7 @@ kind: ClusterPromotionTask
 metadata: { name: render-addon }
 spec:
   vars:
-    - { name: repoURL, value: https://github.com/koorikla/platform-lab.git }
+    - { name: repoURL, value: "git@github.com:koorikla/platform-lab.git" }
     - name: addon
     - name: chart
     - name: namespace
