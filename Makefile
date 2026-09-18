@@ -18,8 +18,14 @@ ui:              ## Argo CD on :8080, Kargo on :8081 (CAPD nodes publish no host
 	kubectl $(CTX) -n kargo port-forward svc/kargo-api 8081:80 & wait
 argocd-password:
 	@kubectl $(CTX) -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+# owner/repo slugs: Argo CD uses the https form, Kargo the SSH form (deploy key), hack/kargo-deploy-key.sh the bare slug
+slug = $(patsubst https://github.com/%.git,%,$(1))
 set-repo:        ## make set-repo REPO=https://github.com/you/fork.git
-	grep -rl '$(OLD)' bootstrap repos | xargs sed -i.bak 's#$(OLD)#$(REPO)#g' && find bootstrap repos -name '*.bak' -delete
+	@[ "$(call slug,$(REPO))" != "$(REPO)" ] || { echo "REPO must look like https://github.com/<owner>/<repo>.git"; exit 1; }
+	grep -rlE 'github.com[/:]$(call slug,$(OLD))\.git|REPO:-$(call slug,$(OLD))\}' bootstrap repos hack | xargs sed -i.bak \
+	  -e 's#github.com/$(call slug,$(OLD))\.git#github.com/$(call slug,$(REPO)).git#g' \
+	  -e 's#github.com:$(call slug,$(OLD))\.git#github.com:$(call slug,$(REPO)).git#g' \
+	  -e 's#REPO:-$(call slug,$(OLD))}#REPO:-$(call slug,$(REPO))}#g' && find bootstrap repos hack -name '*.bak' -delete
 kubeconfig:      ## make kubeconfig CLUSTER=dev1 > dev1.kubeconfig   (server = LB IP on the docker network)
 	@kubectl $(CTX) -n fleet get secret $(CLUSTER)-kubeconfig -o jsonpath='{.data.value}' | base64 -d
 lint:            ## helm lint every chart; render every addon and cluster file

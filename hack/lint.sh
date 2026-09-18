@@ -27,6 +27,16 @@ for a in $config/addons/workers/*/; do
     render "$chart" "$charts/$chart" "${f[@]}"
   done
 done
+# appsets take the addon name from the folder (Kargo project, rendered/<stage>/addons/<name>); addon.yaml must agree
+for f in $config/addons/*/*/addon.yaml*; do
+  [ "$(awk '/name:/ {print $2; exit}' "$f")" = "$(basename "$(dirname "$f")")" ] || { echo "FAIL: $f: addon.name != folder"; exit 1; }
+done
+# render-addon renders for the fleet's Kubernetes minor (charts gate on .Capabilities.KubeVersion)
+kv=$(awk -F'"' '/kubeVersion:/ {print $2}' $config/kargo/shared/render-addon.yaml | cut -d. -f1,2)
+for f in $config/fleet/clusters/*/*.yaml*; do
+  fv=$(awk '/^kubernetesVersion:/ {print $2}' "$f" | sed 's/^v//' | cut -d. -f1,2)
+  [ "$fv" = "$kv" ] || { echo "FAIL: $f: kubernetesVersion $fv != render-addon kubeVersion $kv"; exit 1; }
+done
 # one render per cluster file, enabled or not
 for f in $config/fleet/clusters/*/*.yaml*; do render cluster $charts/cluster -f "$f"; done
 echo "lint: OK"

@@ -1,24 +1,27 @@
 # Rendered manifests pattern: helm-template the addon's umbrella chart at the Freight's commit with fleet + env values
 # and commit the plain YAML to rendered/<branch>. Workers then sync plain manifests; the diff of a promotion is
 # exactly what changes on the clusters. Cluster-scoped so every addon-<name> Project shares one definition.
+# Output (compose-output "result"): commit = SHA now at the head of rendered/<branch>.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: ClusterPromotionTask
 metadata:
   name: render-addon
 spec:
-  vars:
-    - { name: repoURL, value: "git@github.com:koorikla/platform-lab.git" }   # must equal the Warehouse repoURL
+  vars:              # no defaults: Stages (kargo-pipeline chart) pass all of them; a missing one fails loudly
+    - name: repoURL      # must equal the Warehouse repoURL (commitFrom looks the Freight commit up by it)
     - name: addon
     - name: chart
     - name: namespace
     - name: releaseName
     - name: env          # values overlay: envs/<env>.values.yaml
     - name: branch       # stage name; output goes to rendered/<branch>
-    - { name: pr, value: "false" }
+    - name: pr           # "true": push a generated branch + PR instead of pushing rendered/<branch> directly
   steps:
     - uses: git-clone
       config:
         repoURL: ${{ vars.repoURL }}
+        # SPLIT: ./src is one checkout of platform-charts + platform-config; split repos => one clone per repo
+        # (chart from the charts repo at its Freight commit, values from the config repo at its Freight commit)
         checkout:
           - { commit: "${{ commitFrom(vars.repoURL).ID }}", path: ./src }
           - { branch: "rendered/${{ vars.branch }}", create: true, path: ./out }
@@ -31,26 +34,33 @@ spec:
         namespace: ${{ vars.namespace }}
         buildDependencies: true      # charts/*.tgz are gitignored; deps are pinned by Chart.lock
         includeCRDs: true
-        kubeVersion: "1.34.11"       # k3s version of the workers (charts gate on .Capabilities.KubeVersion)
+        kubeVersion: "1.34.11"       # keep in sync with fleet kubernetesVersion (hack/lint.sh checks the minor)
+        # Rendered on the hub, not the worker: no lookup(), .Capabilities only knows what is listed here, and
+        # chart-generated secrets/certs change on every render. Workers have no extra CRD APIs today (e.g. no
+        # monitoring.coreos.com/v1), so the list stays empty; add group/version entries when they do.
+        apiVersions: []
         ignoreMissingValueFiles: true
-        valuesFiles:
+        valuesFiles:   # SPLIT: values come from platform-config, the chart (path) from platform-charts
           - ./src/repos/platform-config/addons/workers/${{ vars.addon }}/values.yaml
           - ./src/repos/platform-config/addons/workers/${{ vars.addon }}/envs/${{ vars.env }}.values.yaml
         outPath: ./out/addons/${{ vars.addon }}/manifests.yaml
     - uses: copy
       config:
-        inPath: ./tools/repos/platform-config/kargo/shared/kustomization.rendered.yaml
+        inPath: ./tools/repos/platform-config/kargo/shared/kustomization.rendered.yaml.tmpl
         outPath: ./out/addons/${{ vars.addon }}/kustomization.yaml
     - uses: git-commit
-      as: commit
       config:
         path: ./out
         message: "render(${{ vars.addon }}): ${{ vars.branch }} <- ${{ commitFrom(vars.repoURL).ID }}"
     - uses: git-push
+      as: push-direct
       if: ${{ vars.pr != "true" }}
-      config: { path: ./out }
+      config:
+        path: ./out
+        maxAttempts: 20   # every addon pipeline pushes to the same rendered/<stage> branch; each attempt rebases
     # PR flow (needs a token that can open PRs; the deploy key can only push). Inside a task, earlier outputs are
-    # read via task.outputs: the step aliases get namespaced when the task is inflated into the Promotion.
+    # read via task.outputs and status() takes the task-local alias: aliases get namespaced when the task is
+    # inflated into the Promotion.
     - uses: git-push
       as: push
       if: ${{ vars.pr == "true" }}
@@ -64,7 +74,15 @@ spec:
         targetBranch: rendered/${{ vars.branch }}
         title: "render(${{ vars.addon }}): ${{ vars.branch }}"
     - uses: git-wait-for-pr
-      if: ${{ vars.pr == "true" }}
+      as: wait-for-pr
+      if: ${{ vars.pr == "true" && status('open-pr') != 'Skipped' }}
       config:
         repoURL: ${{ vars.repoURL }}
         prNumber: ${{ task.outputs['open-pr'].pr.id }}
+    # PR flow: the pushed SHA sits on a generated branch, so report the merge commit on rendered/<branch> instead.
+    # Ternary, not ?? : the skipped branch's outputs don't exist and expr only evaluates the chosen side.
+    - uses: compose-output
+      as: result
+      config:
+        commit: >-
+          ${{ vars.pr == "true" ? task.outputs['wait-for-pr'].commit : task.outputs['push-direct'].commit }}
