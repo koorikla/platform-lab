@@ -945,3 +945,53 @@ with `hack/gen-pipeline.sh`; `make lint` fails if it's stale (`hack/gen-pipeline
   `fleet/clusters/mgmt/mgmt.yaml` to 2 (CAPI rolls it out; the hub manages itself).
 - Things flagged "verify" above are real unknowns from research — resolve them in the task, record the answer in a
   comment at the point of use, and remove the corresponding `# VERIFY` marker.
+
+---
+
+# Addendum (2026-09-19): make the lab a team-ready, prod-shaped template
+
+User direction: finish the whole CLAUDE.md backlog; the repo is a **demo/template** that several engineers will take
+in parallel, extend (EKS/OpenStack providers), and treat as prod-shaped in *structure*. Include Argo CD + Kargo RBAC.
+End with a clean-slate reboot and a review/simplify/cleanup pass.
+
+## Phase 4 — identity & RBAC (after Phase 2 brings Thunder)
+- 4.1 Thunder = single OIDC IdP for Backstage (already), **Argo CD** (`configs.cm.oidc.config`, client secret via
+  OpenBao → ESO) and **Kargo** (`api.oidc`). Groups: `platform-admins`, `app-developers` seeded in Thunder values.
+- 4.2 Argo CD RBAC (`configs.rbac`): `policy.default: role:readonly`; `platform-admins` → admin; `app-developers` →
+  sync/get on project `openchoreo-apps`/`workloads`-equivalent only. Keep the local `admin` for break-glass (documented).
+- 4.3 AppProjects least-privilege: `sourceRepos` = this repo (+ upstream chart registries where Argo renders Helm);
+  `platform-workers` destinations `name: "*"` but namespace allow-list derived from worker addons;
+  `clusterResourceWhitelist` narrowed where feasible; `platform-mgmt` unchanged (hub admin).
+- 4.4 Kargo RBAC: disable `api.adminAccount` once OIDC works (or keep for lab, documented); per-project Kargo roles
+  mapped from OIDC groups (`rbac.kargo.akuity.io/claims` annotations on project ServiceAccounts, rendered by the
+  `kargo-pipeline` chart): platform-admins promote everything, app-developers promote `app-*` projects up to `test`;
+  prod promotion restricted to platform-admins.
+- 4.5 Secrets out of git: Kargo `api.adminAccount` hash/signing key and argocd-agent principal JWT key
+  (`argocd-agent-jwt`, RSA PKCS#8 via cert-manager + ESO) generated in-cluster, no literals in values.
+
+## Phase 5 — team-ready repository
+- 5.1 CI (GitHub Actions): `make lint`, `make test`, kubeconform (with CRD catalog) on every PR; path filters.
+- 5.2 Publish umbrella charts to `oci://ghcr.io/koorikla/platform-charts/<chart>` on version bump (backlog 4);
+  switch HelmChartProxies to the argo-cd/argocd-agent umbrellas where that removes duplicated values.
+- 5.3 `CODEOWNERS` per area (repos/platform-charts, repos/platform-config/{fleet,addons,kargo,argocd}, repos/apps/<app>),
+  `CONTRIBUTING.md` with recipes: add a cluster, an addon, an app, a provider/ClusterClass, promote, canary;
+  PR template; `renovate.json` for chart/image pins (Chart.yaml deps, kindImageVersion, k3s versions).
+- 5.4 Provider extension points: `fleet/base/clusterclasses/<class>.yaml` layout, capi-providers toggles documented,
+  disabled example cluster files for `k3s-openstack` / `eks` with the required variables sketched (no creds).
+- 5.5 Boot hardening (backlog 1): `make up` idempotent across partial failures (bootstrap exists / hub exists without
+  Argo), runs `hack/init-rendered-branches.sh` and (if `gh` is authenticated) `hack/kargo-deploy-key.sh`;
+  `make down` verified; `make doctor` (disk ≥25 GB free, memory, tool versions, inotify on Linux).
+
+## Phase 6 — remaining backlog
+- 6.1 Kargo verification: AnalysisTemplate per app stage (HTTP check through the data-plane gateway), per addon
+  stage (Argo app health via the `argocd-update`-less path or a job) — Rollouts is already on the hub.
+- 6.2 Progressive-sync guard rail: ApplicationSet RollingSync on `worker-addons` by `platform.lab/ring` then env.
+- 6.3 Istio ambient on hub (chart exists, disabled): enable, verify, decide default on/off by memory budget.
+- 6.4 NetworkPolicies baseline for hub namespaces that expose webhooks/UIs (documented, lab-safe).
+
+## Final — verify from scratch and clean up
+- F.1 `make down && make up` on a clean Docker; record timings; everything Synced/Healthy; dev1+dev2 in Backstage;
+  podinfo promoted dev→test; canary flow works.
+- F.2 Review pass (separate reviewer): simplify, remove dead files/values/VERIFY markers, consistent comments,
+  README/CLAUDE.md match reality, no secrets in git (`git grep -nI 'password\|token\|BEGIN .*PRIVATE'`).
+- F.3 Stop `caffeinate`.
