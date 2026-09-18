@@ -1,6 +1,0 @@
-# On the hub only as the engine behind Kargo verification: Kargo creates AnalysisRuns from AnalysisTemplates and
-# this controller executes them. No Rollout objects here, so no dashboard.
-argo-rollouts:
-  installCRDs: true
-  dashboard:
-    enabled: false
