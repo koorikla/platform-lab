@@ -1,0 +1,39 @@
+# One Kargo pipeline (Project addon-<name>) per worker addon folder; later also per app. addon.yaml.disabled => no
+# pipeline. The pipeline renders the addon into rendered/<stage> branches (render-addon ClusterPromotionTask).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: kargo-addon-pipelines
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/koorikla/platform-lab.git            # platform-config repo
+        revision: main
+        files:
+          - path: repos/platform-config/addons/workers/*/addon.yaml
+  template:
+    metadata:
+      name: 'kargo-addon-{{ .addon.name }}'
+      labels:
+        platform.lab/addon: '{{ .addon.name }}'
+    spec:
+      project: platform-mgmt
+      source:
+        repoURL: https://github.com/koorikla/platform-lab.git            # platform-charts repo
+        targetRevision: main
+        path: repos/platform-charts/kargo-pipeline
+        helm:
+          valuesObject:
+            kind: addon
+            name: '{{ .addon.name }}'
+            chart: '{{ .addon.chart }}'
+            namespace: '{{ .addon.namespace }}'
+            releaseName: '{{ .addon.releaseName }}'
+      destination: { name: in-cluster, namespace: kargo }
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+        syncOptions: [ServerSideApply=true]
