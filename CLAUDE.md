@@ -65,6 +65,11 @@ k3s-agent Type=notify deadlocks CAPD bootstrap until timeout (~5 min, Type=exec 
 2. Enable dev2, prove env-wide vs single-cluster pinning (`rollout.clusters.dev2`). Then enable test1/prod1.
 3. Kargo: git creds via ESO; second pipeline promoting `rollout.chartRevision` of worker addons (Warehouse on git tags
    of platform-charts); prod stage via `git-open-pr` + `git-wait-for-pr`; verification (AnalysisTemplate) per stage.
+   Rendered manifests follow-ups:
+   - disabling an addon leaves `rendered/<branch>:addons/<x>/` behind → cleanup step (Task 1.5);
+   - tooling-only changes (`kargo/shared/`) make no Freight → re-promote by hand to re-render;
+   - one push changing an Application's spec *and* its content can race: the auto-sync captures the old spec and
+     retries it until the limit → `argocd app terminate-op <app>`.
 4. Publish umbrella charts to OCI (ghcr) with CI; switch appsets from git-path to `chart:` + semver, and point
    HelmChartProxies at the umbrellas. Per-env HelmChartProxies so agent upgrades are staged too.
 5. OpenChoreo (phase 2) — enable `kgateway`, `openchoreo-control-plane` (hub), `kgateway`, `openchoreo-data-plane`
