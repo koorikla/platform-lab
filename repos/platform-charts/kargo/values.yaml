@@ -16,5 +16,10 @@ kargo:
 # Controller only: it runs Kargo's AnalysisRuns (see Chart.yaml). No Rollout objects on the hub, so no dashboard.
 argo-rollouts:
   installCRDs: true
+  # Argo must never delete these CRDs (e.g. app removal/rename): that would cascade-delete every AnalysisRun/Template.
+  crdAnnotations:
+    argocd.argoproj.io/sync-options: Delete=false
+  controller:
+    replicas: 1   # lab: leader election means a 2nd replica only idles
   dashboard:
     enabled: false

@@ -17,7 +17,8 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
    - anything for workers must carry label `argocd-agent: "true"` (Application *and* its AppProject) and
      `destination.name: <cluster>`; agent cluster secrets carry `argocd.argoproj.io/skip-reconcile: "true"` (Argo CD >= 3.4).
 4. Addons are **umbrella charts** in `repos/platform-charts/<addon>` (upstream chart as dependency, extra templates
-   allowed). Config repo never contains templates, only `addon.yaml` + values + rollout pins.
+   allowed; more than one upstream dependency only when they must land in the same sync — e.g. kargo + argo-rollouts).
+   Config repo never contains templates, only `addon.yaml` + values + rollout pins.
 5. Version precedence for worker addons: cluster pin > env pin. Values: fleet < env < cluster. Kargo only ever writes
    `envs/<env>.yaml` (addons) or `envs/<env>/values.yaml` (apps).
 6. `repos/*` folders are future repositories: no relative references across them except via ApplicationSet

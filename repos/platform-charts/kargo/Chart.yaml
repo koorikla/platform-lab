@@ -1,14 +1,15 @@
 apiVersion: v2
 name: kargo
-description: Umbrella chart for kargo
+description: Kargo + Argo Rollouts (its verification engine)
 type: application
-version: 0.1.0
+version: 0.2.0
 dependencies:
   - name: kargo
     version: 1.11.4
     repository: oci://ghcr.io/akuity/kargo-charts
   # Kargo verification (AnalysisRuns) is executed by the Argo Rollouts controller. Bundled here, not a separate addon:
   # kargo-controller detects the Rollouts CRDs only at startup, and one Argo sync applies CRDs before Deployments.
+  # Rollouts upgrades therefore ship with (and are tested as) a kargo umbrella release.
   - name: argo-rollouts
     version: 2.43.2
     repository: oci://ghcr.io/argoproj/argo-helm
