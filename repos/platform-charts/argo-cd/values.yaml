@@ -10,6 +10,7 @@ argo-cd:
     service:
       type: NodePort
       nodePortHttp: 30080
+      nodePortHttps: 30082       # pinned: a random pick can steal 30443 from the argocd-agent principal
   dex:
     enabled: false
   notifications:

@@ -5,6 +5,7 @@ kind: AppProject
 metadata:
   name: platform-mgmt
   namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "-1" }   # before the appsets that reference it
 spec:
   sourceRepos: ["*"]
   destinations:
@@ -17,6 +18,7 @@ kind: AppProject
 metadata:
   name: platform-workers
   namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "-1" }   # before the appsets that reference it
   labels:
     argocd-agent: "true"
 spec:
@@ -31,6 +33,7 @@ kind: AppProject
 metadata:
   name: workloads
   namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "-1" }   # before the appsets that reference it
   labels:
     argocd-agent: "true"
 spec:
