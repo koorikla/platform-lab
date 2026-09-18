@@ -90,6 +90,10 @@ k3s-agent Type=notify deadlocks CAPD bootstrap until timeout (~5 min, Type=exec 
 8. Hardening: Kargo admin secret, principal `jwt.allowGenerate`, AppProject `sourceRepos`, RBAC, NetworkPolicies,
    AppSet progressive sync (RollingSync by `platform.lab/env`) as a guard rail besides Kargo.
 
+9. Team template (see docs/plans/ addendum): CI (lint/test/kubeconform), CODEOWNERS, CONTRIBUTING recipes, Renovate,
+   provider extension points; **Backstage template "new Helm chart repo"** (pre-commit helm lint + conventional
+   commits, semver releases, GitLab CI pushing to Artifactory).
+
 ## Conventions
 Minimal readable YAML; comments explain *why*. Label prefix `platform.lab/`. Namespaces: `argocd`, `fleet`, `kargo`.
 New addon = umbrella chart + `addons/<scope>/<name>/{addon.yaml,values.yaml}` (+ `envs/*.yaml` for workers).

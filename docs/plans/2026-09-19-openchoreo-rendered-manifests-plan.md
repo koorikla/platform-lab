@@ -503,6 +503,16 @@ things"; addon convention: `addons/workers/<name>/{addon.yaml,values.yaml,envs/<
 
 ## Phase 2 — OpenChoreo on hub and workers; clusters appear in Backstage
 
+> **Read `docs/plans/2026-09-19-phase2-4-research.md` first — it overrides the task text below where they differ:**
+> Task 2.1 → use Envoy `gateway-crds-helm` v1.8.2 (== Gateway API v1.5.1 standard CRDs) instead of vendoring;
+> Thunder needs a PVC health override + `hook-delete-policy` to sync under Argo (no `thunder-admin-credentials`
+> secret exists; logins are literals in values); `ClusterDataPlane.spec.secretStoreRef` refers to a store **on the
+> worker** (optional) — omit it; data-plane gateway port 80 on both sides; `backstage-secrets` needs
+> backend-secret/client-secret/jenkins-api-key; Environments live in `default` (label it
+> `openchoreo.dev/control-plane: "true"`); Deployment `cluster-agent-dataplane`, container `agent` (has `env:`);
+> reuse OpenChoreo group names (`admins`, `developers`, `platform-engineers`, `sres`) for Argo CD/Kargo RBAC;
+> each Project needs a ProjectReleaseBinding per Environment (Phase 3).
+
 Upstream reference for every value: `install/k3d/common/*` and `install/k3d/multi-cluster/*` at tag v1.2.5.
 
 ### Task 2.1: Gateway API CRDs chart
@@ -981,6 +991,16 @@ End with a clean-slate reboot and a review/simplify/cleanup pass.
 - 5.5 Boot hardening (backlog 1): `make up` idempotent across partial failures (bootstrap exists / hub exists without
   Argo), runs `hack/init-rendered-branches.sh` and (if `gh` is authenticated) `hack/kargo-deploy-key.sh`;
   `make down` verified; `make doctor` (disk ≥25 GB free, memory, tool versions, inotify on Linux).
+
+- 5.6 **Backstage software template: new Helm chart repository** (user request). Registered in OpenChoreo's
+  Backstage (catalog location → `repos/platform-config/backstage/templates/helm-chart-repo/template.yaml`). The
+  skeleton contains: chart scaffold (umbrella or plain), `.pre-commit-config.yaml` (helm lint, `helm template`,
+  yamllint, commitlint/conventional commits via `conventional-pre-commit`), semver release from conventional commits
+  (`semantic-release` or `commitizen` bump → git tag + Chart.yaml `version`), `.gitlab-ci.yml` (lint → test → package →
+  push to Artifactory Helm/OCI repo on tag; Artifactory URL + credentials as CI variables, never in the skeleton),
+  CODEOWNERS/README. Scaffolder actions: fetch:template → publish:gitlab (target configurable) → catalog:register.
+  Verify by running the template in Backstage against a throwaway target (GitHub publish if no GitLab is reachable;
+  document that GitLab is the intended target) and running the skeleton's pre-commit + CI lint locally.
 
 ## Phase 6 — remaining backlog
 - 6.1 Kargo verification: AnalysisTemplate per app stage (HTTP check through the data-plane gateway), per addon
