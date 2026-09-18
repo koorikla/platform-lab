@@ -6,6 +6,7 @@ argo-cd:
   configs:
     params:
       server.insecure: true
+      controller.diff.server.side: true   # CRD defaults (ESO, CAPI) otherwise show as permanent drift
   server:
     service:
       type: NodePort

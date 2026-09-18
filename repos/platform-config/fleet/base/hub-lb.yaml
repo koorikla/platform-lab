@@ -1,0 +1,59 @@
+# HAProxy config for the hub's CAPD load balancer (container `<hub>-lb`): CAPD's default template plus a TCP frontend
+# for the argocd-agent principal NodePort. Backends = control-plane nodes (kept current by CAPD).
+# Labelled for `clusterctl move`, because the hub's DockerCluster references it during the pivot.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k3s-docker-hub-lb
+  namespace: fleet
+  labels:
+    clusterctl.cluster.x-k8s.io/move: ""
+data:
+  value: |
+    global
+      log /dev/log local0
+      log /dev/log local1 notice
+      daemon
+      maxconn 100000
+
+    resolvers docker
+      nameserver dns 127.0.0.11:53
+
+    defaults
+      log global
+      mode tcp
+      option dontlognull
+      timeout connect 5000
+      timeout client 50000
+      timeout server 50000
+      default-server init-addr none
+
+    frontend stats
+      mode http
+      bind *:8404
+      stats enable
+      stats uri /stats
+      stats refresh 1s
+      stats admin if TRUE
+
+    frontend control-plane
+      bind *:{{ .FrontendControlPlanePort }}
+      {{ if .IPv6 -}}
+      bind :::{{ .FrontendControlPlanePort }};
+      {{- end }}
+      default_backend kube-apiservers
+
+    backend kube-apiservers
+      option httpchk GET /healthz
+      {{range $server, $backend := .BackendServers}}
+      server {{ $server }} {{ JoinHostPort $backend.Address $.BackendControlPlanePort }} weight {{ $backend.Weight }} check check-ssl verify none resolvers docker resolve-prefer {{ if $.IPv6 -}} ipv6 {{- else -}} ipv4 {{- end }}
+      {{- end}}
+
+    frontend argocd-agent-principal
+      bind *:30443
+      default_backend argocd-agent-principal
+
+    backend argocd-agent-principal
+      {{range $server, $backend := .BackendServers}}
+      server {{ $server }} {{ JoinHostPort $backend.Address "30443" }} check resolvers docker resolve-prefer ipv4
+      {{- end}}

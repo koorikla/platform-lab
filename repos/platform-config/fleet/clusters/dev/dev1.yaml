@@ -4,6 +4,6 @@ env: dev
 provider: docker
 region: local
 clusterClass: k3s-docker
-kubernetesVersion: v1.34.1+k3s1
+kubernetesVersion: v1.34.11+k3s1
 controlPlaneReplicas: 1
 workerReplicas: 1

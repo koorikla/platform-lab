@@ -1,0 +1,21 @@
+# Throw-away bootstrap cluster: only runs CAPI long enough to create the real hub (fleet/clusters/mgmt/mgmt.yaml)
+# and `clusterctl move` it there. Joins docker network "kind", where CAPD puts machines and load balancers.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: bootstrap
+servers: 1
+agents: 0
+image: rancher/k3s:v1.34.11-k3s1   # same minor as the hub
+network: kind
+volumes:
+  - volume: /var/run/docker.sock:/var/run/docker.sock   # CAPD creates clusters as sibling containers
+    nodeFilters: [server:0]
+options:
+  k3s:
+    extraArgs:
+      - arg: --disable=traefik
+        nodeFilters: [server:*]
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: false

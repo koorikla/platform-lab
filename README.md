@@ -5,7 +5,7 @@ delivers to it, **Kargo** promotes across environments, **OpenChoreo** is the de
 
 ```mermaid
 flowchart LR
-  subgraph mgmt["mgmt (kind) — hub"]
+  subgraph mgmt["mgmt (k3s via CAPI, self-hosted) — hub"]
     argo["Argo CD (full) + appsets"]
     principal["argocd-agent principal"]
     capi["CAPI operator: core, k3s, CAPD, CAAPH"]
@@ -32,7 +32,7 @@ Top-level folders under `repos/` simulate separate git repositories (split later
 
 | Path | Future repo | Owns |
 |---|---|---|
-| `bootstrap/` | platform-config | the only imperative bit: kind + Argo CD + root app |
+| `bootstrap/` | platform-config | the only imperative bit: k3d → CAPI builds hub → `clusterctl move` → Argo CD + root app |
 | `repos/platform-charts/` | one repo (or one per chart) | umbrella Helm charts, 1 per addon, + local charts `cluster`, `capi-providers` |
 | `repos/platform-config/argocd/` | platform-config | AppProjects, ApplicationSets (root app points here) |
 | `repos/platform-config/addons/{management,workers}/` | platform-config | which addon, which version, which values — per fleet / env / cluster |
@@ -60,9 +60,10 @@ Enable/disable anything file-driven by renaming `*.yaml` ⇄ `*.yaml.disabled` (
 ```bash
 # 0. push this repo, then point manifests at it (default: github.com/koorikla/platform-lab)
 make set-repo REPO=https://github.com/<you>/<repo>.git && git commit -am "set repo" && git push
-# 1. needs: docker, kind, kubectl, helm
-make up
+# 1. needs: docker, k3d, kubectl, helm, clusterctl
+make up        # k3d bootstrap -> CAPI creates hub 'mgmt' -> clusterctl move (hub manages itself) -> Argo CD
 make status
+make ui        # Argo CD :8080, Kargo :8081
 make kubeconfig CLUSTER=dev1 > dev1.kubeconfig
 ```
 

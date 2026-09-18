@@ -2,9 +2,10 @@
 
 ## Goal
 Enterprise-style GitOps lab. Management cluster (hub) runs Argo CD, argocd-agent principal, Cluster API, Kargo,
-OpenChoreo control plane and manages itself. CAPI (k3s bootstrap/control-plane provider; CAPD infra now, OpenStack and
-EKS later) creates worker clusters per env (dev/test/prod, N clusters per env). Workers get argocd-agent injected at
-birth and are then driven from the hub. Everything declarative; `bootstrap/` is the only imperative entrypoint.
+OpenChoreo control plane and manages itself — including its own CAPI `Cluster` (self-hosted after a `clusterctl move`
+pivot from a throw-away k3d cluster). CAPI (k3s bootstrap/control-plane provider; CAPD infra now, OpenStack and EKS
+later) creates worker clusters per env (dev/test/prod, N clusters per env). Everything is k3s. Workers get argocd-agent
+injected at birth and are then driven from the hub. Everything declarative; `bootstrap/` is the only imperative entrypoint.
 
 ## Invariants — do not break
 1. **Cluster name == argocd-agent name == client-cert CN == Argo CD destination name == OpenChoreo planeID.**
@@ -25,12 +26,19 @@ birth and are then driven from the hub. Everything declarative; `bootstrap/` is 
 8. Enable/disable by file extension (`.yaml.disabled`), never by commenting blocks.
 
 ## Flow
-bootstrap.sh → kind `mgmt` → helm install `repos/platform-charts/argo-cd` (release `argocd`) → `root` app →
+bootstrap.sh → k3d `bootstrap` + cert-manager/capi-operator/capi-providers (same charts+values as GitOps, applied with
+`helm template | kubectl apply`) → Cluster `mgmt` (`fleet/clusters/mgmt/mgmt.yaml`, role=management, ClusterClass
+variable `managementCluster=true`: docker.sock in nodes + LB frontend :30443) → same CAPI stack on mgmt →
+`clusterctl move -n fleet` → delete k3d → helm install `repos/platform-charts/argo-cd` (release `argocd`) → `root` app →
 `platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, principal, capi-operator, capi-providers, kargo,
 argo-cd itself) + `fleet-base` (ClusterClass, HelmChartProxies) + `fleet-clusters` appset → `cluster` chart per file →
 CAPI builds k3s cluster → CAAPH installs argo-cd (controller/repo/redis) + argocd-agent → ESO pushes client cert →
-agent dials `mgmt-control-plane:30443` → ESO-rendered cluster secret makes the cluster selectable →
+agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) → ESO-rendered cluster secret makes the cluster selectable →
 `worker-addons` / `workloads` appsets generate labelled Applications → principal ships them → worker reconciles.
+
+## Hub access
+Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of container `mgmt-lb`>; bootstrap re-points it).
+UIs: `make ui` (port-forwards; CAPD nodes publish no host ports). Hub `Cluster` carries `Delete=false,Prune=false`.
 
 ## Verification status
 Checked against upstream sources (2026-09): argocd-agent v0.9/v0.10 docs + helm values (principal 0.3.3, agent 0.2.7),
@@ -42,7 +50,7 @@ OpenChoreo v1.2.5 multi-cluster guide, latest tags of argo-helm, kargo, cert-man
 ## Backlog (ordered)
 1. First boot: `make lint`, `make up`, fix what breaks. Expected friction points:
    - capi-operator resolving provider name `k3s` (else set `fetchConfig.url`, commented in `capi-providers`);
-   - worker pods resolving `mgmt-control-plane` (kindest/node entrypoint should fix DNS; fallback: `hostAliases` in agent values);
+   - worker pods resolving `mgmt-lb` (kindest/node entrypoint should fix DNS; fallback: `hostAliases` in agent values);
    - principal chart: redis/redis-proxy TLS defaults changed in v0.8+ (`principal.redis.tls`, `argocd-redis-proxy-tls`);
    - ESO kubernetes provider `authRef` with CAPD kubeconfig (server = docker LB container IP, reachable from mgmt pods?);
    - argo-cd chart worker profile: is `server.replicas: 0` / `applicationSet.replicas: 0` still the way to disable;
@@ -67,7 +75,7 @@ OpenChoreo v1.2.5 multi-cluster guide, latest tags of argo-helm, kargo, cert-man
    - Requires Kubernetes >= 1.34 (k3s version in fleet files already is).
 6. Istio ambient on hub (chart ready, disabled), then multi-cluster ambient east-west if wanted.
 7. Providers: `k3s-openstack` ClusterClass (CAPO + k3s), EKS ClusterClass (CAPA managed control plane, no k3s);
-   only `clusterClass`, `provider`, `variables` change in a cluster file. Move hub off kind (CAPI pivot / self-hosted).
+   only `clusterClass`, `provider`, `variables` change in a cluster file. (Hub pivot/self-hosting: done.)
 8. Hardening: Kargo admin secret, principal `jwt.allowGenerate`, AppProject `sourceRepos`, RBAC, NetworkPolicies,
    AppSet progressive sync (RollingSync by `platform.lab/env`) as a guard rail besides Kargo.
 

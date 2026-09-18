@@ -68,7 +68,7 @@ spec:
       tag: v0.10.0
     agentMode: managed
     auth: "mtls:any"                   # identity = CN of argocd-agent-client-tls (pushed from the hub, = {{ .Cluster.metadata.name }})
-    server: k3d-mgmt-server-0         # keep in sync with hub.host / hub.principalNodePort of argocd-agent-principal
+    server: mgmt-lb                    # hub CAPD LB (fleet/base/hub-lb.yaml); keep in sync with hub.host / hub.principalNodePort of argocd-agent-principal
     serverPort: "30443"
     destinationBasedMapping: true
     createNamespace: true
@@ -77,3 +77,4 @@ spec:
     tlsSecretName: argocd-agent-client-tls
     tlsRootCASecretName: argocd-agent-ca
     redisAddress: argocd-redis:6379
+    heartbeatInterval: 30s              # < hub LB haproxy idle timeout (50s), keeps the gRPC stream open

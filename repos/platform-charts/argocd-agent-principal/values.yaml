@@ -1,5 +1,5 @@
 hub:
-  host: k3d-mgmt-server-0     # DNS name workers use to reach the hub (k3d node container on the "kind" docker network)
+  host: mgmt-lb                # DNS name workers dial: the hub's CAPD load balancer container (fleet/base/hub-lb.yaml)
   principalNodePort: 30443
 
 argocd-agent-principal:

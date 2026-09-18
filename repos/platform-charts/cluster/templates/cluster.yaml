@@ -5,6 +5,11 @@ metadata:
   namespace: {{ .Values.fleetNamespace }}
   labels:
     {{- include "cluster.labels" . | nindent 4 }}
+  {{- if eq .Values.role "management" }}
+  annotations:
+    # the hub's own Cluster object: Argo CD must never delete it (that would tear down the cluster Argo runs in)
+    argocd.argoproj.io/sync-options: Delete=false,Prune=false
+  {{- end }}
 spec:
   clusterNetwork:
     serviceDomain: cluster.local

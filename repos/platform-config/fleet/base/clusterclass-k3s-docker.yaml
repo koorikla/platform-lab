@@ -1,4 +1,6 @@
 # k3s (bootstrap + control plane) on CAPD. Sibling classes later: k3s-openstack, eks.
+# Variable managementCluster=true turns a cluster into a self-hosted hub: docker.sock in every node (CAPD runs there
+# after the pivot) and an LB that also fronts the argocd-agent principal, so workers dial the stable `<name>-lb`.
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: ClusterClass
 metadata:
@@ -35,12 +37,18 @@ spec:
               kind: DockerMachineTemplate
               name: k3s-docker-worker
   variables:
-    - name: kindImageVersion
+    - name: kindImageVersion         # only the node OS; k3s itself is installed at boot (topology.version)
       required: true
       schema:
         openAPIV3Schema:
           type: string
           default: v1.34.0
+    - name: managementCluster
+      required: false
+      schema:
+        openAPIV3Schema:
+          type: boolean
+          default: false
   patches:
     - name: customImage
       definitions:
@@ -56,6 +64,31 @@ spec:
               path: /spec/template/spec/customImage
               valueFrom:
                 template: kindest/node:{{ .kindImageVersion }}
+    - name: managementCluster
+      enabledIf: "{{ .managementCluster }}"
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: DockerMachineTemplate
+            matchResources:
+              controlPlane: true
+              machineDeploymentClass:
+                names: [k3s-default-worker]
+          jsonPatches:
+            - op: add
+              path: /spec/template/spec/extraMounts
+              value:
+                - { containerPath: /var/run/docker.sock, hostPath: /var/run/docker.sock }
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: DockerClusterTemplate
+            matchResources:
+              infrastructureCluster: true
+          jsonPatches:
+            - op: add
+              path: /spec/template/spec/loadBalancer
+              value:
+                customHAProxyConfigTemplateRef: { name: k3s-docker-hub-lb }
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: DockerClusterTemplate
@@ -77,6 +110,7 @@ spec:
       kthreesConfigSpec:
         serverConfig:
           tlsSan: [0.0.0.0]
+          disableComponents: [traefik]   # ingress comes from kgateway (OpenChoreo) where needed
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: DockerMachineTemplate

@@ -5,7 +5,7 @@ openchoreo-data-plane:
       enabled: false
   clusterAgent:
     enabled: true
-    serverUrl: "wss://k3d-mgmt-server-0:30843/ws"   # VERIFY port once cluster-gateway-external nodePort is fixed
+    serverUrl: "wss://mgmt-lb:30843/ws"   # VERIFY: needs fixed nodePort + frontend in fleet/base/hub-lb.yaml
     tls:
       enabled: true
       generateCerts: true

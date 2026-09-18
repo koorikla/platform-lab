@@ -1,0 +1,14 @@
+# The hub itself. Created by CAPI running in a throw-away k3d cluster (bootstrap/bootstrap.sh), then pivoted with
+# `clusterctl move`, so from then on the hub's own CAPI manages this Cluster (self-hosted). Never disable this file.
+name: mgmt
+env: mgmt
+role: management                # no argocd-agent identity; worker ApplicationSets select role=worker only
+provider: docker
+region: local
+clusterClass: k3s-docker
+kubernetesVersion: v1.34.11+k3s1
+controlPlaneReplicas: 1
+workerReplicas: 1
+variables:
+  - { name: kindImageVersion, value: v1.34.0 }
+  - { name: managementCluster, value: true }
