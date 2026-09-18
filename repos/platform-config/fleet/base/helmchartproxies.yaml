@@ -29,9 +29,20 @@ spec:
     notifications:
       enabled: false
     server:
-      replicas: 0                      # VERIFY: no server.enabled switch in the chart
+      replicas: 0                      # chart has no server.enabled switch (same as upstream agent-managed profile)
     applicationSet:
       replicas: 0                      # managed mode: ApplicationSets live on the hub
+    # default NetworkPolicy only admits Argo's own components to redis; the agent needs it too
+    extraObjects:
+      - apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata: { name: argocd-redis-allow-agent }
+        spec:
+          podSelector: { matchLabels: { app.kubernetes.io/name: argocd-redis } }
+          policyTypes: [Ingress]
+          ingress:
+            - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: argocd-agent-agent } } }]
+              ports: [{ port: 6379, protocol: TCP }]
 ---
 apiVersion: addons.cluster.x-k8s.io/v1alpha1
 kind: HelmChartProxy
@@ -44,7 +55,7 @@ spec:
       platform.lab/role: worker
   repoURL: oci://ghcr.io/argoproj-labs/argocd-agent
   chartName: argocd-agent-agent
-  version: 0.2.7                       # VERIFY against argocd-agent v0.9.x
+  version: 0.2.7                       # identical to the v0.10.0 chart; image pinned below
   releaseName: argocd-agent
   namespace: argocd
   options:
@@ -52,6 +63,9 @@ spec:
     install:
       createNamespace: true
   valuesTemplate: |
+    image:                             # chart default (ghcr, v0.8.1 tag) does not exist; releases live on quay
+      repository: quay.io/argoprojlabs/argocd-agent
+      tag: v0.10.0
     agentMode: managed
     auth: "mtls:any"                   # identity = CN of argocd-agent-client-tls (pushed from the hub, = {{ .Cluster.metadata.name }})
     server: k3d-mgmt-server-0         # keep in sync with hub.host / hub.principalNodePort of argocd-agent-principal
@@ -62,3 +76,4 @@ spec:
     labelSelector: "argocd-agent=true"
     tlsSecretName: argocd-agent-client-tls
     tlsRootCASecretName: argocd-agent-ca
+    redisAddress: argocd-redis:6379

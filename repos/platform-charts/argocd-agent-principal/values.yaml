@@ -4,6 +4,9 @@ hub:
 
 argocd-agent-principal:
   fullnameOverride: argocd-agent-principal
+  image:                       # chart appVersion still says v0.8.1; releases are published on quay only
+    repository: quay.io/argoprojlabs/argocd-agent
+    tag: v0.10.0
   service:
     type: ClusterIP            # exposed via templates/nodeport.yaml (chart has no nodePort knob)
   principal:
@@ -17,4 +20,4 @@ argocd-agent-principal:
         require: true
         matchSubject: true
     jwt:
-      allowGenerate: true      # LAB ONLY
+      allowGenerate: true      # LAB ONLY: key regenerated on restart; agents simply re-auth via mTLS

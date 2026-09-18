@@ -10,7 +10,7 @@ grep -ho 'repository: https://[^ ]*' $charts/*/Chart.yaml repos/apps/*/chart/Cha
   while read -r url; do helm repo add "$(echo "$url" | md5 -q 2>/dev/null || echo "$url" | md5sum | cut -c1-32)" "$url" --force-update >/dev/null; done
 
 for c in $charts/*/ repos/apps/*/chart/; do
-  helm dependency build "$c" >/dev/null
+  helm dependency update "$c" >/dev/null
   helm lint --quiet "$c" --set name=lint,env=dev
 done
 

@@ -26,8 +26,8 @@ metadata:
   namespace: capi-k3s-bootstrap-system
 spec:
   version: {{ .Values.k3s.version }}
-  # fetchConfig:   # only if the operator cannot resolve "k3s" from the built-in clusterctl provider list
-  #   url: https://github.com/k3s-io/cluster-api-k3s/releases/{{ .Values.k3s.version }}/bootstrap-components.yaml
+  fetchConfig:   # "k3s" is not in clusterctl's built-in provider list
+    url: https://github.com/k3s-io/cluster-api-k3s/releases/{{ .Values.k3s.version }}/bootstrap-components.yaml
 ---
 {{ include "ns" "capi-k3s-control-plane-system" }}
 ---
@@ -38,6 +38,8 @@ metadata:
   namespace: capi-k3s-control-plane-system
 spec:
   version: {{ .Values.k3s.version }}
+  fetchConfig:
+    url: https://github.com/k3s-io/cluster-api-k3s/releases/{{ .Values.k3s.version }}/control-plane-components.yaml
 ---
 {{ include "ns" "caaph-system" }}
 ---

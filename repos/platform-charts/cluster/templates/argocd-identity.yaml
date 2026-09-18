@@ -58,6 +58,7 @@ spec:
         namespace: {{ .Values.fleetNamespace }}
         key: value
 ---
+# Client cert as-is (keeps type kubernetes.io/tls, which the agent requires).
 apiVersion: external-secrets.io/v1alpha1
 kind: PushSecret
 metadata:
@@ -73,6 +74,24 @@ spec:
     secret:
       name: {{ $tls }}
   data:
-    - match: { secretKey: tls.crt, remoteRef: { remoteKey: argocd-agent-client-tls, property: tls.crt } }
-    - match: { secretKey: tls.key, remoteRef: { remoteKey: argocd-agent-client-tls, property: tls.key } }
-    - match: { secretKey: ca.crt,  remoteRef: { remoteKey: argocd-agent-ca,         property: ca.crt } }
+    - match: { remoteRef: { remoteKey: argocd-agent-client-tls } }
+---
+# CA only, as Opaque: the agent parses every key of this secret as a certificate.
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: {{ $n }}-agent-ca
+  namespace: {{ .Values.argocdNamespace }}
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: Delete
+  secretStoreRefs:
+    - { kind: ClusterSecretStore, name: fleet-{{ $n }}-argocd }
+  selector:
+    secret:
+      name: {{ $tls }}
+  template:
+    type: Opaque
+  data:
+    - match: { secretKey: ca.crt, remoteRef: { remoteKey: argocd-agent-ca, property: ca.crt } }

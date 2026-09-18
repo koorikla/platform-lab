@@ -5,5 +5,5 @@ type: application
 version: 0.1.0
 dependencies:
   - name: argocd-agent-principal
-    version: 0.3.3             # VERIFY: chart version shipped with argocd-agent v0.9.x
+    version: 0.3.3             # identical to install/helm-repo at argocd-agent v0.10.0; image pinned in values
     repository: oci://ghcr.io/argoproj-labs/argocd-agent
