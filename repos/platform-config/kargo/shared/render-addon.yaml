@@ -18,6 +18,7 @@ spec:
     - name: pr           # "true": push a generated branch + PR instead of pushing rendered/<branch> directly
   steps:
     - uses: git-clone
+      retry: { errorThreshold: 3 }   # network step: ride out transient DNS/registry errors
       config:
         repoURL: ${{ vars.repoURL }}
         # SPLIT: ./src is one checkout of platform-charts + platform-config; split repos => one clone per repo
@@ -31,6 +32,7 @@ spec:
       config:
         path: ./out/addons/${{ vars.addon }}
     - uses: helm-template
+      retry: { errorThreshold: 3 }   # network step: ride out transient DNS/registry errors
       config:
         path: ./src/repos/platform-charts/${{ vars.chart }}
         releaseName: ${{ vars.releaseName }}

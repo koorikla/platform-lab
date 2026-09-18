@@ -1,0 +1,15 @@
+# k3s imports *.server keys as extra CoreDNS server blocks. Registries and git hosts resolve through public resolvers
+# first: the Docker Desktop resolver behind /etc/resolv.conf times out now and then, and a failed lookup errors a
+# Kargo promotion or an Argo CD manifest fetch. Docker container names (mgmt-lb, <cluster>-lb) keep the default path.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  external.server: |
+    github.com github.io githubusercontent.com ghcr.io quay.io docker.io k8s.io googleapis.com kgateway.dev {
+      errors
+      cache 30
+      forward . 1.1.1.1 8.8.8.8 /etc/resolv.conf
+    }

@@ -16,3 +16,5 @@ spec:
     namespace: argocd
   syncPolicy:
     automated: { prune: true, selfHeal: true }
+    # server-side apply: the hub diffs server-side, so fields removed from child Applications must be pruned by SSA
+    syncOptions: [ServerSideApply=true]
