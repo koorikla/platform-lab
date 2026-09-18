@@ -1,0 +1,9 @@
+kind: addon                 # addon | app
+name: ""                    # addon or app name (required)
+chart: ""                   # addon: chart folder under repos/platform-charts (default: name)
+namespace: ""               # addon: target namespace (default: name)
+releaseName: ""             # addon: helm release name (default: name)
+image: ""                   # app: image repository (Warehouse subscription)
+repoURL: git@github.com:koorikla/platform-lab.git   # Kargo authenticates with the repo deploy key (SSH)
+stages: [dev-canary, dev, test, prod]   # order = promotion order; stage name = rendered/<stage> branch
+autoPromote: [dev-canary, dev]

@@ -1,0 +1,71 @@
+{{- if eq .Values.kind "addon" }}
+{{- $p := include "kargo-pipeline.project" . }}
+# Declared explicitly so creation order doesn't matter: Kargo refuses to adopt an unlabelled namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $p }}
+  labels:
+    kargo.akuity.io/project: "true"
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: {{ $p }}
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: {{ $p }}
+  namespace: {{ $p }}
+spec:
+  promotionPolicies:
+  {{- range .Values.autoPromote }}
+    - stageSelector: { name: {{ . }} }
+      autoPromotionEnabled: true
+  {{- end }}
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ $p }}
+spec:
+  subscriptions:
+    - git:
+        repoURL: {{ .Values.repoURL }}
+        branch: main
+        commitSelectionStrategy: NewestFromBranch
+        includePaths:   # freight = a commit touching the chart or the addon's config (values, env overlays)
+          - repos/platform-charts/{{ include "kargo-pipeline.chart" . }}/
+          - repos/platform-config/addons/workers/{{ .Values.name }}/
+{{- range $i, $s := .Values.stages }}
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: {{ $s }}
+  namespace: {{ $p }}
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: {{ $.Values.name }} }
+      sources:
+        {{- if eq $i 0 }}
+        direct: true
+        {{- else }}
+        stages: [{{ index $.Values.stages (sub $i 1) }}]
+        {{- end }}
+  promotionTemplate:
+    spec:
+      steps:
+        - task: { name: render-addon, kind: ClusterPromotionTask }
+          vars:
+            - { name: addon, value: {{ $.Values.name | quote }} }
+            - { name: chart, value: {{ include "kargo-pipeline.chart" $ | quote }} }
+            - { name: namespace, value: {{ include "kargo-pipeline.namespace" $ | quote }} }
+            - { name: releaseName, value: {{ include "kargo-pipeline.releaseName" $ | quote }} }
+            - { name: env, value: {{ splitList "-" $s | first | quote }} }   # dev-canary renders with dev values
+            - { name: branch, value: {{ $s | quote }} }
+            - { name: pr, value: "false" }   # deploy key cannot open PRs; "true" for prod once Kargo has a GitHub token
+{{- end }}
+{{- end }}
