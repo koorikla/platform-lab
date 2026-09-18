@@ -22,6 +22,8 @@ spec:
         checkout:
           - { commit: "${{ commitFrom(vars.repoURL).ID }}", path: ./src }
           - { branch: "rendered/${{ vars.branch }}", create: true, path: ./out }
+          # pipeline tooling comes from main: the Freight commit can predate it (or carry a stale copy)
+          - { branch: main, path: ./tools, sparse: [repos/platform-config/kargo/shared] }
     - uses: helm-template
       config:
         path: ./src/repos/platform-charts/${{ vars.chart }}
@@ -37,7 +39,7 @@ spec:
         outPath: ./out/addons/${{ vars.addon }}/manifests.yaml
     - uses: copy
       config:
-        inPath: ./src/repos/platform-config/kargo/shared/kustomization.rendered.yaml
+        inPath: ./tools/repos/platform-config/kargo/shared/kustomization.rendered.yaml
         outPath: ./out/addons/${{ vars.addon }}/kustomization.yaml
     - uses: git-commit
       as: commit
