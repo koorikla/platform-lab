@@ -74,4 +74,4 @@ Kargo needs git push credentials: see `repos/platform-config/kargo/podinfo/git-c
 
 ## Status
 
-Scaffold — **not yet run end to end**. Open items and everything marked `# VERIFY` are tracked in [CLAUDE.md](CLAUDE.md).
+Boots end to end on Docker Desktop (CAPI pivot + agent path verified). Open items and remaining `# VERIFY` markers are tracked in [CLAUDE.md](CLAUDE.md). Needs ~8 GB RAM and ≥25 GB free Docker disk for hub + one worker.

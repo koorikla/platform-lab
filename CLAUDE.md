@@ -41,21 +41,24 @@ Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of containe
 UIs: `make ui` (port-forwards; CAPD nodes publish no host ports). Hub `Cluster` carries `Delete=false,Prune=false`.
 
 ## Verification status
-Checked against upstream sources (2026-09): argocd-agent v0.9/v0.10 docs + helm values (principal 0.3.3, agent 0.2.7),
-cluster-api-k3s v0.4.0 samples (v1beta1 contract, built on CAPI 1.11 → core pinned to 1.12.x, NOT 1.14),
-OpenChoreo v1.2.5 multi-cluster guide, latest tags of argo-helm, kargo, cert-manager, ESO, CAAPH, capi-operator, istio.
-**Nothing has been rendered with helm or applied to a cluster yet.** Start with `make lint`, then `make up`.
-`grep -rn VERIFY repos/` lists every value that was inferred rather than confirmed.
+Booted end to end on Docker Desktop (2026-09-19): k3d bootstrap → CAPI creates hub → `clusterctl move` (clusterctl
+1.14.2 against operator-installed CAPI 1.12.11: works) → Argo CD adopts everything incl. `Cluster/mgmt`. Earlier run on
+a k3d hub proved the worker path: CAPD k3s dev1 → CAAPH argo-cd + agent → ESO PushSecret → agent mTLS to principal →
+`cert-manager-dev1`, `podinfo-dev1` Synced/Healthy via argocd-agent.
+Fixed on first boot (see git log): k3s providers need `fetchConfig.url`; agent images only on quay (v0.10.0);
+argo-helm NetworkPolicy blocks principal/agent → redis; PushSecret split (tls vs Opaque CA); Kargo ns label;
+argocd-server https NodePort stole 30443; `curl get.k3s.io | sh` races kindest DNS (preK3sCommands wait);
+k3s-agent Type=notify deadlocks CAPD bootstrap until timeout (~5 min, Type=exec drop-in); CRD-default drift
+(server-side diff). `grep -rn VERIFY repos/` lists what is still inferred (mostly OpenChoreo).
+
+## Known lab constraints
+- All CAPD nodes share the Docker VM disk: >90% used → DiskPressure evictions everywhere. Keep ≥25 GB free.
+- CAPD nodes publish no host ports: `make ui` port-forwards; hub API via `mgmt-lb`'s published 6443 (context `mgmt`).
+- k3s is downloaded at node boot (get.k3s.io) → workers need internet.
 
 ## Backlog (ordered)
-1. First boot: `make lint`, `make up`, fix what breaks. Expected friction points:
-   - capi-operator resolving provider name `k3s` (else set `fetchConfig.url`, commented in `capi-providers`);
-   - worker pods resolving `mgmt-lb` (kindest/node entrypoint should fix DNS; fallback: `hostAliases` in agent values);
-   - principal chart: redis/redis-proxy TLS defaults changed in v0.8+ (`principal.redis.tls`, `argocd-redis-proxy-tls`);
-   - ESO kubernetes provider `authRef` with CAPD kubeconfig (server = docker LB container IP, reachable from mgmt pods?);
-   - argo-cd chart worker profile: is `server.replicas: 0` / `applicationSet.replicas: 0` still the way to disable;
-   - multi-source Applications with `$values` through the agent (worker repo-server needs repo access: public = fine,
-     private = project-scoped repo secret labelled `argocd-agent=true`).
+1. Harden the boot: `make up` should be re-runnable after partial failure (bootstrap cluster already has `mgmt`;
+   hub exists but Argo not yet installed); `make down` tested only by hand.
 2. Enable dev2, prove env-wide vs single-cluster pinning (`rollout.clusters.dev2`). Then enable test1/prod1.
 3. Kargo: git creds via ESO; second pipeline promoting `rollout.chartRevision` of worker addons (Warehouse on git tags
    of platform-charts); prod stage via `git-open-pr` + `git-wait-for-pr`; verification (AnalysisTemplate) per stage.
