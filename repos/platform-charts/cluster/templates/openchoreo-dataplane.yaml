@@ -1,0 +1,25 @@
+{{- if .Values.openchoreo.enabled }}
+# Registers this cluster as an OpenChoreo DataPlane on the control plane (hub). planeID must equal
+# clusterAgent.planeId of the data-plane chart on the worker.
+apiVersion: openchoreo.dev/v1alpha1
+kind: DataPlane
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.openchoreo.namespace }}
+spec:
+  planeID: {{ .Values.name }}
+  clusterAgent:
+    clientCA:
+      value: |
+        {{- required "openchoreo.agentCA is required" .Values.openchoreo.agentCA | nindent 8 }}
+  secretStoreRef:
+    name: default
+  gateway:
+    ingress:
+      external:
+        name: gateway-default
+        namespace: openchoreo-data-plane
+        https:
+          host: {{ .Values.openchoreo.appsHost | quote }}
+          port: 443
+{{- end }}

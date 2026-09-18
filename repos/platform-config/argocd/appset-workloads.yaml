@@ -1,0 +1,48 @@
+# app x worker-cluster. Version lives in repos/apps/<app>/envs/<env>/values.yaml (written by Kargo),
+# optional single-cluster override in repos/apps/<app>/clusters/<cluster>/values.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: workloads
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/koorikla/platform-lab.git      # apps repo
+              revision: main
+              directories:
+                - path: repos/apps/*
+          - clusters:
+              selector:
+                matchLabels:
+                  platform.lab/role: worker
+              values:
+                env: '{{ index .metadata.labels "platform.lab/env" }}'
+  template:
+    metadata:
+      name: '{{ .path.basename }}-{{ .name }}'
+      labels:
+        argocd-agent: "true"
+        platform.lab/app: '{{ .path.basename }}'
+        platform.lab/env: '{{ .values.env }}'
+    spec:
+      project: workloads
+      source:
+        repoURL: https://github.com/koorikla/platform-lab.git
+        targetRevision: main
+        path: '{{ .path.path }}/chart'
+        helm:
+          ignoreMissingValueFiles: true
+          valueFiles:
+            - '../envs/{{ .values.env }}/values.yaml'
+            - '../clusters/{{ .name }}/values.yaml'
+      destination:
+        name: '{{ .name }}'
+        namespace: '{{ .path.basename }}'
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: [CreateNamespace=true]

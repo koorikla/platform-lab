@@ -1,0 +1,9 @@
+apiVersion: v2
+name: argocd-agent-principal
+description: argocd-agent principal (hub side) + its PKI + the in-cluster ESO store used to mint Argo cluster secrets
+type: application
+version: 0.1.0
+dependencies:
+  - name: argocd-agent-principal
+    version: 0.3.3             # VERIFY: chart version shipped with argocd-agent v0.9.x
+    repository: oci://ghcr.io/argoproj-labs/argocd-agent

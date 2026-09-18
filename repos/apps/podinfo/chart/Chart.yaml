@@ -1,0 +1,9 @@
+apiVersion: v2
+name: podinfo
+description: Sample workload. App teams own this repo; the platform only consumes repos/apps/*/chart.
+type: application
+version: 0.1.0
+dependencies:
+  - name: podinfo
+    version: 6.15.0
+    repository: oci://ghcr.io/stefanprodan/charts

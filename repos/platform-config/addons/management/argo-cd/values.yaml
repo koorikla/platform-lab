@@ -1,0 +1,7 @@
+# Hub overrides. Applied by GitOps only (bootstrap installs chart defaults), so Argo is up before it depends on the principal.
+argo-cd:
+  configs:
+    params:
+      # argocd-agent hybrid mode: all redis traffic goes through the principal's redis proxy, which serves
+      # agent-owned keys (resource trees of remote apps) and forwards the rest to argocd-redis.
+      redis.server: argocd-agent-redis-proxy:6379

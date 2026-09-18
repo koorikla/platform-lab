@@ -1,0 +1,9 @@
+apiVersion: v2
+name: openchoreo-data-plane
+description: Umbrella chart for openchoreo-data-plane
+type: application
+version: 0.1.0
+dependencies:
+  - name: openchoreo-data-plane
+    version: 1.2.5
+    repository: oci://ghcr.io/openchoreo/helm-charts

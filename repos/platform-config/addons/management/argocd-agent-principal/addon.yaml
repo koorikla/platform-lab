@@ -1,0 +1,6 @@
+addon:
+  name: argocd-agent-principal
+  chart: argocd-agent-principal
+  namespace: argocd
+  releaseName: argocd-agent
+  chartRevision: main

@@ -1,0 +1,4 @@
+# Rollout pin for env "dev". Written by Kargo promotions; edit by hand only for break-glass.
+rollout:
+  chartRevision: main          # git ref of the platform-charts repo (branch in the lab, chart tag once split out)
+  clusters: {}                 # pin a single cluster:  dev2: { chartRevision: <ref> }

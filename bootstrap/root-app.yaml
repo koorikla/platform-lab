@@ -1,0 +1,18 @@
+# The only manifest applied by hand. Everything else is pulled from git.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/koorikla/platform-lab.git
+    targetRevision: main
+    path: repos/platform-config/argocd
+  destination:
+    name: in-cluster
+    namespace: argocd
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }

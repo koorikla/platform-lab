@@ -1,0 +1,17 @@
+# k3s provider v0.4.0 is a v1beta1-contract provider built against CAPI v1.11 -> stay on the 1.12 line until it moves to v1beta2.
+core:
+  version: v1.12.11
+k3s:
+  version: v0.4.0
+helm:
+  version: v0.6.4
+infrastructure:
+  docker:
+    enabled: true
+    version: v1.12.11          # CAPD is released with core
+  openstack:
+    enabled: false
+    version: ""                # TODO
+  aws:
+    enabled: false             # EKS: uses its own bootstrap/control-plane (no k3s) -> separate ClusterClass
+    version: ""                # TODO

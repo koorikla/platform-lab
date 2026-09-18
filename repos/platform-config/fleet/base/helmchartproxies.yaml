@@ -1,0 +1,64 @@
+# What CAPI (CAAPH) injects into every worker at birth: the minimum needed for the cluster to phone home.
+# Everything after that is delivered by Argo CD through the agent (worker-addons ApplicationSet).
+# CAAPH only installs from Helm/OCI repos, not git paths -> upstream charts are referenced directly here.
+# TODO: publish umbrella charts to OCI and point these at them; split per env to stage agent upgrades.
+apiVersion: addons.cluster.x-k8s.io/v1alpha1
+kind: HelmChartProxy
+metadata:
+  name: worker-argocd
+  namespace: fleet
+spec:
+  clusterSelector:
+    matchLabels:
+      platform.lab/role: worker
+  repoURL: oci://ghcr.io/argoproj/argo-helm
+  chartName: argo-cd
+  version: 10.9.2
+  releaseName: argocd                  # -> argocd-redis / argocd-repo-server, which the agent expects
+  namespace: argocd
+  options:
+    wait: true
+    timeout: 10m
+    install:
+      createNamespace: true
+  valuesTemplate: |
+    # Workload-cluster profile: application-controller + repo-server + redis only.
+    fullnameOverride: argocd
+    dex:
+      enabled: false
+    notifications:
+      enabled: false
+    server:
+      replicas: 0                      # VERIFY: no server.enabled switch in the chart
+    applicationSet:
+      replicas: 0                      # managed mode: ApplicationSets live on the hub
+---
+apiVersion: addons.cluster.x-k8s.io/v1alpha1
+kind: HelmChartProxy
+metadata:
+  name: worker-argocd-agent
+  namespace: fleet
+spec:
+  clusterSelector:
+    matchLabels:
+      platform.lab/role: worker
+  repoURL: oci://ghcr.io/argoproj-labs/argocd-agent
+  chartName: argocd-agent-agent
+  version: 0.2.7                       # VERIFY against argocd-agent v0.9.x
+  releaseName: argocd-agent
+  namespace: argocd
+  options:
+    timeout: 10m
+    install:
+      createNamespace: true
+  valuesTemplate: |
+    agentMode: managed
+    auth: "mtls:any"                   # identity = CN of argocd-agent-client-tls (pushed from the hub, = {{ .Cluster.metadata.name }})
+    server: mgmt-control-plane         # keep in sync with hub.host / hub.principalNodePort of argocd-agent-principal
+    serverPort: "30443"
+    destinationBasedMapping: true
+    createNamespace: true
+    allowedNamespaces: "*"
+    labelSelector: "argocd-agent=true"
+    tlsSecretName: argocd-agent-client-tls
+    tlsRootCASecretName: argocd-agent-ca

@@ -1,0 +1,6 @@
+dependencies:
+- name: argocd-agent-principal
+  repository: oci://ghcr.io/argoproj-labs/argocd-agent
+  version: 0.3.3
+digest: sha256:6bb39a651ddc070c27674a0c5a3447443429155e76de3f7848cfb6bcf642928d
+generated: "2026-09-18T23:19:45.721045+03:00"

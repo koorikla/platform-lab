@@ -1,0 +1,2 @@
+# Operator only. Providers are declared as CRs in the capi-providers chart.
+cluster-api-operator: {}

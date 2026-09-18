@@ -1,0 +1,25 @@
+# Phase 2. Needs: cert-manager, external-secrets, kgateway, Gateway API CRDs, an IdP (ThunderID) and a
+# ClusterSecretStore "default" (OpenBao in upstream guide). K8s >= 1.34. Keys below are from upstream docs.
+openchoreo-control-plane:
+  openchoreoApi:
+    http:
+      hostnames: ["api.openchoreo.localhost"]
+  backstage:
+    baseUrl: "https://console.openchoreo.localhost"
+    secretName: backstage-secrets
+    http:
+      hostnames: ["console.openchoreo.localhost"]
+  security:
+    oidc:
+      issuer: "https://thunder.openchoreo.localhost"
+  gateway:
+    tls:
+      enabled: false
+  clusterGateway:
+    service:
+      type: NodePort            # VERIFY: chart may not expose a fixed nodePort; workers dial mgmt-control-plane:<nodePort>
+    tls:
+      dnsNames:
+        - cluster-gateway.openchoreo-control-plane.svc
+        - cluster-gateway.openchoreo-control-plane.svc.cluster.local
+        - mgmt-control-plane

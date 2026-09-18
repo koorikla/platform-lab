@@ -1,0 +1,6 @@
+addon:
+  name: capi-providers
+  chart: capi-providers
+  namespace: capi-system
+  releaseName: capi-providers
+  chartRevision: main

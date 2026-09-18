@@ -1,0 +1,66 @@
+# addon x worker-cluster x rollout(env). Version resolution per generated Application (file envs/<env>.yaml):
+#   clusters.<cluster>.chartRevision  (pin ONE cluster)   >   chartRevision  (whole env: dev1, dev2, ...)
+# Values layering: values.yaml < envs/<env>.values.yaml < clusters/<cluster>.values.yaml
+# Kargo promotes by writing envs/<env>.yaml. Apps carry argocd-agent=true so the principal ships them to the agent.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: worker-addons
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - matrix:
+              generators:
+                - git:
+                    repoURL: https://github.com/koorikla/platform-lab.git
+                    revision: main
+                    pathParamPrefix: addonfile
+                    files:
+                      - path: repos/platform-config/addons/workers/*/addon.yaml
+                - clusters:
+                    selector:
+                      matchLabels:
+                        platform.lab/role: worker
+                    values:
+                      env: '{{ index .metadata.labels "platform.lab/env" }}'
+          - git:
+              repoURL: https://github.com/koorikla/platform-lab.git
+              revision: main
+              pathParamPrefix: rolloutfile
+              files:
+                - path: '{{ .addonfile.path.path }}/envs/{{ .values.env }}.yaml'
+  template:
+    metadata:
+      name: '{{ .addon.name }}-{{ .name }}'
+      labels:
+        argocd-agent: "true"
+        platform.lab/addon: '{{ .addon.name }}'
+        platform.lab/env: '{{ .values.env }}'
+        platform.lab/cluster: '{{ .name }}'
+    spec:
+      project: platform-workers
+      sources:
+        - repoURL: https://github.com/koorikla/platform-lab.git          # platform-charts repo (git tag per chart release once split out)
+          targetRevision: '{{ dig "clusters" .name "chartRevision" .rollout.chartRevision .rollout }}'
+          path: 'repos/platform-charts/{{ .addon.chart }}'
+          helm:
+            releaseName: '{{ .addon.releaseName }}'
+            ignoreMissingValueFiles: true
+            valueFiles:
+              - '$values/{{ .addonfile.path.path }}/values.yaml'
+              - '$values/{{ .addonfile.path.path }}/envs/{{ .values.env }}.values.yaml'
+              - '$values/{{ .addonfile.path.path }}/clusters/{{ .name }}.values.yaml'
+        - repoURL: https://github.com/koorikla/platform-lab.git
+          targetRevision: main
+          ref: values
+      destination:
+        name: '{{ .name }}'
+        namespace: '{{ .addon.namespace }}'
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+        syncOptions: [CreateNamespace=true, ServerSideApply=true, SkipDryRunOnMissingResource=true]

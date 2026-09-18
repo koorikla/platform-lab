@@ -1,0 +1,6 @@
+addon:
+  name: openchoreo-control-plane
+  chart: openchoreo-control-plane
+  namespace: openchoreo-control-plane
+  releaseName: openchoreo-control-plane
+  chartRevision: main

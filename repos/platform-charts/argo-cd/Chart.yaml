@@ -1,0 +1,9 @@
+apiVersion: v2
+name: argo-cd
+description: Umbrella chart for argo-cd
+type: application
+version: 0.1.0
+dependencies:
+  - name: argo-cd
+    version: 10.9.2            # app v3.5.x; argocd-agent hybrid mode needs >= v3.4 (skip-reconcile)
+    repository: oci://ghcr.io/argoproj/argo-helm

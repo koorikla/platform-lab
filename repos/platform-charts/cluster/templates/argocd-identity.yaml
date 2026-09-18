@@ -1,0 +1,78 @@
+{{- $n := .Values.name -}}
+{{- $tls := printf "%s-agent-client-tls" $n -}}
+# 1. Client cert for the agent (CN = agent name). Signed by the hub CA from the argocd-agent-principal chart.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $tls }}
+  namespace: {{ .Values.argocdNamespace }}
+spec:
+  secretName: {{ $tls }}
+  commonName: {{ $n }}
+  usages: [client auth]
+  privateKey: { algorithm: ECDSA, size: 256 }
+  issuerRef: { name: argocd-agent-ca, kind: Issuer }
+---
+# 2. Argo CD cluster secret, rendered from that cert. Same shape as `argocd-agentctl agent create`, but declarative
+#    and carrying the fleet labels -> this is what ApplicationSet cluster generators select on.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: cluster-{{ $n }}
+  namespace: {{ .Values.argocdNamespace }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { kind: SecretStore, name: in-cluster }
+  target:
+    name: cluster-{{ $n }}
+    template:
+      engineVersion: v2
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: cluster
+          argocd-agent.argoproj-labs.io/agent-name: {{ $n }}
+          {{- include "cluster.labels" . | nindent 10 }}
+        annotations:
+          argocd.argoproj.io/skip-reconcile: "true"   # hub app-controller must not reconcile agent clusters (Argo CD >= 3.4)
+      data:
+        name: {{ $n }}
+        server: "https://{{ .Values.resourceProxy }}?agentName={{ $n }}"
+        config: |
+          {"tlsClientConfig":{"insecure":false,"certData":"{{ `{{ .crt | b64enc }}` }}","keyData":"{{ `{{ .key | b64enc }}` }}","caData":"{{ `{{ .ca | b64enc }}` }}"}}
+  data:
+    - { secretKey: crt, remoteRef: { key: {{ $tls }}, property: tls.crt } }
+    - { secretKey: key, remoteRef: { key: {{ $tls }}, property: tls.key } }
+    - { secretKey: ca,  remoteRef: { key: {{ $tls }}, property: ca.crt } }
+---
+# 3. Push cert + CA into the workload cluster, authenticating with the kubeconfig CAPI generates (<name>-kubeconfig).
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: fleet-{{ $n }}-argocd
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: argocd            # created on the worker by the argocd HelmChartProxy
+      authRef:
+        name: {{ $n }}-kubeconfig
+        namespace: {{ .Values.fleetNamespace }}
+        key: value
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: {{ $tls }}
+  namespace: {{ .Values.argocdNamespace }}
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: Delete
+  secretStoreRefs:
+    - { kind: ClusterSecretStore, name: fleet-{{ $n }}-argocd }
+  selector:
+    secret:
+      name: {{ $tls }}
+  data:
+    - match: { secretKey: tls.crt, remoteRef: { remoteKey: argocd-agent-client-tls, property: tls.crt } }
+    - match: { secretKey: tls.key, remoteRef: { remoteKey: argocd-agent-client-tls, property: tls.key } }
+    - match: { secretKey: ca.crt,  remoteRef: { remoteKey: argocd-agent-ca,         property: ca.crt } }

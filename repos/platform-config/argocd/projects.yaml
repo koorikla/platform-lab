@@ -1,0 +1,41 @@
+# platform-mgmt : hub-local, reconciled by the hub's own application-controller (never shipped to agents)
+# platform-workers / workloads : labelled argocd-agent=true -> principal syncs them to agents (managed mode)
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-mgmt
+  namespace: argocd
+spec:
+  sourceRepos: ["*"]
+  destinations:
+    - { name: in-cluster, namespace: "*" }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-workers
+  namespace: argocd
+  labels:
+    argocd-agent: "true"
+spec:
+  sourceRepos: ["*"]
+  destinations:
+    - { name: "*", namespace: "*" }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: workloads
+  namespace: argocd
+  labels:
+    argocd-agent: "true"
+spec:
+  sourceRepos: ["*"]             # TODO: restrict to the apps repo once split out
+  destinations:
+    - { name: "*", namespace: "*" }
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }

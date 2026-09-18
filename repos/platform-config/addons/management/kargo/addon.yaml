@@ -1,0 +1,6 @@
+addon:
+  name: kargo
+  chart: kargo
+  namespace: kargo
+  releaseName: kargo
+  chartRevision: main

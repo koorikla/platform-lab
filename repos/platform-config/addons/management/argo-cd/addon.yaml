@@ -1,0 +1,6 @@
+addon:
+  name: argo-cd
+  chart: argo-cd
+  namespace: argocd
+  releaseName: argocd
+  chartRevision: main

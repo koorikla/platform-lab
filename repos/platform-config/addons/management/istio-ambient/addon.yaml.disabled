@@ -1,0 +1,6 @@
+addon:
+  name: istio-ambient
+  chart: istio-ambient
+  namespace: istio-system
+  releaseName: istio
+  chartRevision: main

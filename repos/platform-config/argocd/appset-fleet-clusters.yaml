@@ -1,0 +1,41 @@
+# One Application per cluster file: fleet/clusters/<env>/<name>.yaml -> chart "cluster".
+# Disabled clusters are kept as <name>.yaml.disabled (the glob only matches *.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: fleet-clusters
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/koorikla/platform-lab.git
+        revision: main
+        files:
+          - path: repos/platform-config/fleet/clusters/*/*.yaml
+  template:
+    metadata:
+      name: 'cluster-{{ .name }}'
+      labels:
+        platform.lab/env: '{{ .env }}'
+    spec:
+      project: platform-mgmt
+      sources:
+        - repoURL: https://github.com/koorikla/platform-lab.git
+          targetRevision: main
+          path: repos/platform-charts/cluster
+          helm:
+            releaseName: '{{ .name }}'
+            valueFiles:
+              - '$values/{{ .path.path }}/{{ .path.filename }}'
+        - repoURL: https://github.com/koorikla/platform-lab.git
+          targetRevision: main
+          ref: values
+      destination:
+        name: in-cluster
+        namespace: fleet
+      syncPolicy:
+        automated: { prune: false, selfHeal: true }   # never auto-prune a cluster
+        retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+        syncOptions: [ServerSideApply=true, SkipDryRunOnMissingResource=true]

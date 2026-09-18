@@ -1,0 +1,41 @@
+# One Application per folder in addons/management/. Rename addon.yaml -> addon.yaml.disabled to switch an addon off.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: mgmt-addons
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/koorikla/platform-lab.git            # platform-config repo
+        revision: main
+        files:
+          - path: repos/platform-config/addons/management/*/addon.yaml
+  template:
+    metadata:
+      name: 'mgmt-{{ .addon.name }}'
+      labels:
+        platform.lab/addon: '{{ .addon.name }}'
+    spec:
+      project: platform-mgmt
+      sources:
+        - repoURL: https://github.com/koorikla/platform-lab.git          # platform-charts repo
+          targetRevision: '{{ .addon.chartRevision }}'
+          path: 'repos/platform-charts/{{ .addon.chart }}'
+          helm:
+            releaseName: '{{ .addon.releaseName }}'
+            ignoreMissingValueFiles: true
+            valueFiles:
+              - '$values/{{ .path.path }}/values.yaml'
+        - repoURL: https://github.com/koorikla/platform-lab.git
+          targetRevision: main
+          ref: values
+      destination:
+        name: in-cluster
+        namespace: '{{ .addon.namespace }}'
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }   # CRD ordering between addons is handled by retries
+        syncOptions: [CreateNamespace=true, ServerSideApply=true, SkipDryRunOnMissingResource=true]

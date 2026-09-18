@@ -1,0 +1,9 @@
+apiVersion: v2
+name: cert-manager
+description: Umbrella chart for cert-manager
+type: application
+version: 0.1.0
+dependencies:
+  - name: cert-manager
+    version: v1.21.2
+    repository: oci://quay.io/jetstack/charts

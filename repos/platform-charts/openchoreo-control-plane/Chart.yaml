@@ -1,0 +1,9 @@
+apiVersion: v2
+name: openchoreo-control-plane
+description: Umbrella chart for openchoreo-control-plane
+type: application
+version: 0.1.0
+dependencies:
+  - name: openchoreo-control-plane
+    version: 1.2.5
+    repository: oci://ghcr.io/openchoreo/helm-charts

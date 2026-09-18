@@ -1,0 +1,5 @@
+addon:
+  name: kgateway
+  chart: kgateway
+  namespace: kgateway
+  releaseName: kgateway

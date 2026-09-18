@@ -1,0 +1,6 @@
+addon:
+  name: capi-operator
+  chart: capi-operator
+  namespace: capi-operator-system
+  releaseName: capi-operator
+  chartRevision: main

@@ -1,0 +1,35 @@
+# Plain (non-generated) hub applications.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fleet-base
+  namespace: argocd
+spec:
+  project: platform-mgmt
+  source:
+    repoURL: https://github.com/koorikla/platform-lab.git
+    targetRevision: main
+    path: repos/platform-config/fleet/base
+  destination: { name: in-cluster, namespace: fleet }
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+    syncOptions: [CreateNamespace=true, SkipDryRunOnMissingResource=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kargo-pipelines
+  namespace: argocd
+spec:
+  project: platform-mgmt
+  source:
+    repoURL: https://github.com/koorikla/platform-lab.git
+    targetRevision: main
+    path: repos/platform-config/kargo
+    directory: { recurse: true }
+  destination: { name: in-cluster, namespace: kargo }
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+    syncOptions: [SkipDryRunOnMissingResource=true]

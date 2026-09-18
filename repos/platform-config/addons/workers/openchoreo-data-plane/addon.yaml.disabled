@@ -1,0 +1,5 @@
+addon:
+  name: openchoreo-data-plane
+  chart: openchoreo-data-plane
+  namespace: openchoreo-data-plane
+  releaseName: openchoreo-data-plane

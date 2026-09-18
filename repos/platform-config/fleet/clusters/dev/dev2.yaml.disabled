@@ -1,0 +1,9 @@
+# One file = one cluster. Values for repos/platform-charts/cluster. Labels derived from here drive every ApplicationSet.
+name: dev2
+env: dev
+provider: docker
+region: local
+clusterClass: k3s-docker
+kubernetesVersion: v1.34.1+k3s1
+controlPlaneReplicas: 1
+workerReplicas: 1

@@ -1,0 +1,90 @@
+{{- define "ns" -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ . }}
+{{- end }}
+{{ include "ns" "capi-system" }}
+---
+apiVersion: operator.cluster.x-k8s.io/v1alpha2
+kind: CoreProvider
+metadata:
+  name: cluster-api
+  namespace: capi-system
+spec:
+  version: {{ .Values.core.version }}
+  manager:
+    featureGates:
+      ClusterTopology: true
+---
+{{ include "ns" "capi-k3s-bootstrap-system" }}
+---
+apiVersion: operator.cluster.x-k8s.io/v1alpha2
+kind: BootstrapProvider
+metadata:
+  name: k3s
+  namespace: capi-k3s-bootstrap-system
+spec:
+  version: {{ .Values.k3s.version }}
+  # fetchConfig:   # only if the operator cannot resolve "k3s" from the built-in clusterctl provider list
+  #   url: https://github.com/k3s-io/cluster-api-k3s/releases/{{ .Values.k3s.version }}/bootstrap-components.yaml
+---
+{{ include "ns" "capi-k3s-control-plane-system" }}
+---
+apiVersion: operator.cluster.x-k8s.io/v1alpha2
+kind: ControlPlaneProvider
+metadata:
+  name: k3s
+  namespace: capi-k3s-control-plane-system
+spec:
+  version: {{ .Values.k3s.version }}
+---
+{{ include "ns" "caaph-system" }}
+---
+apiVersion: operator.cluster.x-k8s.io/v1alpha2
+kind: AddonProvider
+metadata:
+  name: helm
+  namespace: caaph-system
+spec:
+  version: {{ .Values.helm.version }}
+{{- if .Values.infrastructure.docker.enabled }}
+---
+{{ include "ns" "capd-system" }}
+---
+apiVersion: operator.cluster.x-k8s.io/v1alpha2
+kind: InfrastructureProvider
+metadata:
+  name: docker
+  namespace: capd-system
+spec:
+  version: {{ .Values.infrastructure.docker.version }}
+  manager:
+    featureGates:
+      ClusterTopology: true
+{{- end }}
+{{- if .Values.infrastructure.openstack.enabled }}
+---
+{{ include "ns" "capo-system" }}
+---
+apiVersion: operator.cluster.x-k8s.io/v1alpha2
+kind: InfrastructureProvider
+metadata:
+  name: openstack
+  namespace: capo-system
+spec:
+  version: {{ .Values.infrastructure.openstack.version }}
+{{- end }}
+{{- if .Values.infrastructure.aws.enabled }}
+---
+{{ include "ns" "capa-system" }}
+---
+apiVersion: operator.cluster.x-k8s.io/v1alpha2
+kind: InfrastructureProvider
+metadata:
+  name: aws
+  namespace: capa-system
+spec:
+  version: {{ .Values.infrastructure.aws.version }}
+  # configSecret: { name: capa-credentials }   # TODO
+{{- end }}

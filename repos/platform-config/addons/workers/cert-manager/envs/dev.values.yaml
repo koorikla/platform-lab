@@ -1,0 +1,3 @@
+# Example env-level value override (dev only).
+cert-manager:
+  replicaCount: 1

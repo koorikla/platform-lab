@@ -1,0 +1,5 @@
+# helm dependency build output (umbrella chart deps are pinned in Chart.yaml/Chart.lock)
+**/charts/*.tgz
+*.tgz
+*.kubeconfig
+.DS_Store

@@ -1,0 +1,20 @@
+hub:
+  host: mgmt-control-plane     # DNS name workers use to reach the hub (kind node container on the "kind" docker network)
+  principalNodePort: 30443
+
+argocd-agent-principal:
+  fullnameOverride: argocd-agent-principal
+  service:
+    type: ClusterIP            # exposed via templates/nodeport.yaml (chart has no nodePort knob)
+  principal:
+    listen:
+      host: ""                 # chart default is 127.0.0.1 -> unreachable for remote agents
+    auth: "mtls:CN=([^,]+)"    # agent name == client cert CN == CAPI cluster name
+    destinationBasedMapping: true
+    labelSelector: "argocd-agent=true"   # hybrid mode: only labelled Applications/AppProjects go to agents
+    tls:
+      clientCert:
+        require: true
+        matchSubject: true
+    jwt:
+      allowGenerate: true      # LAB ONLY

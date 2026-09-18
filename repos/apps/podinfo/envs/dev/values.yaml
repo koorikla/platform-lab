@@ -1,0 +1,6 @@
+# env: dev — image.tag is written by Kargo (stage "dev")
+podinfo:
+  image:
+    tag: 6.15.0
+  ui:
+    message: "podinfo @ dev"

@@ -1,0 +1,6 @@
+# Disabled by default (addon.yaml.disabled). Ambient = no sidecars, smallest footprint for the lab.
+istiod:
+  profile: ambient
+cni:
+  profile: ambient
+ztunnel: {}

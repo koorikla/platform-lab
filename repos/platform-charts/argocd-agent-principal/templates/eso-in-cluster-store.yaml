@@ -1,0 +1,38 @@
+# Lets ExternalSecrets in this namespace read cert-manager secrets and template them into Argo CD cluster secrets.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso-in-cluster
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: eso-in-cluster
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch]
+  - apiGroups: [authorization.k8s.io]
+    resources: [selfsubjectrulesreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: eso-in-cluster
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: eso-in-cluster }
+subjects:
+  - { kind: ServiceAccount, name: eso-in-cluster, namespace: {{ .Release.Namespace }} }
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: in-cluster
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: {{ .Release.Namespace }}
+      server:
+        caProvider: { type: ConfigMap, name: kube-root-ca.crt, key: ca.crt }
+      auth:
+        serviceAccount: { name: eso-in-cluster }

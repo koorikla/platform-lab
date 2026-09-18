@@ -1,0 +1,2 @@
+# OpenChoreo prerequisite. Gateway API CRDs (v1.5.1 standard-install) are NOT in a chart -> see CLAUDE.md backlog.
+kgateway: {}

@@ -1,0 +1,16 @@
+# Hub profile defaults. Release name MUST be "argocd" (bootstrap + mgmt-argo-cd app), so services are argocd-*.
+argo-cd:
+  fullnameOverride: argocd
+  global:
+    domain: localhost
+  configs:
+    params:
+      server.insecure: true
+  server:
+    service:
+      type: NodePort
+      nodePortHttp: 30080
+  dex:
+    enabled: false
+  notifications:
+    enabled: false

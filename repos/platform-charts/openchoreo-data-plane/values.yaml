@@ -1,0 +1,13 @@
+# Phase 2. Remote-plane settings per upstream multi-cluster guide.
+openchoreo-data-plane:
+  gateway:
+    tls:
+      enabled: false
+  clusterAgent:
+    enabled: true
+    serverUrl: "wss://mgmt-control-plane:30843/ws"   # VERIFY port once cluster-gateway-external nodePort is fixed
+    tls:
+      enabled: true
+      generateCerts: true
+      serverCAConfigMap: cluster-gateway-ca          # TODO: deliver declaratively (see CLAUDE.md -> OpenChoreo trust)
+      caSecretName: ""

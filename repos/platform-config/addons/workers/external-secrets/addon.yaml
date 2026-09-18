@@ -1,0 +1,5 @@
+addon:
+  name: external-secrets
+  chart: external-secrets
+  namespace: external-secrets
+  releaseName: external-secrets

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: kgateway
+description: Umbrella chart for kgateway
+type: application
+version: 0.1.0
+dependencies:
+  - name: kgateway-crds
+    version: v2.3.1
+    repository: oci://cr.kgateway.dev/kgateway-dev/charts
+  - name: kgateway
+    version: v2.3.1
+    repository: oci://cr.kgateway.dev/kgateway-dev/charts

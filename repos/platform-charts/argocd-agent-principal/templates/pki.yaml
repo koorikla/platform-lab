@@ -1,0 +1,55 @@
+# Self-contained PKI for argocd-agent. CA key never leaves the hub; per-agent client certs are issued by the
+# `cluster` chart and pushed to workers with ESO PushSecret.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: argocd-agent-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-agent-ca
+spec:
+  isCA: true
+  commonName: argocd-agent-ca
+  secretName: argocd-agent-ca            # principal reads tls.crt from here as root CA
+  duration: 87600h
+  privateKey: { algorithm: ECDSA, size: 256 }
+  issuerRef: { name: argocd-agent-selfsigned, kind: Issuer }
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: argocd-agent-ca
+spec:
+  ca:
+    secretName: argocd-agent-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-agent-principal-tls
+spec:
+  secretName: argocd-agent-principal-tls
+  commonName: argocd-agent-principal
+  dnsNames:
+    - {{ .Values.hub.host }}
+    - argocd-agent-principal
+    - argocd-agent-principal.{{ .Release.Namespace }}.svc
+  usages: [server auth]
+  issuerRef: { name: argocd-agent-ca, kind: Issuer }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-agent-resource-proxy-tls
+spec:
+  secretName: argocd-agent-resource-proxy-tls
+  commonName: argocd-agent-resource-proxy
+  dnsNames:
+    - argocd-agent-resource-proxy
+    - argocd-agent-resource-proxy.{{ .Release.Namespace }}.svc
+  usages: [server auth]
+  issuerRef: { name: argocd-agent-ca, kind: Issuer }

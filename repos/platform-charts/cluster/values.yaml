@@ -1,0 +1,30 @@
+# Filled from repos/platform-config/fleet/clusters/<env>/<name>.yaml
+name: ""                       # cluster name == argocd-agent name == Argo CD destination name
+env: ""                        # dev | test | prod
+role: worker
+provider: docker
+region: local
+extraLabels: {}                # extra platform.lab/* style selectors, stamped on CAPI Cluster AND Argo cluster secret
+
+fleetNamespace: fleet
+argocdNamespace: argocd
+
+clusterClass: k3s-docker
+kubernetesVersion: v1.34.1+k3s1
+controlPlaneReplicas: 1
+workerReplicas: 1
+workerClass: k3s-default-worker
+variables:                     # ClusterClass variables, provider specific
+  - name: kindImageVersion
+    value: v1.34.0
+network:
+  pods: 10.45.0.0/16
+  services: 10.46.0.0/16
+
+resourceProxy: argocd-agent-resource-proxy:9090
+
+openchoreo:
+  enabled: false               # Phase 2
+  namespace: default
+  agentCA: ""                  # TODO: replace with a declarative trust flow (CLAUDE.md -> OpenChoreo trust)
+  appsHost: ""

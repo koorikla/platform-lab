@@ -1,0 +1,9 @@
+apiVersion: v2
+name: external-secrets
+description: Umbrella chart for external-secrets
+type: application
+version: 0.1.0
+dependencies:
+  - name: external-secrets
+    version: 2.10.0
+    repository: oci://ghcr.io/external-secrets/charts

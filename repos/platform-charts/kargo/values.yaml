@@ -1,0 +1,15 @@
+kargo:
+  api:
+    host: localhost:8081
+    tls:
+      enabled: false
+    service:
+      type: NodePort
+      nodePort: 30081
+    adminAccount:
+      # LAB ONLY: password "admin". TODO: move to ESO-managed secret (api.secret.name).
+      passwordHash: "$2b$10$48SEYFyqMQ5DVXCuMiOFv.HAAiaroOvGVx5/Op8l.mtP8jDqqFq/O"
+      tokenSigningKey: "lab-only-change-me"
+  controller:
+    argocd:
+      namespace: argocd

@@ -1,0 +1,6 @@
+addon:
+  name: cert-manager
+  chart: cert-manager
+  namespace: cert-manager
+  releaseName: cert-manager
+  chartRevision: main
