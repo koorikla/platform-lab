@@ -1,9 +1,16 @@
-kind: addon                 # addon | app
-name: ""                    # addon or app name (required)
+# One Kargo pipeline (Project <kind>-<name>) for one addon or app; an ApplicationSet instantiates it per folder.
+# Staged (travels with Freight): the chart and the addon's values. NOT staged: chart/namespace/releaseName below come
+# from addon.yaml on main and hit every stage at its next promotion - change them like a new addon, not a rollout.
+kind: addon                 # addon | app (Phase 3); anything else fails the render
+name: ""                    # required; == folder name under addons/workers/ (hack/lint.sh checks addon.yaml)
 chart: ""                   # addon: chart folder under repos/platform-charts (default: name)
 namespace: ""               # addon: target namespace (default: name)
 releaseName: ""             # addon: helm release name (default: name)
 image: ""                   # app: image repository (Warehouse subscription)
-repoURL: git@github.com:koorikla/platform-lab.git   # Kargo authenticates with the repo deploy key (SSH)
-stages: [dev-canary, dev, test, prod]   # order = promotion order; stage name = rendered/<stage> branch
+repoURL: git@github.com:koorikla/platform-lab.git   # SSH: Kargo's credential is the repo deploy key; passed to the task
+stages:                     # order = promotion order; the first stage takes Freight straight from the Warehouse
+  - { name: dev-canary, env: dev,  pr: false }   # name = stage + rendered/<name> branch; env = values overlay
+  - { name: dev,        env: dev,  pr: false }
+  - { name: test,       env: test, pr: false }
+  - { name: prod,       env: prod, pr: false }   # pr: true needs a token that can open PRs (deploy key can't)
 autoPromote: [dev-canary, dev]

@@ -1,0 +1,30 @@
+{{- $p := include "kargo-pipeline.project" . }}
+{{- range $i, $s := .Values.stages }}
+{{- if $i }}
+---
+{{- end }}
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: {{ $s.name }}
+  namespace: {{ $p }}
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: {{ $.Values.name }} }
+      sources:
+        {{- if eq $i 0 }}
+        direct: true
+        {{- else }}
+        stages: [{{ (index $.Values.stages (sub $i 1)).name }}]
+        {{- end }}
+  promotionTemplate:
+    spec:
+      steps:
+        - task: { name: render-{{ $.Values.kind }}, kind: ClusterPromotionTask }
+          vars:
+            - { name: repoURL, value: {{ $.Values.repoURL | quote }} }
+            {{- include (printf "kargo-pipeline.vars.%s" $.Values.kind) $ | nindent 12 }}
+            - { name: env, value: {{ required "stages[].env is required" $s.env | quote }} }
+            - { name: branch, value: {{ $s.name | quote }} }
+            - { name: pr, value: {{ $s.pr | default false | toString | quote }} }
+{{- end }}

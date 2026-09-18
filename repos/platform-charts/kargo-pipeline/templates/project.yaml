@@ -1,0 +1,25 @@
+{{- $p := include "kargo-pipeline.project" . }}
+# Declared explicitly so creation order doesn't matter: Kargo refuses to adopt an unlabelled namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $p }}
+  labels:
+    kargo.akuity.io/project: "true"
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: {{ $p }}
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: {{ $p }}
+  namespace: {{ $p }}
+spec:
+  promotionPolicies:
+  {{- range .Values.autoPromote }}
+    - stageSelector: { name: {{ . }} }
+      autoPromotionEnabled: true
+  {{- end }}

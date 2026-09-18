@@ -1,0 +1,21 @@
+{{- if eq .Values.kind "addon" }}
+{{- $cfg := printf "repos/platform-config/addons/workers/%s" .Values.name }}
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ include "kargo-pipeline.project" . }}
+spec:
+  subscriptions:
+    - git:
+        repoURL: {{ .Values.repoURL }}
+        branch: main
+        commitSelectionStrategy: NewestFromBranch
+        # SPLIT: one subscription spans platform-charts + platform-config; split repos => one subscription each
+        includePaths:   # freight = a commit touching the chart or the addon's values
+          - repos/platform-charts/{{ include "kargo-pipeline.chart" . }}/
+          - {{ $cfg }}/
+        excludePaths:   # rollout pins (envs/<env>.yaml) and per-cluster values aren't rendered (removed in Task 1.6)
+          - regex:^{{ $cfg }}/envs/[^/.]+\.yaml$
+          - {{ $cfg }}/clusters/
+{{- end }}

@@ -28,10 +28,12 @@ spec:
         helm:
           valuesObject:
             kind: addon
-            name: '{{ .addon.name }}'
-            chart: '{{ .addon.chart }}'
-            namespace: '{{ .addon.namespace }}'
-            releaseName: '{{ .addon.releaseName }}'
+            name: '{{ .path.basename }}'                       # folder name == addon name (hack/lint.sh)
+            # optional: empty => the chart defaults them to name
+            chart: '{{ dig "chart" "" .addon }}'
+            namespace: '{{ dig "namespace" "" .addon }}'
+            releaseName: '{{ dig "releaseName" "" .addon }}'
+      # only a default: every namespaced object sets its own addon-<name> namespace, the rest is cluster-scoped
       destination: { name: in-cluster, namespace: kargo }
       syncPolicy:
         automated: { prune: true, selfHeal: true }

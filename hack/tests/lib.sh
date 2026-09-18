@@ -16,6 +16,10 @@ assert_yq() {
   got=$(yq eval-all "$2" "$1") || fail "line ${BASH_LINENO[0]}: yq failed: $2"
   [ "$got" = "$3" ] || fail "line ${BASH_LINENO[0]}: $2 = '$got', want '$3'"
 }
+# assert_fails <cmd...>: the command must exit non-zero (e.g. a render the chart has to reject)
+assert_fails() {
+  if "$@" >/dev/null 2>&1; then fail "line ${BASH_LINENO[0]}: expected failure: $*"; fi
+}
 # render <release> <chart> [helm args...] -> path of the rendered multi-doc file.
 # Assign it first (x=$(render ...)): `local x=$(...)` or an inline $(render) swallows its exit code.
 render() {
