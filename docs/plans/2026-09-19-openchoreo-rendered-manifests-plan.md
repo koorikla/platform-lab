@@ -124,18 +124,11 @@ done
 
 Run it; verify `git ls-remote --heads origin 'rendered/*'` lists 4 branches. Commit the script.
 
-### Task 0.4: Argo Rollouts on the management cluster
+### Task 0.4: Argo Rollouts on the management cluster — DONE (3601c0b, 3d3a613)
 
-Kargo verification (AnalysisTemplates/AnalysisRuns) is executed by the Argo Rollouts controller next to Kargo.
-
-**Files:** Create `repos/platform-charts/argo-rollouts/{Chart.yaml,values.yaml}`,
-`repos/platform-config/addons/management/argo-rollouts/{addon.yaml,values.yaml}`; Test `hack/tests/test_argo_rollouts.sh`.
-- Dep: `argo-rollouts` from `oci://ghcr.io/argoproj/argo-helm` (latest chart; `helm show chart` to pin).
-- values: `argo-rollouts: { installCRDs: true, dashboard: { enabled: false } }` (keys: confirm with `helm show values`).
-- addon.yaml: `name: argo-rollouts, chart: argo-rollouts, namespace: argo-rollouts, releaseName: argo-rollouts, chartRevision: main`.
-- Test: render has `CustomResourceDefinition analysisruns.argoproj.io` and a Deployment.
-- E2E: `kubectl --context mgmt get crd analysistemplates.argoproj.io`; `mgmt-argo-rollouts` Synced/Healthy;
-  kargo-controller logs no longer warn about missing Rollouts CRDs.
+Bundled as a second dependency of the **kargo umbrella** (`repos/platform-charts/kargo`, argo-rollouts 2.43.2), not a
+separate addon: kargo-controller detects the Rollouts CRDs only at startup, and one Argo sync applies CRDs before
+Deployments. Test: `hack/tests/test_argo_rollouts.sh`. Verified: "Argo Rollouts integration is enabled" in kargo-controller.
 
 ---
 
