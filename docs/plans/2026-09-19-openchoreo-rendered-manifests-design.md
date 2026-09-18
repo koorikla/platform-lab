@@ -125,3 +125,18 @@ Replaces "hub PushSecret writes into the worker with the CAPI admin kubeconfig".
   identity + a TokenReview ClusterRoleBinding, installed before argocd-agent. ESO therefore leaves `worker-addons`.
 - Lab simplifications (documented, prod path noted): OpenBao dev mode (in-memory, root token) and plain HTTP on the
   frontend; prod = HA storage, auto-unseal, TLS via cert-manager.
+
+## Addendum: no kustomize; identity via CAAPH (user decision 2026-09-19)
+- Kargo renders **folders** (`helm-template` `outLayout: flat`, one file per resource) into
+  `rendered/<branch>/addons/<addon>/`, after a `delete` step clears that folder; Argo syncs it with
+  `directory.recurse`. No kustomization files, no inline patches (Argo only patches when a kustomization exists).
+- Rule: **Kargo renders everything versioned; per-cluster stamping is identity only** (cluster name), done where
+  templating already exists:
+  - cluster-identity-bound components (argocd-agent, OpenChoreo data plane `clusterAgent.planeID`, the ESO store for
+    the OpenBao pull model) live in the **CAAPH birth kit** — HelmChartProxy `valuesTemplate` renders
+    `{{ .Cluster.metadata.name }}` per cluster;
+  - per-cluster OpenChoreo `ReleaseBinding`s: an ApplicationSet (apps × clusters) renders a tiny `openchoreo-binding`
+    chart with the cluster name as a Helm parameter and the Kargo-rendered release name from `rendered/<env>` as a
+    values file (multi-source `$rendered`).
+- Consequences: `addon.yaml` has no `clusterIdentity`; the worker-addons appset has no `templatePatch`; sections above
+  that mention kustomize patches are superseded by this addendum.
