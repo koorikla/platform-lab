@@ -109,3 +109,19 @@ CAAPH HelmChartProxies (argo-cd + agent at cluster birth) are unchanged.
   Mitigation: keep ComponentType specs in the same chart that renders releases; pin OpenChoreo 1.2.5.
 - Memory: OpenChoreo control plane + Thunder + OpenBao + kgateway on the hub add roughly 2–3 GB on a 16 GB Docker VM.
 - Argo CD support for OpenChoreo CR health/diff is untested (upstream documents Flux only).
+
+## Addendum: pull-model secrets via OpenBao (user decision 2026-09-19)
+Replaces "hub PushSecret writes into the worker with the CAPI admin kubeconfig".
+- **OpenBao on the hub** (KV v2 `secret/`), reachable by workers through a `mgmt-lb` TCP frontend.
+- **Hub writes:** cert-manager issues per-cluster material (argocd-agent client cert + CA; later OpenChoreo agent
+  cert + gateway CA); a hub-local `PushSecret` (OpenBao provider — legitimate PushSecret use) writes it to
+  `secret/clusters/<name>/<item>`.
+- **Worker pulls:** the worker's ESO (`ClusterSecretStore hub-openbao`) reads only its own path via
+  `ExternalSecret`s; the gateway CA becomes a ConfigMap through an ESO generic target.
+- **Per-cluster identity in OpenBao:** the `cluster` chart renders a hub Job that (idempotently) enables
+  `auth/k8s-<name>` (Kubernetes auth against the worker API from `<name>-kubeconfig`), a role bound to the worker's
+  ESO ServiceAccount, and a policy limited to `secret/data/clusters/<name>/*`. A worker can read only its own secrets.
+- **Birth kit (CAAPH, per worker):** ESO + the `hub-openbao` ClusterSecretStore + the ExternalSecrets for the agent
+  identity + a TokenReview ClusterRoleBinding, installed before argocd-agent. ESO therefore leaves `worker-addons`.
+- Lab simplifications (documented, prod path noted): OpenBao dev mode (in-memory, root token) and plain HTTP on the
+  frontend; prod = HA storage, auto-unseal, TLS via cert-manager.
