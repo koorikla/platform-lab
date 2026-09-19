@@ -10,6 +10,7 @@
 #   - pods: CoreDNS rewrites *.openchoreo.localhost to gateway-default.openchoreo-control-plane (fleet/base/hub-coredns.yaml).
 # Resources: upstream requests for every Deployment (sum ~750m CPU / ~900Mi) are modest enough for the hub; the only
 # container without requests is the authz bootstrap Job (short-lived PostSync hook, the chart has no knob for it).
+# The Gateway's envoy (created by kgateway, not this chart) gets requests via gatewayEnvoyResources below.
 openchoreo-control-plane:
   openchoreoApi:
     http:
@@ -58,6 +59,19 @@ openchoreo-control-plane:
     httpsPort: 8443                   # unused: no https listener (tls off) and no tls-passthrough (tlsRoute off)
     tls:
       enabled: false
+    # LAB: proxy Service ClusterIP + envoy requests (templates/gatewayparameters.yaml renders this name). The chart
+    # passes `infrastructure` into the Gateway verbatim.
+    infrastructure:
+      parametersRef:
+        group: gateway.kgateway.dev
+        kind: GatewayParameters
+        name: gateway-default
+
+# Envoy of gateway-default (templates/gatewayparameters.yaml): kgateway sets none. Requests only, no limits (#67).
+gatewayEnvoyResources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
 
 # Label the org namespace OpenChoreo reads Environments/Projects from (templates/namespace.yaml).
 orgNamespace: default

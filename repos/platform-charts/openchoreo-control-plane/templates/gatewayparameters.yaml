@@ -1,0 +1,17 @@
+# kgateway settings for the proxy of Gateway gateway-default (referenced from gateway.infrastructure.parametersRef;
+# kgateway v2.3.1 deep-merges them over its defaults, same namespace as the Gateway).
+# ClusterIP: kgateway's default LoadBalancer makes k3s servicelb bind hostPort 8080 on every hub node (reachable from
+# all workers on the kind network) and allocates a random NodePort, which could collide with a fixed one (30443, 30820,
+# 30843). Browsers use `make ui` (port-forward) and pods the CoreDNS rewrite, both via the ClusterIP.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata:
+  name: {{ index .Values "openchoreo-control-plane" "gateway" "infrastructure" "parametersRef" "name" }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  kube:
+    service:
+      type: ClusterIP
+    envoyContainer:
+      resources:
+        {{- toYaml .Values.gatewayEnvoyResources | nindent 8 }}
