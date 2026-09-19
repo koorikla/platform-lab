@@ -2,8 +2,21 @@
 {{- fail (printf "openchoreo-app: unknown mode %q (types|component|release|binding)" .Values.mode) }}
 {{- end }}
 {{- if eq .Values.mode "types" }}
+{{- include "oc.required" (list . "project" "deploymentPipeline" "projectType") }}
+{{- include "oc.dns1123" (list . "project" "deploymentPipeline") }}
 {{- range $f, $_ := .Files.Glob "files/types/*.yaml" }}
 ---
 {{ $.Files.Get $f }}
 {{- end }}
+---
+# The one shared Project every app's Component is owned by
+apiVersion: openchoreo.dev/v1alpha1
+kind: Project
+metadata:
+  name: {{ .Values.project }}
+  namespace: {{ .Values.namespace }}
+  labels: { openchoreo.dev/name: {{ .Values.project }} }
+spec:
+  deploymentPipelineRef: { name: {{ .Values.deploymentPipeline }} }
+  type: { kind: ClusterProjectType, name: {{ .Values.projectType }} }
 {{- end }}

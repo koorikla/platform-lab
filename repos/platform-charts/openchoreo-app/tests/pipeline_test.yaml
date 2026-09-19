@@ -1,0 +1,102 @@
+# mode=types, templates/pipeline.yaml: the shared Project's DeploymentPipeline and the CronJob that writes its
+# promotionPaths. The script itself and cross-chart contracts (Kargo stages, Environment labels, image pin, no spec):
+# hack/tests/test_openchoreo_pipeline.sh. Types and the Project: types_test.yaml.
+suite: mode=types - DeploymentPipeline + pipeline-sync CronJob
+templates: [templates/types.yaml, templates/pipeline.yaml, templates/component.yaml]
+release: { name: openchoreo-types, namespace: openchoreo-control-plane }
+set: { mode: types, pipelineSync: { stages: [dev-canary, dev, nit, sit, prod] } }
+tests:
+  - it: renders the DeploymentPipeline without promotionPaths (owned by the CronJob, never by Argo)
+    template: templates/pipeline.yaml
+    documentSelector: { path: kind, value: DeploymentPipeline }
+    asserts:
+      - equal: { path: metadata.name, value: default }
+      - equal: { path: metadata.namespace, value: default }
+      - notExists: { path: spec }
+
+  - it: the pipeline name follows the value
+    set: { project: team-a, deploymentPipeline: fleet }
+    asserts:
+      - equal: { path: metadata.name, value: fleet }
+        template: templates/pipeline.yaml
+        documentSelector: { path: kind, value: DeploymentPipeline }
+      - equal:
+          path: 'spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="PIPELINE")].value'
+          value: fleet
+        template: templates/pipeline.yaml
+        documentSelector: { path: kind, value: CronJob }
+      - equal: { path: 'rules[1].resourceNames', value: [fleet] }
+        template: templates/pipeline.yaml
+        documentSelector: { path: kind, value: Role }
+
+  - it: CronJob gets the Kargo stage order, the Environment selector and the pipeline to write
+    template: templates/pipeline.yaml
+    documentSelector: { path: kind, value: CronJob }
+    asserts:
+      - equal: { path: metadata.namespace, value: openchoreo-control-plane }
+      - equal: { path: spec.concurrencyPolicy, value: Forbid }
+      - equal: { path: spec.jobTemplate.spec.backoffLimit, value: 0 }
+      - equal: { path: spec.jobTemplate.spec.template.spec.serviceAccountName, value: openchoreo-pipeline-sync }
+      - equal:
+          path: 'spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="STAGES")].value'
+          value: dev-canary dev nit sit prod
+      - equal:
+          path: 'spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="SELECTOR")].value'
+          value: platform.lab/role=worker
+      - equal:
+          path: 'spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="NAMESPACE")].value'
+          value: default
+      - equal:
+          path: 'spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="PIPELINE")].value'
+          value: default
+      - equal: { path: spec.jobTemplate.spec.template.spec.securityContext.runAsNonRoot, value: true }
+      - equal: { path: 'spec.jobTemplate.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem', value: true }
+      - matchRegex: { path: 'spec.jobTemplate.spec.template.spec.containers[0].image', pattern: '^alpine/k8s:[0-9.]+@sha256:[0-9a-f]{64}$' }
+      - exists: { path: 'spec.jobTemplate.spec.template.metadata.annotations["checksum/script"]' }
+
+  - it: ships the script in the ConfigMap the CronJob mounts
+    template: templates/pipeline.yaml
+    documentSelector: { path: kind, value: ConfigMap }
+    asserts:
+      - equal: { path: metadata.name, value: openchoreo-pipeline-sync }
+      - matchRegex: { path: 'data["pipeline-sync.sh"]', pattern: 'kubectl patch deploymentpipelines' }
+
+  - it: may list Environments and write exactly one pipeline, in the org namespace only
+    template: templates/pipeline.yaml
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal: { path: metadata.namespace, value: default }
+      - equal:
+          path: rules
+          value:
+            - { apiGroups: [openchoreo.dev], resources: [environments], verbs: [list] }
+            - { apiGroups: [openchoreo.dev], resources: [deploymentpipelines], resourceNames: [default], verbs: [get, patch] }
+
+  - it: binds the Role to the CronJob's ServiceAccount
+    template: templates/pipeline.yaml
+    documentSelector: { path: kind, value: RoleBinding }
+    asserts:
+      - equal: { path: metadata.namespace, value: default }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: openchoreo-pipeline-sync, namespace: openchoreo-control-plane }] }
+
+  - it: requires the stage order (no default, the addon sets the Kargo pipeline's)
+    template: templates/pipeline.yaml
+    set: { pipelineSync: { stages: [] } }
+    asserts:
+      - failedTemplate: { errorPattern: 'pipelineSync.stages is required' }
+
+  - it: rejects a stage that can't be a Kargo stage / branch name
+    template: templates/pipeline.yaml
+    set: { pipelineSync: { stages: [dev, Nit_1] } }
+    asserts:
+      - failedTemplate: { errorPattern: '"Nit_1" is not a stage name' }
+
+  - it: other modes render none of it
+    set: { mode: component, name: podinfo }
+    asserts:
+      - hasDocuments: { count: 0 }
+        template: templates/types.yaml
+      - hasDocuments: { count: 0 }
+        template: templates/pipeline.yaml
+      - hasDocuments: { count: 1 }   # the Component only: the Project is types mode's
+        template: templates/component.yaml

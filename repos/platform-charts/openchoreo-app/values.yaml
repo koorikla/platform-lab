@@ -1,6 +1,7 @@
 # One chart, four renders (OpenChoreo v1.2.5 CRDs, namespace `default` = the labelled OpenChoreo org namespace):
-#   types     hub addon: ClusterComponentTypes + ClusterProjectType from files/types (vendored upstream samples)
-#   component hub, from main: Component (autoDeploy off: Kargo cuts releases) [+ Project if createProject]
+#   types     hub addon openchoreo-types: ClusterComponentTypes + ClusterProjectType from files/types (vendored
+#             upstream samples), the shared Project `project` and its DeploymentPipeline (paths: pipelineSync below)
+#   component hub, from main: Component (autoDeploy off: Kargo cuts releases); its Project comes from types mode
 #   release   Kargo, per stage: ComponentRelease <name>-<stage>-<tag>-<hash8> [+ Workload on the workload stage]
 #   binding   hub appset, from main, one per (rendered release x worker cluster): ReleaseBinding <name>-<environment>.
 #             Identity only; everything env-specific is in the promoted release. The appset reads each
@@ -20,10 +21,20 @@ container: {}                     # Workload container fields besides image: com
 endpoints: {}                     # Workload endpoints: {<name>: {type, port, visibility: [...]}}
 dependencies: {}                  # Workload dependencies: {endpoints: [...], resources: [...]}
 
-# --- component mode
-createProject: false              # the shared `lab` Project comes from the openchoreo-types addon, not per app
+# --- types mode (hub addon openchoreo-types): files/types + the one shared Project `project` (every app's Component is
+# owned by it; hack/tests checks) + DeploymentPipeline `deploymentPipeline`, whose promotionPaths a CronJob writes from
+# the worker Environments (files/pipeline-sync.sh)
 deploymentPipeline: default
 projectType: default              # ClusterProjectType
+pipelineSync:
+  # Required, no default: the Kargo stage order (set by the openchoreo-types addon values; a config-level test keeps it
+  # equal to kargo-pipeline `stages[].name`). An Environment's stage is its platform.lab/env label, plus -canary in
+  # the canary ring (worker-addons' branch rule).
+  stages: []
+  selector: platform.lab/role=worker    # the Environments the cluster chart renders, one per worker fleet file
+  schedule: "*/5 * * * *"               # descriptive for Kargo-driven promotion: a new cluster shows up within minutes
+  # kubectl + jq + bash; same pin as openbao fleetSync.image (Renovate group kubernetes; a test keeps them equal)
+  image: alpine/k8s:1.34.11@sha256:0382123ab8ae17d8da5d43cc299242933eb012cfbe56787b43731c942c3eed80
 
 # --- release mode
 stage: ""                         # Kargo stage = rendered branch (required): names the release, so dev-canary (which

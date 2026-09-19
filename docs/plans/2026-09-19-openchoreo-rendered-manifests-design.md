@@ -283,3 +283,52 @@ addon. Details: plan Task 2.8 "As built (#14)".
 - **Trust boundary: the OpenChoreo control plane is worker admin.** Upstream's agent ClusterRole grants `*` on secrets,
   RBAC and core resources cluster-wide. Whoever controls the hub's OpenChoreo can do anything on every connected
   worker, including reading the argocd-agent client key in `argocd`.
+
+## Addendum: OpenChoreo platform defaults and the DeploymentPipeline (#78, 2026-09-19)
+Supersedes "`DeploymentPipeline default`: rendered … from the cluster list" above and plan Task 3.7 (generated file).
+- **Why a pipeline at all:** OpenChoreo v1.2.5's Component controller marks a Component Ready only when its
+  ClusterComponentType exists, its Project exists and the Project's DeploymentPipeline has a *root* (a
+  `promotionPaths[].sourceEnvironmentRef` that is never a target; `internal/controller/component/controller.go`
+  `validateAndFetchDeploymentPipeline`, `findRootEnvironment`; it also needs its Workload, which #17 syncs). The root
+  matters only for `autoDeploy`, which we keep off. Nothing else reads the pipeline for deployment: ReleaseBindings
+  and ProjectReleaseBindings don't check it, so Kargo stays the promotion engine; the pipeline is what Backstage and
+  `occ` show. One side effect: an Environment can't be deleted while a pipeline references it
+  (`internal/controller/environment/controller_finalize.go`).
+- **Env vs cluster:** an `Environment` points at exactly one data plane (`spec.dataPlaneRef`, single object), so
+  "one Environment per env with N planes" isn't possible; Environments stay per cluster (#13). The pipeline groups
+  them by Kargo stage: stage = `platform.lab/env` label, plus `-canary` for `platform.lab/ring=canary` (the
+  worker-addons branch rule). Every Environment of a stage promotes to every Environment of the next non-empty stage
+  (`promotionPaths` = complete bipartite links between consecutive stages); the last stage's Environments are listed
+  with `targetEnvironmentRefs: []` (accepted by the CRD). Example, dev2 canary, dev1+dev3, nit1, sit1, prod1:
+  `dev2 → {dev1, dev3}`, `dev1 → nit1`, `dev3 → nit1`, `nit1 → sit1`, `sit1 → prod1`, `prod1 → []`; root = the first stage.
+  The lab today (dev1 only): `dev1 → []`.
+- **Data-driven without cluster names in git:** an ApplicationSet can't aggregate fleet files into one object, and
+  Helm can't read another repo's files (invariant 6). So the pipeline is derived at runtime from what the fleet
+  files already produce: the `cluster` chart's `Environment <name>` objects carry the fleet labels. Hub CronJob
+  `openchoreo-pipeline-sync` (every 5 min, `files/pipeline-sync.sh`, same shape as `openbao-fleet-sync`) lists
+  Environments labelled `platform.lab/role=worker`, groups them as above in Kargo stage order and merge-patches `spec.promotionPaths` (field manager
+  `openchoreo-pipeline-sync`, output sorted so reruns are no-ops). Argo renders the DeploymentPipeline *without*
+  `spec`, so its server-side apply never owns, resets or diffs the paths. The stage order is the required chart value
+  `pipelineSync.stages` (no default), set in the config repo (`addons/management/openchoreo-types/values.yaml`); a
+  config-level test fails when it differs from kargo-pipeline's `stages[].name` (same names, same order). Not read
+  from the kargo-pipeline chart directly: the two charts are versioned and published independently. RBAC: list Environments, get/patch that one
+  pipeline, in the org namespace only. A failed read exits before writing; terminating Environments are dropped
+  (unblocks their deletion within one run); an Environment whose stage isn't a Kargo stage is skipped and fails the
+  Job (config drift, e.g. an env renamed in Kargo only).
+- **Where:** hub addon `openchoreo-types` = chart `openchoreo-app` with `mode: types`: the vendored
+  ClusterComponentTypes/ClusterProjectType (the same files every ComponentRelease freezes), the shared
+  `Project lab` (ClusterProjectType `default`, pipeline `default`) and the DeploymentPipeline + CronJob. A change to
+  these templates is also new app Freight (the app Warehouses watch the chart); releases re-render unchanged.
+- **Other readers of the pipeline:**
+  - Project deletion: the Project finalizer takes the Environments whose cell namespaces it cleans up from the
+    pipeline (`project/project_context.go` `findEnvironmentNamesFromDeploymentPipeline`). Once the CronJob drops a
+    terminating Environment, a later Project deletion no longer cleans that cluster's namespace. That is fine while
+    the cluster is going away with it; otherwise delete `dp-*` namespaces there by hand.
+  - Promotion from the OpenChoreo UI/API/`occ`: openchoreo-api offers promotions along these paths, and one would
+    move a ReleaseBinding past Kargo (no Freight, no verification, not in `rendered/*`, and Argo reverts it on the
+    next sync of the bindings appset). #12/#17: restrict promote/ReleaseBinding writes for humans with OpenChoreo
+    authz (AuthzRole/AuthzRoleBinding) so that Kargo + git stay the only promotion path.
+- **Not here:** ReleaseBindings (#17). Note for #17: the data plane's cell namespace is owned by a
+  `ProjectReleaseBinding` per (Project, Environment) (`internal/controller/renderedrelease/controller.go`: the
+  data-plane apply never creates namespaces), so each worker also needs `ProjectReleaseBinding lab-<cluster>`
+  (`spec.projectRelease` empty: the Project controller seeds it once) before any ReleaseBinding can land.

@@ -158,8 +158,9 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
      5. `-n argocd delete role,rolebinding eso-in-cluster-<name>` (the in-cluster store's read on that cert),
         `-n fleet delete role,rolebinding <name>-ca-projector`, `-n openbao delete externalsecret <name>-ca-public`.
      6. OpenChoreo registration (only if it was rendered, see [Conventions](#conventions)):
-        `-n default delete environment <name>`, then `delete clusterdataplane <name>` (otherwise the gateway keeps
-        accepting that planeID);
+        `-n default delete environment <name>` (OpenChoreo holds it in Terminating while DeploymentPipeline `default`
+        lists it; `openchoreo-pipeline-sync` drops terminating Environments within 5 min, then it goes), then
+        `delete clusterdataplane <name>` (otherwise the gateway keeps accepting that planeID);
         `-n openchoreo-control-plane delete pushsecret <name>-openchoreo-agent <name>-openchoreo-gateway-ca`
         (`deletionPolicy: Delete` removes `secret/clusters/<name>/openchoreo-*` from OpenBao);
         `-n openchoreo-control-plane delete certificate <name>-openchoreo-agent-tls <name>-openchoreo-agent-ca`, then
@@ -305,14 +306,20 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
 ### Add an app
 An app is an OpenChoreo Component, described by values of the `openchoreo-app` chart (`repos/apps/podinfo` is the
 example):
-1. `repos/apps/<app>/app.yaml`: `name` (== folder name), `project`, `componentType` (`<workloadType>/<type>` from
-   `openchoreo-app/files/types`), `image.repository`, optional `image.constraint` (semver range for new tags),
+1. `repos/apps/<app>/app.yaml`: `name` (== folder name), `project` (the shared `lab`, rendered with its
+   DeploymentPipeline by the hub addon `openchoreo-types`; `make test` checks), `componentType` (`<workloadType>/<type>`
+   from `openchoreo-app/files/types`), `image.repository`, optional `image.constraint` (semver range for new tags),
    `endpoints`, optional `container` (command/args/env/files) and `parameters`. **No tag**: the tag is the Kargo Freight.
 2. Optional `repos/apps/<app>/envs/<env>/values.yaml`: env config (e.g. `container.env`), frozen into that env's
    release. Nothing per cluster.
 3. Result on merge: `kargo-app-pipelines` creates Kargo project `app-<app>`; promotions render
    `rendered/<stage>:apps/<app>/release/` (`make test` renders every app for every stage, as `render-app` does).
    Deploying it (Component, releases, a ReleaseBinding per worker cluster on the hub) is #17.
+   OpenChoreo shows the promotion order as DeploymentPipeline `default`: one Environment per worker cluster, grouped
+   into the Kargo stages by the fleet labels (env, ring), each stage's clusters → the next stage's. The hub CronJob
+   `openchoreo-pipeline-sync` (addon `openchoreo-types`) rewrites it every 5 min from the Environments, so a new
+   cluster needs nothing here. A new or renamed Kargo stage also goes into `pipelineSync.stages` in
+   `addons/management/openchoreo-types/values.yaml` (`make test` fails until both match). Why and how: design doc addendum "OpenChoreo platform defaults" (#78).
 4. Disable = rename `app.yaml` → `app.yaml.disabled`: the Kargo project goes; what it rendered stays on `rendered/*`.
 
 Until #17 retires it, the `workloads` appset still deploys every `repos/apps/<app>/chart` from `main` (Application
