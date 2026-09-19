@@ -1,0 +1,26 @@
+{{- if eq .Values.kind "app" }}
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ include "kargo-pipeline.project" . }}
+spec:
+  # Freight = newest image x newest config commit: a new tag, and a change to what the release freezes (the app's
+  # definition or env config, or the chart that renders it), both cut a new ComponentRelease
+  subscriptions:
+    - image:
+        repoURL: {{ required "image (repository) is required for kind=app" .Values.image }}
+        imageSelectionStrategy: SemVer
+        {{- with .Values.imageConstraint }}
+        constraint: {{ . | quote }}
+        {{- end }}
+        discoveryLimit: 5
+    - git:
+        repoURL: {{ .Values.repoURL }}
+        branch: main
+        commitSelectionStrategy: NewestFromBranch
+        # SPLIT: one subscription spans the app's repo + platform-charts; split repos => one subscription each
+        includePaths:
+          - repos/apps/{{ .Values.name }}/
+          - repos/platform-charts/openchoreo-app/
+{{- end }}

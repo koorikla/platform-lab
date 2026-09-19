@@ -1,0 +1,104 @@
+# Rendered manifests pattern for apps (#16): helm-template the openchoreo-app chart (mode=release) at the Freight's
+# commit with the app's definition + env values and the Freight's image tag, and commit plain YAML, one file per
+# resource, to rendered/<branch>:apps/<app>/release/. Same shape as render-addon; cluster-scoped so every app-<name>
+# Project shares one definition. Output (compose-output "result"): commit = SHA now at the head of rendered/<branch>.
+#
+# Contract for the hub ApplicationSets (#17; until then nothing syncs apps/):
+#   branch  rendered/<stage> for every kargo-pipeline stage (dev-canary, dev, test, prod). A cluster binds from its
+#           env's branch, or <env>-canary in the canary ring: the same rule as worker-addons.
+#   folder  apps/<app>/release/, <app> = folder under repos/apps = Component name. The pipeline owns apps/<app>/ on
+#           its branch: every promotion deletes it and renders it again.
+#   files   Kargo flat layout, "<group, . -> _>-<kind>-<namespace>-<name>.yaml" lowercased (v1.11.4
+#           helm_template_runner.go generateResourceFilename):
+#             openchoreo_dev-componentrelease-default-<app>-<stage>-<tag>-<hash8>.yaml
+#               exactly one per folder: the release promoted to that stage. Bindings take metadata.name,
+#               spec.owner.projectName and spec.owner.componentName from it (never recompute the name). Match it as
+#               apps/*/release/openchoreo_dev-componentrelease-*.yaml.
+#             openchoreo_dev-workload-default-<app>-workload.yaml
+#               only on the chart's workloadStage (dev): the Component's single "latest" Workload.
+#   A new tag or config is a new release name, so a promotion replaces the release file: the previous
+#   ComponentRelease leaves the branch (immutable objects; whether the hub prunes them is #17's call).
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ClusterPromotionTask
+metadata:
+  name: render-app
+spec:
+  vars:              # no defaults: Stages (kargo-pipeline chart, kind=app) pass all of them; a missing one fails loudly
+    - name: repoURL      # must equal the Warehouse git repoURL (commitFrom looks the Freight commit up by it)
+    - name: app          # folder under repos/apps (== Component name)
+    - name: image        # must equal the Warehouse image repoURL (imageFrom looks the Freight tag up by it)
+    - name: env          # values overlay: repos/apps/<app>/envs/<env>/values.yaml
+    - name: branch       # stage name; output goes to rendered/<branch>; also names the release (openchoreo-app stage)
+    - name: pr           # "true": push a generated branch + PR instead of pushing rendered/<branch> directly
+  steps:
+    - uses: git-clone
+      retry: { errorThreshold: 3 }   # network step: ride out transient DNS/registry errors
+      config:
+        repoURL: ${{ vars.repoURL }}
+        # SPLIT: ./src is one checkout of the app's repo + platform-charts; split repos => one clone per repo
+        # rendered/<branch> first: all network I/O happens before any worktree exists (see render-addon.yaml)
+        checkout:
+          - { branch: "rendered/${{ vars.branch }}", create: true, path: ./out }
+          - { commit: "${{ commitFrom(vars.repoURL).ID }}", path: ./src }
+    # helm-template only adds/overwrites files: start from an empty folder so the superseded release (a new name)
+    # and removed resources disappear. Only this app's folder; the rest of the branch is other pipelines' output.
+    - uses: delete
+      config:
+        path: ./out/apps/${{ vars.app }}
+    - uses: helm-template
+      config:        # no network: openchoreo-app has no dependencies and renders no lookup()
+        path: ./src/repos/platform-charts/openchoreo-app
+        releaseName: ${{ vars.app }}
+        ignoreMissingValueFiles: true   # an app without env-specific config has no envs/<env>/values.yaml
+        valuesFiles:   # SPLIT: from the app's repo; the chart (path) from platform-charts
+          - ./src/repos/apps/${{ vars.app }}/app.yaml
+          - ./src/repos/apps/${{ vars.app }}/envs/${{ vars.env }}/values.yaml
+        setValues:
+          - { key: mode, value: release }
+          - { key: stage, value: "${{ vars.branch }}" }   # dev-canary and dev (both env=dev) cut distinct releases
+          # Cheap defence: the tag reaches the chart as a string even if it looks like a number. With SemVer +
+          # strictSemvers (default) only x.y.z tags are selected today, but a looser selection could yield e.g. 1.10,
+          # which Kargo (pkg/expressions/json_templates.go EvaluateTemplate) and helm --set would both turn into the
+          # float 1.1: hence quote() and literal (--set-literal).
+          - { key: image.tag, value: "${{ quote(imageFrom(vars.image).Tag) }}", literal: true }
+        outPath: ./out/apps/${{ vars.app }}/release
+        outLayout: flat   # one file per resource: the contract above
+    - uses: git-commit
+      config:
+        path: ./out
+        message: "render(app/${{ vars.app }}): ${{ vars.branch }} <- ${{ imageFrom(vars.image).Tag }} @ ${{ commitFrom(vars.repoURL).ID }}"
+    # success() on every custom if: a custom if REPLACES the implicit "all previous steps succeeded" guard
+    - uses: git-push
+      as: push-direct
+      if: ${{ success() && vars.pr != "true" }}
+      retry: { errorThreshold: 3 }   # network step (its own maxAttempts covers rebase races, not DNS/transport)
+      config:
+        path: ./out
+        maxAttempts: 20   # every addon and app pipeline pushes to the same rendered/<stage> branch; each attempt rebases
+    # PR flow (needs a token that can open PRs; the deploy key can only push): as in render-addon.yaml
+    - uses: git-push
+      as: push
+      if: ${{ success() && vars.pr == "true" }}
+      retry: { errorThreshold: 3 }
+      config: { path: ./out, generateTargetBranch: true }
+    - uses: git-open-pr
+      as: open-pr
+      if: ${{ success() && vars.pr == "true" }}
+      retry: { errorThreshold: 3 }
+      config:
+        repoURL: ${{ vars.repoURL }}
+        sourceBranch: ${{ task.outputs.push.branch }}
+        targetBranch: rendered/${{ vars.branch }}
+        title: "render(app/${{ vars.app }}): ${{ vars.branch }} <- ${{ imageFrom(vars.image).Tag }}"
+    - uses: git-wait-for-pr
+      as: wait-for-pr
+      if: ${{ success() && vars.pr == "true" && status('open-pr') != 'Skipped' }}
+      retry: { errorThreshold: 3 }
+      config:
+        repoURL: ${{ vars.repoURL }}
+        prNumber: ${{ task.outputs['open-pr'].pr.id }}
+    - uses: compose-output
+      as: result
+      config:
+        commit: >-
+          ${{ vars.pr == "true" ? (task.outputs['wait-for-pr']?.commit ?? task.outputs.push.commit) : task.outputs['push-direct'].commit }}

@@ -41,8 +41,8 @@ Top-level folders under `repos/` simulate separate git repositories (split later
 | `repos/platform-config/argocd/` | platform-config | AppProjects, ApplicationSets (root app points here) |
 | `repos/platform-config/addons/{management,workers}/` | platform-config | which addon, which values — per fleet / env (worker addon versions travel as Kargo Freight) |
 | `repos/platform-config/fleet/` | platform-config | ClusterClasses, CAAPH HelmChartProxies, one file per cluster |
-| `repos/platform-config/kargo/` | platform-config | Kargo projects, warehouses, stages |
-| `repos/apps/` | app team repos | workloads: `chart/` + `envs/<env>/values.yaml` |
+| `repos/platform-config/kargo/` | platform-config | shared Kargo promotion tasks (`render-addon`, `render-app`); the per-addon/app pipelines come from the `kargo-pipeline` chart |
+| `repos/apps/` | app team repos | OpenChoreo apps: `app.yaml` + `envs/<env>/values.yaml`, no versions (legacy `chart/` until #17) |
 
 ## How targeting works
 
@@ -60,7 +60,7 @@ in the canary ring. Rings replace per-cluster pins: nothing is rendered per clus
 | whole env (dev1, dev2, …) | values in `addons/workers/<addon>/envs/<env>.values.yaml`; version = the Freight promoted to that env's stage |
 | clusters ahead of their env | `ring: canary` in their fleet file → they follow stage `<env>-canary`, promoted before `<env>` (dev2 in the lab; `dev` follows once Kargo verified the canary Synced + Healthy at the new commit) |
 | one cluster's identity | CAAPH birth kit (`fleet/base/helmchartproxies.yaml`, cluster name via `valuesTemplate`) |
-| apps | `repos/apps/<app>/envs/<env>/values.yaml` (Kargo writes, until apps move to OpenChoreo), `clusters/<cluster>/values.yaml` for one cluster |
+| apps | `repos/apps/<app>/app.yaml` (fleet) and `envs/<env>/values.yaml` (env); version = the Freight (image tag) promoted to the stage, rendered to `rendered/<stage>:apps/<app>/`; clusters ahead via the ring, as above |
 
 Enable/disable anything file-driven by renaming `*.yaml` ⇄ `*.yaml.disabled` (test1, prod1, OpenChoreo, Istio ship disabled).
 

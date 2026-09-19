@@ -1,5 +1,6 @@
-# app x worker-cluster. Version lives in repos/apps/<app>/envs/<env>/values.yaml (written by Kargo),
-# optional single-cluster override in repos/apps/<app>/clusters/<cluster>/values.yaml.
+# LEGACY, retired by #17: app x worker-cluster, the app's chart/ synced from main with envs/<env>/values.yaml.
+# Nothing promotes it any more (Kargo renders apps to rendered/*:apps/<app>/, #16): the image is the chart's default
+# tag. The clusters/<cluster>/values.yaml override is optional and unused (per-cluster app values are gone).
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:

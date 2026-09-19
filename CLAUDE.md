@@ -24,8 +24,9 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
 5. **Kargo writes only `rendered/*` branches; `main` holds no versions for promoted things.** A worker addon's version
    is the Freight (a `main` commit of its chart + config) rendered into `rendered/<stage>`; values: fleet < env, nothing
    per cluster. Anything per-cluster is identity only (cluster name), stamped by the CAAPH birth kit. Rings replace
-   pins: run clusters ahead with `ring: canary` (stage `<env>-canary`). Exception until #16/#17: the `podinfo` app
-   pipeline still writes `repos/apps/podinfo/envs/<env>/values.yaml` on `main`.
+   pins: run clusters ahead with `ring: canary` (stage `<env>-canary`). An app's version is its Freight (image tag x a
+   `main` commit of `repos/apps/<app>/` or the `openchoreo-app` chart) rendered as a ComponentRelease into
+   `rendered/<stage>:apps/<app>/release/`; `repos/apps/<app>/` holds no tag.
 6. `repos/*` folders are future repositories: no relative references across them except via ApplicationSet
    `repoURL`/`$values`. Splitting = change repoURLs + drop the `repos/<x>/` path prefix.
 7. CA private keys never leave the hub. Worker credentials are issued on the hub (cert-manager), written to the hub's
@@ -51,7 +52,12 @@ worker ESO pulls the cert via `mgmt-lb:30820` → agent dials `mgmt-lb:30443` (h
 ESO-rendered cluster secret makes the cluster selectable → `worker-addons` / `workloads` appsets generate labelled Applications → principal
 ships them → worker reconciles. Worker addon content: a `main` commit touching the addon → Freight of Kargo project
 `addon-<name>` (`kargo-addon-pipelines` appset) → stages `dev-canary → dev → test → prod` render fleet < env values into
-`rendered/<stage>:addons/<name>/` → `worker-addons` syncs that folder by the cluster's env + ring.
+`rendered/<stage>:addons/<name>/` → `worker-addons` syncs that folder by the cluster's env + ring. App content:
+`repos/apps/<app>/app.yaml` → Kargo project `app-<app>` (`kargo-app-pipelines` appset), Freight = image tag x `main`
+commit → same stages, task `render-app` renders `openchoreo-app` (mode=release) into
+`rendered/<stage>:apps/<app>/release/` (branch/folder/file-name contract: header of `kargo/shared/render-app.yaml`).
+Nothing syncs `apps/` until #17 (hub components/releases/bindings); meanwhile `workloads` still deploys the legacy
+`repos/apps/<app>/chart` from `main` (image = that chart's default tag).
 
 ## Hub access
 Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of container `mgmt-lb`>; bootstrap re-points it).
@@ -107,6 +113,8 @@ Minimal readable YAML; comments explain *why*. Label prefix `platform.lab/`. Nam
 New addon = umbrella chart + `addons/<scope>/<name>/{addon.yaml,values.yaml}` (+ optional `envs/<env>.values.yaml`
 for workers; nothing else in a worker addon folder, `make test` checks).
 New cluster = one file in `fleet/clusters/<env>/`.
+New app = `repos/apps/<app>/app.yaml` (openchoreo-app values: name == folder, `image.repository`, optional
+`image.constraint` for the Warehouse) + optional `envs/<env>/values.yaml`; no tag anywhere (`make test` checks).
 New ClusterClass / CAPI provider = `fleet/base/clusterclasses/<class>.yaml` + a `capi-providers` toggle (disabled
 examples: `k3s-openstack`, `eks`; recipe and per-provider differences in CONTRIBUTING.md).
 Worker addons sync plain YAML from Kargo's `rendered/<env>[-canary]:addons/<addon>/` (`worker-addons` appset, branch
@@ -116,9 +124,10 @@ go). Once Kargo project `addon-<addon>` is gone (a running promotion could re-pu
 (dry run) / `make rendered-prune APPLY=1` removes the stale `addons/<addon>` from every `rendered/*` branch — the one
 documented cleanup besides Kargo that writes those branches (it pushes directly, so prod needs a PR once PR-gated).
 A `ring: canary` cluster needs a `<env>-canary` stage in kargo-pipeline (`hack/lint.sh` checks). dev2 is dev's canary
-ring; stage `dev` auto-promotes only Freight verified in `dev-canary`: every stage runs AnalysisTemplate `argocd-apps`
-(its Applications Synced + Healthy at the promoted rendered commit for a streak; no clusters = passes, except on a
-canary stage; CONTRIBUTING.md).
+ring; stage `dev` auto-promotes only Freight verified in `dev-canary`: every addon stage runs AnalysisTemplate
+`argocd-apps` (its Applications Synced + Healthy at the promoted rendered commit for a streak; no clusters = passes,
+except on a canary stage; CONTRIBUTING.md). App pipelines have no verification until apps are deployed (#17/#18):
+their `dev` takes Freight after `appSoak` (15 min) in `dev-canary`.
 Worker-addon apps carry `platform.lab/ring` but stay auto-sync: RollingSync works through the agent but is off by
 decision (costs selfHeal) — why and how to enable: design doc addendum "progressive sync" (#27).
 Disabling (`.disabled`) leaves an addon's/cluster's resources running; removal is manual: CONTRIBUTING.md "Disabling".

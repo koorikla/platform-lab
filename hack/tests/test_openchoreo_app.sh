@@ -4,7 +4,7 @@
 # test_openchoreo_app_schema.sh.
 source "$(dirname "$0")/lib.sh"
 c=$charts/openchoreo-app
-a=hack/tests/fixtures/podinfo          # shaped like repos/apps/<app>/ (the real podinfo app is #16)
+a=hack/tests/fixtures/podinfo          # shaped like repos/apps/<app>/ (real apps: test_app_pipeline.sh)
 rel='select(.kind=="ComponentRelease")'
 dev=(-f "$a/app.yaml" -f "$a/envs/dev/values.yaml" --set env=dev --set stage=dev)   # what Kargo passes
 

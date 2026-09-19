@@ -1,0 +1,10 @@
+# What the app is, for OpenChoreo (values of the openchoreo-app chart) and Kargo (kargo-app-pipelines appset).
+# No version: Kargo supplies image.tag from the Freight at render time (render-app), per stage.
+name: podinfo                         # == folder name == Component name == Kargo project app-podinfo
+project: lab                          # OpenChoreo Project, shared; created on the hub with the types (plan Task 3.5)
+componentType: deployment/service     # <workloadType>/<ClusterComponentType> (openchoreo-app files/types)
+image:
+  repository: ghcr.io/stefanprodan/podinfo
+  constraint: ^6.0.0                  # Kargo Warehouse: which new tags become Freight (the chart ignores it)
+endpoints:
+  http: { type: HTTP, port: 9898, visibility: [external] }

@@ -1,3 +1,6 @@
+{{- /* addons only: it reads the addon's worker Applications. Apps have none to read until #17 binds their releases
+       on the hub; their dev soaks instead (appSoak, stages.yaml). App verification: #17/#18. */}}
+{{- if eq .Values.kind "addon" }}
 {{- $p := include "kargo-pipeline.project" . }}
 {{- $v := .Values.verification }}
 {{- $argocd := $v.argocdNamespace }}
@@ -105,3 +108,4 @@ subjects:
   - kind: ServiceAccount
     name: verify-apps
     namespace: {{ $p }}
+{{- end }}
