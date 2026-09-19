@@ -106,7 +106,8 @@ upgrade) until ESO CRDs/webhook exist: ~40 revisions within a minute at birth, h
    only `clusterClass`, `provider`, `variables` change in a cluster file. (Hub pivot/self-hosting: done.)
 8. Hardening: Kargo admin secret, principal `jwt.allowGenerate`, AppProject `sourceRepos`, RBAC, NetworkPolicies,
    AppSet progressive sync (RollingSync by `platform.lab/env`) as a guard rail besides Kargo. OpenBao prod mode (raft
-   PVC, auto-unseal, TLS on :30820 or a gateway); fleet-sync reads whole CAPI kubeconfigs (only server + CA needed).
+   PVC, auto-unseal, TLS on :30820 or a gateway); the `fleet-sync` OpenBao policy can't constrain the body of
+   `sys/policies/acl/cluster-*` (a compromised CronJob could write a broad policy) → a controller with a fixed template.
 
 9. Team template (see docs/plans/ addendum): CI (lint/test/kubeconform), CODEOWNERS, CONTRIBUTING recipes, Renovate,
    provider extension points; **Backstage template "new Helm chart repo"** (pre-commit helm lint + conventional

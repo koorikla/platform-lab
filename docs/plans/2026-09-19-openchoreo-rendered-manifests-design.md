@@ -118,9 +118,15 @@ Replaces "hub PushSecret writes into the worker with the CAPI admin kubeconfig".
   `secret/clusters/<name>/<item>`.
 - **Worker pulls:** the worker's ESO (`ClusterSecretStore hub-openbao`) reads only its own path via
   `ExternalSecret`s; the gateway CA becomes a ConfigMap through an ESO generic target.
-- **Per-cluster identity in OpenBao:** the `cluster` chart renders a hub Job that (idempotently) enables
-  `auth/k8s-<name>` (Kubernetes auth against the worker API from `<name>-kubeconfig`), a role bound to the worker's
-  ESO ServiceAccount, and a policy limited to `secret/data/clusters/<name>/*`. A worker can read only its own secrets.
+- **Per-cluster identity in OpenBao** (as built, Phase 1b): one hub **CronJob `openbao-fleet-sync`** in the `openbao`
+  chart (not a Job per cluster) reconciles every 2 min: for each CAPI Cluster with `platform.lab/role=worker` it
+  enables `auth/k8s-<name>` (Kubernetes auth against the worker API: endpoint from `Cluster.spec.controlPlaneEndpoint`,
+  CA from `openbao/<name>-ca-public`), a role `eso` bound to the worker's ESO ServiceAccount, and a policy limited to
+  `secret/data/clusters/<name>/*`; mounts/policies of deleted clusters are removed. A worker can read only its own
+  secrets. The CronJob can't read the `fleet` namespace: the `cluster` chart grants a projector SA `get` on exactly
+  `<name>-ca` and an ExternalSecret copies only its public cert to `<name>-ca-public`. OpenBao's `fleet-sync` policy
+  pins mount type, role shape and `cluster-*` policy names (`allowed_parameters`); the policy *body* can't be pinned
+  (residual risk, see platform-charts/openbao values.yaml).
 - **Birth kit (CAAPH, per worker):** ESO + the `hub-openbao` ClusterSecretStore + the ExternalSecrets for the agent
   identity + a TokenReview ClusterRoleBinding, installed before argocd-agent. ESO therefore leaves `worker-addons`.
 - Lab simplifications (documented, prod path noted): OpenBao dev mode (in-memory, root token) and plain HTTP on the
