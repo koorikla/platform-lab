@@ -10,6 +10,7 @@ spec:
     repoURL: https://github.com/koorikla/platform-lab.git
     targetRevision: main
     path: repos/platform-config/fleet/base
+    directory: { recurse: true }   # clusterclasses/<class>.yaml; *.yaml.disabled never syncs
   destination: { name: in-cluster, namespace: fleet }
   syncPolicy:
     automated: { prune: true, selfHeal: true }
