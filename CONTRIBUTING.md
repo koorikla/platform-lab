@@ -83,7 +83,7 @@ with `repos/`.
 
 ### Add a worker cluster
 1. Create `fleet/clusters/<env>/<name>.yaml`. Copy `fleet/clusters/dev/dev1.yaml`, or enable a shipped one by
-   renaming `dev2.yaml.disabled` → `dev2.yaml`. Keys are values of the `cluster` chart (defaults and comments in
+   renaming `test1.yaml.disabled` → `test1.yaml`. Keys are values of the `cluster` chart (defaults and comments in
    `repos/platform-charts/cluster/values.yaml`):
    - `name`: unique, DNS-safe. It becomes the CAPI Cluster, agent name, cert CN and Argo destination (invariant 1).
      Never rename a running cluster; create a new one.
@@ -150,7 +150,8 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
    - Kargo project `addon-<name>` (`kargo-addon-pipelines` appset → `repos/platform-charts/kargo-pipeline`): a
      Warehouse on commits touching the chart or the addon's config, and stages `dev-canary → dev → test → prod` that
      `helm template` fleet + env values into `rendered/<stage>:addons/<name>/` (`kargo/shared/render-addon.yaml`).
-     `dev-canary` and `dev` auto-promote the new Freight; `test` and `prod` wait for a manual promotion.
+     `dev-canary` auto-promotes the new Freight, `dev` too once it has soaked 15 min in `dev-canary`; `test` and
+     `prod` wait for a manual promotion.
    - Argo CD Application `<name>-<cluster>` for every worker (`worker-addons` appset, project `platform-workers`,
      label `argocd-agent: "true"`), shipped to the cluster by the principal. It syncs `addons/<name>/` of
      `rendered/<env>` (`rendered/<env>-canary` for `ring: canary` clusters) as plain YAML. Until the first promotion
@@ -203,8 +204,9 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
 Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make kargo-password`. Kargo's git credential is a repo-scoped deploy key: run
 `hack/kargo-deploy-key.sh` after a fresh hub. Promotions change the lab: hold the lab lock.
 
-- **Worker addons** (project `addon-<name>`): Freight = a `main` commit touching the addon. `dev-canary` and `dev`
-  auto-promote; `test` and `prod` are promoted by hand (UI: pick the Freight on the stage → Promote). Each promotion
+- **Worker addons** (project `addon-<name>`): Freight = a `main` commit touching the addon. `dev-canary`
+  auto-promotes, `dev` after a soak in `dev-canary` (see canary ring); `test` and `prod` are promoted by hand
+  (UI: pick the Freight on the stage → Promote). Each promotion
   commits plain YAML to `rendered/<stage>`; the diff of that commit is the change. Prod through a PR (`pr: true`)
   needs a token that can open PRs (#6).
 - **podinfo** (project `podinfo`, `kargo/podinfo/`): Warehouse on `ghcr.io/stefanprodan/podinfo` (semver `^6`).
@@ -213,9 +215,23 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
 - **Canary ring** (worker addons): rings replace per-cluster version pins. To run a cluster ahead of its env, set
   `ring: canary` in its fleet file (label `platform.lab/ring=canary`): its Applications follow `rendered/<env>-canary`,
   which the `<env>-canary` stage renders before `<env>`. Only `dev-canary` exists today (a canary cluster needs that
-  stage; `make lint` checks). To hold the rest of dev until the canary looks good, drop `dev` from `autoPromote` in
-  `repos/platform-charts/kargo-pipeline/values.yaml` and promote `dev` by hand. End to end proof with dev2: #5. For
-  apps (until #16/#17), one cluster can still run ahead with `repos/apps/<app>/clusters/<cluster>/values.yaml`.
+  stage; `make lint` checks). In the lab `dev2` is dev's canary ring and `dev1` the rest of dev.
+  - **dev is automatic, after a soak**: the `dev` stage takes only Freight that has been in `dev-canary` for its
+    `soak` (15 min, Kargo `requiredSoakTime`, `stages[].soak` in `repos/platform-charts/kargo-pipeline/values.yaml`),
+    then auto-promotes. Without the soak dev followed the canary within seconds (no verification is configured, so
+    Freight counts as verified as soon as its promotion succeeds) and the ring showed nothing. Soak start:
+    `kubectl --context mgmt -n addon-<name> get freight <id> -o jsonpath='{.status.currentlyIn.dev-canary.since}'`;
+    `dev` picks it up within ~5 min after the soak ends (the Stage controller's resync).
+  - **Stop a bad canary** within the soak: promote the previous Freight to `dev-canary` (UI: stage `dev-canary` →
+    Freight → Promote). The bad Freight leaves the stage before it soaked, so `dev` never becomes eligible for it, and
+    promoting non-latest Freight puts an auto-promotion hold on `dev-canary` (newer Freight no longer lands there by
+    itself) until you promote the latest Freight to it again.
+  - **Skip the wait**: approve the Freight for `dev` (UI: Freight → Approve, or `kargo approve --project
+    addon-<name> --freight <id> --stage dev`); a manual approval supersedes the soak. Commits to one addon less than
+    15 min apart restart the soak (each new Freight replaces the last in `dev-canary` before it soaked), so dev
+    follows 15 min after the last of them unless you approve.
+  - **Hold dev longer** (a canary that needs a day): drop `dev` from `autoPromote` and promote it by hand.
+  For apps (until #16/#17), one cluster can still run ahead with `repos/apps/<app>/clusters/<cluster>/values.yaml`.
 - Never edit `rendered/*` by hand (the one documented exception is `make rendered-prune`). There is no pin file on
   `main` to edit for a break-glass: roll back by promoting older Freight to the stage (Kargo UI, stage → Freight).
 

@@ -1,6 +1,8 @@
 # One file = one cluster. Values for repos/platform-charts/cluster. Labels derived from here drive every ApplicationSet.
 name: dev2
 env: dev
+# dev's canary ring: worker addons come from rendered/dev-canary, which Kargo renders before rendered/dev (dev1).
+ring: canary
 provider: docker
 region: local
 clusterClass: k3s-docker

@@ -13,9 +13,16 @@ spec:
     - origin: { kind: Warehouse, name: {{ $.Values.name }} }
       sources:
         {{- if eq $i 0 }}
+        {{- if $s.soak }}{{ fail (printf "stages[0] (%s) takes Freight from the Warehouse: no upstream stage to soak in" $s.name) }}{{ end }}
         direct: true
         {{- else }}
         stages: [{{ (index $.Values.stages (sub $i 1)).name }}]
+        {{- with $s.soak }}
+        {{- if not (regexMatch "^([0-9]+(\\.[0-9]+)?(s|m|h))+$" (toString .)) }}
+        {{- fail (printf "stages[].soak of %s: %v is not a duration like 15m or 1h30m (Kargo requiredSoakTime)" $s.name .) }}
+        {{- end }}
+        requiredSoakTime: {{ . | quote }}
+        {{- end }}
         {{- end }}
   promotionTemplate:
     spec:

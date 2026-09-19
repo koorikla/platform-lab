@@ -10,7 +10,12 @@ image: ""                   # app: image repository (Warehouse subscription)
 repoURL: git@github.com:koorikla/platform-lab.git   # SSH: Kargo's credential is the repo deploy key; passed to the task
 stages:                     # order = promotion order; the first stage takes Freight straight from the Warehouse
   - { name: dev-canary, env: dev,  pr: false }   # name = stage + rendered/<name> branch; env = values overlay
-  - { name: dev,        env: dev,  pr: false }
+  - { name: dev,        env: dev,  pr: false, soak: 15m }   # soak: minimum time in the previous stage (below)
   - { name: test,       env: test, pr: false }
   - { name: prod,       env: prod, pr: false }   # pr: true needs a token that can open PRs (deploy key can't)
+# dev follows its canary ring automatically, but only with Freight that has run in dev-canary for `soak` (Kargo
+# requiredSoakTime; no verification is configured, so without a soak dev would follow within seconds and the ring
+# would show nothing). Stop a bad canary inside that window by promoting the previous Freight to dev-canary: that
+# Freight leaves the stage before it soaked, and the manual promotion holds dev-canary's auto-promotion. Skip the wait
+# by approving the Freight for dev (manual approval supersedes soak). test and prod stay manual.
 autoPromote: [dev-canary, dev]
