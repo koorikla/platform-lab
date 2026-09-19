@@ -54,6 +54,8 @@ assert_yq "$o" 'select(.kind=="Job") | .spec.template.spec.containers[0].env[] |
 grep -q backstage-portal-secret "$o" && fail "upstream literal Backstage client secret still rendered"
 # no config = no render (else the Job would wait forever on a Secret nobody creates)
 assert_fails helm template thunder $charts/thunder -n thunder -f $a/values.yaml --set backstageClientSecret=null
+helm template thunder $charts/thunder -n thunder -f $a/values.yaml --set backstageClientSecret=null 2>&1 |
+  grep -q 'backstageClientSecret is required' || fail "missing backstageClientSecret: render fails for another reason"
 
 # seed data (bootstrap scripts run by the setup Job; every script is check-then-create/update, so re-runs are safe)
 scripts=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="thunder-bootstrap") | .data' "$o")
