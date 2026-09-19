@@ -1,2 +1,3 @@
-# OpenChoreo prerequisite. Gateway API CRDs (v1.5.1 standard-install) are NOT in a chart -> see CLAUDE.md backlog.
+# OpenChoreo prerequisite. Gateway API CRDs (v1.5.1 standard) come from the gateway-api-crds addon (hub + workers);
+# kgateway-crds only carries gateway.kgateway.dev CRDs, so nothing here fights that addon's safe-upgrades VAP.
 kgateway: {}
