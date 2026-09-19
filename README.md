@@ -101,7 +101,13 @@ Kargo: log out of `gh` or skip it if that isn't yours to rotate.
 SSO: Argo CD and Kargo log in via Thunder (OIDC, public clients with PKCE, no client secret). Thunder groups map to
 roles: `admins` → admin in both; `platform-engineers` → Argo CD `role:platform-engineer` (full
 Application/ApplicationSet rights in `platform-workers` and `workloads`; in the hub's own `platform-mgmt` only sync
-and resource actions; read-only elsewhere) and Kargo admin; `developers`, `sres` → read-only in both. SSO needs
+and resource actions; read-only elsewhere) and Kargo admin; `developers` → read-only, plus sync of the `workloads`
+apps (AppProject role) and Kargo promotion of app pipelines into `dev-canary`, `dev`, `nit` (per-project Kargo role,
+stages marked `promotedBy` in the kargo-pipeline values; `sit`/`prod` and all addon pipelines stay with platform
+engineers); `sres` → read-only, plus sync and resource actions (restart) in `platform-workers` and `workloads`. The AppProjects are least privilege: this repo as the only source,
+the hub reachable only through `platform-mgmt`, worker projects limited to the namespaces and cluster-scoped kinds
+their renders use (`repos/platform-config/argocd/projects.yaml`, checked by `make test` and, read-only against the
+live hub, `hack/appproject-check.sh --live`). SSO needs
 the OpenChoreo gateway, because the issuer `http://thunder.openchoreo.localhost:8080` must resolve in the browser
 (through `make ui`'s 8080 forward) and in the hub pods (through the CoreDNS rewrite). The local `admin` accounts stay
 as break-glass, with the passwords above, and keep working when Thunder is down.

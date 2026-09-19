@@ -1,5 +1,12 @@
 # platform-mgmt : hub-local, reconciled by the hub's own application-controller (never shipped to agents)
 # platform-workers / workloads : labelled argocd-agent=true -> principal syncs them to agents (managed mode)
+# Least privilege (#20). hack/tests/test_appprojects.sh renders everything the ApplicationSets deploy and fails when a
+# project would reject it (new kind, new namespace, new repo): extend the lists here in the same PR. Before merging a
+# change to this file, `hack/appproject-check.sh --live` checks it read-only against the hub's live Applications.
+# sourceRepos: Argo CD checks it for Application sources only. Helm chart dependencies (ghcr.io/..., pulled by the
+# repo-server's `helm dependency build`) are not sources; sourceRepos would only matter for them if they needed Argo
+# repository credentials (none: every chart registry used is public). CAAPH, not Argo, pulls ghcr.io/koorikla/platform-charts.
+# `make set-repo` rewrites the URL below with every other reference; a repo split (invariant 6) adds the new repos.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -7,11 +14,27 @@ metadata:
   namespace: argocd
   annotations: { argocd.argoproj.io/sync-wave: "-1" }   # before the appsets that reference it
 spec:
-  sourceRepos: ["*"]
+  sourceRepos: [https://github.com/koorikla/platform-lab.git]
+  # the hub only; any namespace: it installs the hub's addons, CAPI clusters (fleet) and Kargo projects (addon-*)
   destinations:
     - { name: in-cluster, namespace: "*" }
+  # This project is hub admin anyway (it deploys Argo CD itself and ClusterRoleBindings), so the list is a review gate,
+  # not containment: a new cluster-scoped kind on the hub is a deliberate edit here, not a side effect of a chart bump.
   clusterResourceWhitelist:
-    - { group: "*", kind: "*" }
+    - { group: "", kind: Namespace }
+    - { group: apiextensions.k8s.io, kind: CustomResourceDefinition }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRole }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRoleBinding }
+    - { group: admissionregistration.k8s.io, kind: MutatingWebhookConfiguration }
+    - { group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration }
+    - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicy }
+    - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicyBinding }
+    - { group: external-secrets.io, kind: ClusterSecretStore }       # openbao, hub-local in-cluster store
+    - { group: kargo.akuity.io, kind: Project }                      # kargo-pipelines, kargo-addon-*
+    - { group: kargo.akuity.io, kind: ClusterPromotionTask }         # render-addon, render-app
+    - { group: openchoreo.dev, kind: ClusterDataPlane }              # cluster chart: a worker registered in OpenChoreo
+    - { group: openchoreo.dev, kind: ClusterComponentType }          # mgmt-openchoreo-types (#78)
+    - { group: openchoreo.dev, kind: ClusterProjectType }            # mgmt-openchoreo-types (#78)
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -22,11 +45,37 @@ metadata:
   labels:
     argocd-agent: "true"
 spec:
-  sourceRepos: ["*"]
+  sourceRepos: [https://github.com/koorikla/platform-lab.git]   # rendered/* branches
+  # Any worker (name "*": a new cluster file needs no edit here), only the namespaces worker addons render into.
+  # The agent's copy of this project (argocd-agent AgentSpecificAppProject) keeps the entries whose name glob matches
+  # the agent, rewritten to in-cluster. The last entry is for the hub only: "!in-cluster" denies the hub itself
+  # (isDestinationMatched returns false on a deny for any namespace), so nobody with rights in this project can deploy
+  # to the hub through it; its namespace is one already allowed so it grants nothing extra. The agent drops it (a
+  # literal "!in-cluster" never matches an agent name).
   destinations:
-    - { name: "*", namespace: "*" }
+    - { name: "*", namespace: cert-manager }            # cert-manager
+    - { name: "*", namespace: kube-system }             # gateway-api-crds (anchor), cert-manager leader election
+    - { name: "*", namespace: openchoreo-data-plane }   # kgateway
+    - { name: "!in-cluster", namespace: cert-manager }
   clusterResourceWhitelist:
-    - { group: "*", kind: "*" }
+    - { group: "", kind: Namespace }   # CreateNamespace=true on a newborn worker goes through this list
+    - { group: apiextensions.k8s.io, kind: CustomResourceDefinition }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRole }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRoleBinding }
+    - { group: admissionregistration.k8s.io, kind: MutatingWebhookConfiguration }
+    - { group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration }
+    - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicy }
+    - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicyBinding }
+  # Evaluated by argocd-server on the hub (the agent's copy drops roles in managed mode). Global roles:
+  # addons/management/argo-cd/values.yaml.
+  roles:
+    - name: sre
+      description: SREs operate the worker addons (sync, resource actions such as restart); the specs stay in git
+      groups: [sres]
+      policies:
+        - p, proj:platform-workers:sre, applications, get, platform-workers/*, allow
+        - p, proj:platform-workers:sre, applications, sync, platform-workers/*, allow
+        - p, proj:platform-workers:sre, applications, action/*, platform-workers/*, allow
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -37,8 +86,27 @@ metadata:
   labels:
     argocd-agent: "true"
 spec:
-  sourceRepos: ["*"]             # TODO: restrict to the apps repo once split out
+  sourceRepos: [https://github.com/koorikla/platform-lab.git]   # SPLIT: the apps repo
+  # Any worker, one namespace per app (namespace = repos/apps/<app> folder name): a new app is onboarded here.
+  # Hub denied as in platform-workers.
   destinations:
-    - { name: "*", namespace: "*" }
+    - { name: "*", namespace: podinfo }
+    - { name: "!in-cluster", namespace: podinfo }
   clusterResourceWhitelist:
-    - { group: "", kind: Namespace }
+    - { group: "", kind: Namespace }   # CreateNamespace=true
+  # App teams sync; everything else about their apps is platform-owned (the ApplicationSet). Evaluated by argocd-server
+  # on the hub (the agent's copy drops roles in managed mode). Global roles: addons/management/argo-cd/values.yaml.
+  roles:
+    - name: developer
+      description: developers sync their apps on any worker
+      groups: [developers]
+      policies:
+        - p, proj:workloads:developer, applications, get, workloads/*, allow
+        - p, proj:workloads:developer, applications, sync, workloads/*, allow
+    - name: sre
+      description: SREs operate the apps (sync, resource actions such as restart); the specs stay in git
+      groups: [sres]
+      policies:
+        - p, proj:workloads:sre, applications, get, workloads/*, allow
+        - p, proj:workloads:sre, applications, sync, workloads/*, allow
+        - p, proj:workloads:sre, applications, action/*, workloads/*, allow

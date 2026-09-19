@@ -12,6 +12,7 @@ kargo:
       clientID: kargo          # api.host is the client id only with the bundled Dex
       admins:
         claims: { groups: [admins, platform-engineers] }
-      # read-only on all Kargo resources (no Secrets); promotion rights per project come with #20
+      # read-only on all Kargo resources (no Secrets); developers' promotion rights are per project (kargo-pipeline
+      # values: `promoters` + `stages[].promotedBy`)
       viewers:
         claims: { groups: [developers, sres] }
