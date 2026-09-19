@@ -1,1 +1,4 @@
 # Fleet-wide values for cert-manager
+cert-manager:
+  image:
+    tag: v0.0.0-verification-demo   # temporary: deliberately broken controller image (#26 bad-change demo); reverted next
