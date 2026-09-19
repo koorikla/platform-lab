@@ -74,10 +74,18 @@ make doctor    # free Docker disk (>= 25 GB), memory, tool versions, inotify, bo
 make up        # k3d bootstrap -> CAPI creates hub 'mgmt' -> clusterctl move (hub manages itself) -> Argo CD
                # -> rendered/* branches + Kargo deploy key. Re-run after a failure: resumes at the detected stage
 make status
-make ui        # Argo CD :8080 (admin / make argocd-password), Kargo :8081 (admin / make kargo-password)
+make ui        # Argo CD :8090 (admin / make argocd-password), Kargo :8091 (admin / make kargo-password),
+               # OpenChoreo http://openchoreo.localhost:8080 (once enabled)
 make kubeconfig CLUSTER=dev1 > dev1.kubeconfig
 make down      # workers via CAPI (waits for their containers), then the hub's containers; FORCE=1 if the hub is gone
 ```
+
+`make ui` port-forwards, because the CAPD hub publishes no usable host ports (its LB container maps only 6443 and
+8404, hard-coded in CAPD). OpenChoreo hosts (`openchoreo.localhost`, `api.`, `thunder.`…`.openchoreo.localhost`) all go
+to the control-plane gateway on :8080, which routes by Host. Browsers resolve `*.localhost` to loopback (Chrome,
+Firefox); for others add `127.0.0.1 openchoreo.localhost api.openchoreo.localhost thunder.openchoreo.localhost` to
+`/etc/hosts`. Pods on the hub use the same URLs: CoreDNS rewrites `*.openchoreo.localhost` to
+`gateway-default.openchoreo-control-plane.svc` (`fleet/base/hub-coredns.yaml`), so issuer URLs match on both sides.
 
 Linux hosts running several CAPD clusters usually need
 `sysctl fs.inotify.max_user_watches=1048576 fs.inotify.max_user_instances=8192`.

@@ -54,7 +54,7 @@ ships them → worker reconciles. Worker addon content: a `main` commit touching
 
 ## Hub access
 Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of container `mgmt-lb`>; bootstrap re-points it).
-UIs: `make ui` (port-forwards; CAPD nodes publish no host ports). Hub `Cluster` carries `Delete=false,Prune=false`.
+UIs: `make ui` (port-forwards: OpenChoreo `*.openchoreo.localhost:8080`, Argo CD :8090, Kargo :8091). Hub `Cluster` carries `Delete=false,Prune=false`.
 `make up` is resumable: `bootstrap/bootstrap.sh stage` prints the detected stage (fresh / bootstrap / hub-requested /
 pivot-partial / pivoted / argo / orphan) and the steps left; a failed API read aborts rather than counting as absent.
 `make down` never runs `kind delete`: Argo scaled to 0, workers deleted via CAPI and awaited, then containers labelled
@@ -80,7 +80,9 @@ upgrade) until ESO CRDs/webhook exist: ~40 revisions within a minute at birth, h
 
 ## Known lab constraints
 - All CAPD nodes share the Docker VM disk: >90% used → DiskPressure evictions everywhere. Keep ≥25 GB free.
-- CAPD nodes publish no host ports: `make ui` port-forwards; hub API via `mgmt-lb`'s published 6443 (context `mgmt`).
+- CAPD nodes publish no host ports and the LB maps only 6443/8404 (hard-coded in CAPD, no API field): `make ui`
+  port-forwards; hub API via `mgmt-lb`'s published 6443 (context `mgmt`). Hub pods resolve `*.openchoreo.localhost` to
+  `openchoreo-control-plane/gateway-default:8080` (CoreDNS rewrite, `fleet/base/hub-coredns.yaml`): same URLs as browsers.
 - k3s is downloaded at node boot (get.k3s.io) → workers need internet.
 - CAPD renders the hub LB template (`fleet/base/hub-lb.yaml`) only on control-plane machine create/delete: after
   editing it on a running hub run `hack/hub-lb-reload.sh`.

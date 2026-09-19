@@ -193,7 +193,7 @@ step_post() {
   fi
   echo
   echo "Hub     : kubectl --context $HUB ...   (self-hosted: kubectl --context $HUB -n fleet get cluster $HUB)"
-  echo "UIs     : make ui   -> Argo CD http://localhost:8080 (admin / \$(make argocd-password)), Kargo http://localhost:8081 (admin / \$(make kargo-password))"
+  echo "UIs     : make ui   -> Argo CD http://localhost:8090 (admin / \$(make argocd-password)), Kargo http://localhost:8091 (admin / \$(make kargo-password)), OpenChoreo http://openchoreo.localhost:8080"
   echo "Watch   : kubectl --context $HUB get applications -n argocd -w"
   echo "Check   : make doctor"
   local n; for n in ${notes[@]+"${notes[@]}"}; do echo "TODO    : $n"; done
