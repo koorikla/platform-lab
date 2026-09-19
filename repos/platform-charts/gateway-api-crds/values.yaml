@@ -1,0 +1,14 @@
+# Gateway API CRDs only, no controller: kgateway and OpenChoreo bring their own and need v1.5.1 standard.
+# Envoy's chart is the maintained Helm packaging of upstream standard-install.yaml (every CRD .spec byte-identical,
+# docs/plans/2026-09-19-phase2-4-research.md §F) and ships the CRDs under templates/, not crds/: Argo CD and Kargo's
+# helm-template therefore apply upgrades (crds/ would be install-only for helm).
+# httproutes is ~244 KB: the appsets' ServerSideApply=true is required (last-applied annotation limit is 256 KiB).
+# The chart has no knob for CRD annotations, so argocd.argoproj.io/sync-options: Delete=false cannot be set here:
+# deleting or disabling this addon deletes the CRDs and with them every Gateway/HTTPRoute on that cluster.
+gateway-crds-helm:
+  crds:
+    gatewayAPI:
+      enabled: true
+      channel: standard     # chart default is experimental
+    envoyGateway:
+      enabled: false        # gateway.envoyproxy.io CRDs: we do not run Envoy Gateway

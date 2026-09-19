@@ -1,0 +1,7 @@
+addon:
+  name: gateway-api-crds
+  chart: gateway-api-crds
+  # cluster-scoped objects only (CRDs + ValidatingAdmissionPolicy): kube-system always exists, so no empty
+  # namespace gets created just to anchor the Application
+  namespace: kube-system
+  releaseName: gateway-api-crds
