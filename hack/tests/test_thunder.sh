@@ -45,7 +45,9 @@ got=$(grep -oE '^ *ensure_group +"[^"]+"' <<<"$users" | awk -F'"' '{print $2}' |
 # well-known secrets, service_mcp_client even maps to OpenChoreo admin - add them back with the feature that needs them)
 payloads=$tmp/payloads.json
 for k in $(yq 'keys | .[]' <<<"$scripts"); do
-  yq ".[\"$k\"]" <<<"$scripts" | awk "/APP_PAYLOAD='/ {f=1; sub(/.*APP_PAYLOAD='/, \"\")} f && /^ *}'\$/ {print \"}\"; f=0; next} f" |
+  yq ".[\"$k\"]" <<<"$scripts" >"$tmp/$k"
+  if command -v shellcheck >/dev/null; then shellcheck -s bash "$tmp/$k" || fail "shellcheck $k"; fi
+  awk "/APP_PAYLOAD='/ {f=1; sub(/.*APP_PAYLOAD='/, \"\")} f && /^ *}'\$/ {print \"}\"; f=0; next} f" "$tmp/$k" |
     jq -c . >>"$payloads" || fail "$k: APP_PAYLOAD is not valid JSON"
 done
 app() { jq -c --arg c "$1" '.inbound_auth_config[].config | select(.client_id == $c)' "$payloads"; }
