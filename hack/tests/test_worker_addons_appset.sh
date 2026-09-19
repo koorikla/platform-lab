@@ -97,7 +97,10 @@ for f in $config/fleet/clusters/*/*.yaml; do
   branch "$o" "$want"
   assert_yq "$o" '.spec.destination.name' "$(yq .name "$f")"
 done
-# canary ring of dev (#5): dev2 runs ahead on rendered/dev-canary, dev1 (the rest of dev) follows rendered/dev
-[ -f $config/fleet/clusters/dev/dev2.yaml ] || fail "dev2 must be enabled as dev's canary ring (#5)"
-o=$(fleet_app $config/fleet/clusters/dev/dev2.yaml); branch "$o" dev-canary
+# canary ring (#5): ring=canary clusters run ahead on rendered/<env>-canary, the rest of the env follows rendered/<env>.
+# The ring may be empty (dev2 can be disabled, #83); the ring -> branch mapping is covered by the fleet-file loop above.
 o=$(fleet_app $config/fleet/clusters/dev/dev1.yaml); branch "$o" dev
+for f in $config/fleet/clusters/*/*.yaml; do
+  [ "$(yq '.ring // "stable"' "$f")" = canary ] || continue
+  o=$(fleet_app "$f"); branch "$o" "$(yq .env "$f")-canary"
+done
