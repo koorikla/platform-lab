@@ -126,10 +126,18 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
         <name>-agent-client-tls`: otherwise the hub keeps renewing a valid agent client cert, and cert-manager leaves
         the Secret behind.
      5. `-n argocd delete role,rolebinding eso-in-cluster-<name>` (the in-cluster store's read on that cert),
-        `-n fleet delete role,rolebinding <name>-ca-projector`, `-n openbao delete externalsecret <name>-ca-public`,
-        and, if `openchoreo.enabled`, `delete dataplane <name>` in the OpenChoreo namespace.
-  4. Check nothing is left: `kubectl --context mgmt get certificate,externalsecret,pushsecret,role,rolebinding -A |
-     grep <name>`.
+        `-n fleet delete role,rolebinding <name>-ca-projector`, `-n openbao delete externalsecret <name>-ca-public`.
+     6. OpenChoreo registration (only if it was rendered, see [Conventions](#conventions)):
+        `-n default delete environment <name>`, then `delete clusterdataplane <name>` (otherwise the gateway keeps
+        accepting that planeID);
+        `-n openchoreo-control-plane delete pushsecret <name>-openchoreo-agent <name>-openchoreo-gateway-ca`
+        (`deletionPolicy: Delete` removes `secret/clusters/<name>/openchoreo-*` from OpenBao);
+        `-n openchoreo-control-plane delete certificate <name>-openchoreo-agent-tls <name>-openchoreo-agent-ca`, then
+        `-n openchoreo-control-plane delete issuer <name>-openchoreo-agent-ca <name>-openchoreo-agent-selfsigned`, then
+        `-n openchoreo-control-plane delete secret <name>-openchoreo-agent-tls <name>-openchoreo-agent-ca`
+        (cert-manager leaves the Secrets behind; the CA would keep issuing valid agent certs).
+  4. Check nothing is left: `kubectl --context mgmt get
+     certificate,issuer,externalsecret,pushsecret,role,rolebinding,clusterdataplane,environment -A | grep <name>`.
 - To rebuild a worker from scratch, delete `Cluster/<name>` while its file stays enabled. Argo CD re-creates the
   object and CAPI builds a fresh cluster (a "rebirth").
 
@@ -184,6 +192,10 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
    then delete them by hand: consumers first, CRDs last and only when no custom resources of them are left. Never
    remove `capi-operator` or `capi-providers` (CAPI CRDs: every `Cluster` would go and the workers would be torn down),
    and never remove `cert-manager` or `external-secrets` while anything uses them.
+   `openchoreo-control-plane` is also the switch for every worker's OpenChoreo registration (the one capability
+   switch, see [Conventions](#conventions)). Disabling the addon alone changes nothing there: its CRDs stay, so cluster
+   apps keep rendering the registrations; once the CRDs are removed they stop rendering and the objects stay unmanaged
+   (`prune: false`), so remove them first (worker removal, step 3.6, for each worker).
 
 ### Disabling: rules for every ApplicationSet
 - Each appset either **preserves** (disabling deletes only the Application: `mgmt-addons`, `fleet-clusters`,
@@ -369,6 +381,12 @@ need internet egress.
 - **Minimal YAML; comments explain why**, not what the next line says.
 - Labels use the `platform.lab/` prefix. Namespaces: `argocd`, `fleet`, `kargo`.
 - **Enable/disable by file extension** (`*.yaml` ⇄ `*.yaml.disabled`), never by commenting out blocks.
+  One implicit switch follows from it: while `addons/management/openchoreo-control-plane/addon.yaml` is enabled
+  (the hub serves the OpenChoreo CRDs), every worker's `cluster-<name>` app also renders its OpenChoreo registration
+  (`cluster` chart `templates/openchoreo.yaml`, gated on `.Capabilities.APIVersions`; Argo re-renders within ~120s of
+  the CRDs appearing). Disabling the addon leaves the registrations in place (its CRDs stay; cluster apps use
+  `prune: false`); removal: "remove a worker", step 3.6. Offline renders need
+  `--api-versions openchoreo.dev/v1alpha1/ClusterDataPlane`.
 - **Chart versions**: bump `version` in `Chart.yaml` of every chart you change: patch for fixes and dependency bumps,
   minor for new values or templates, major when existing values change meaning. Upstream dependencies are pinned
   exactly and `Chart.lock` is committed. CI will enforce the bump (#1).

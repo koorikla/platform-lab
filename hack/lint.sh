@@ -70,6 +70,9 @@ for f in $config/fleet/clusters/*/*.yaml*; do
   s="$(yq '.env' "$f")-canary"
   [[ $stages == *" $s "* ]] || { echo "FAIL: $f: ring canary, but kargo-pipeline has no stage $s"; exit 1; }
 done
-# one render per cluster file, enabled or not
-for f in $config/fleet/clusters/*/*.yaml*; do render cluster $charts/cluster -f "$f"; done
+# one render per cluster file, enabled or not; again as on a hub serving OpenChoreo (templates/openchoreo.yaml)
+for f in $config/fleet/clusters/*/*.yaml*; do
+  render cluster $charts/cluster -f "$f"
+  render cluster $charts/cluster -f "$f" --api-versions openchoreo.dev/v1alpha1/ClusterDataPlane
+done
 echo "lint: OK"

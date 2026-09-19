@@ -33,8 +33,13 @@ openbao:                       # platform-charts/openbao on the hub
   caProjector: fleet-ca-projector   # SA + SecretStore that project <name>-ca's public cert for fleet-sync
   caStore: fleet-ca
 
+# OpenChoreo registration (templates/openchoreo.yaml): rendered for workers whenever the hub serves the OpenChoreo CRDs,
+# i.e. while addons/management/openchoreo-control-plane is enabled. Names must match that umbrella chart.
 openchoreo:
-  enabled: false               # Phase 2
-  namespace: default
-  agentCA: ""                  # TODO: replace with a declarative trust flow (CLAUDE.md -> OpenChoreo trust)
-  appsHost: ""
+  orgNamespace: default        # Environments: the namespace the umbrella labels openchoreo.dev/control-plane=true
+  namespace: openchoreo-control-plane   # agent CA + client cert, next to the cluster-gateway that trusts them
+  gatewayCASecret: cluster-gateway-ca   # the cluster-gateway's server CA (upstream chart); only ca.crt is pushed
+  appsDomain: apps.lab.localhost        # external endpoints: <env>-<namespace>.<name>.<appsDomain> (Phase 3)
+  dataPlaneGateway:            # openchoreo-data-plane chart on the worker: Gateway gateway-default, listener http :80
+    name: gateway-default
+    namespace: openchoreo-data-plane

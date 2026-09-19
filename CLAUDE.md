@@ -45,7 +45,9 @@ variable `managementCluster=true`: docker.sock in nodes + LB frontends :30443, :
 (then `post`: `hack/init-rendered-branches.sh`, and `hack/kargo-deploy-key.sh` if gh is logged in and the secret is missing) →
 `platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, OpenBao, principal, capi-operator,
 capi-providers, kargo + argo-rollouts, argo-cd itself) + `fleet-base` (ClusterClass, HelmChartProxies) + `fleet-clusters` appset →
-`cluster` chart per file (agent client cert → hub PushSecret → OpenBao `secret/clusters/<name>/argocd-agent`) → CAPI
+`cluster` chart per file (agent client cert → hub PushSecret → OpenBao `secret/clusters/<name>/argocd-agent`; with the
+OpenChoreo CRDs on the hub also `ClusterDataPlane`/`Environment <name>` + per-cluster OC agent CA, cert and gateway CA →
+`secret/clusters/<name>/openchoreo-{agent,gateway-ca}`) → CAPI
 builds k3s cluster → `openbao-fleet-sync` CronJob adds `auth/k8s-<name>` → CAAPH installs the birth kit (one release
 `worker-birth-kit`: argo-cd controller/repo/redis, argocd-agent, ESO, store `hub-openbao` + agent ExternalSecrets) →
 worker ESO pulls the cert via `mgmt-lb:30820` → agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) →

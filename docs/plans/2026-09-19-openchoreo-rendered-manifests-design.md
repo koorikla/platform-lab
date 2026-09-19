@@ -227,3 +227,19 @@ ReleaseBindings are stamped per cluster by a hub appset (#17). What #17 consumes
 - **Promotion gate:** the #26 verification (hub Applications of an addon) exists only for `kind: addon`. App
   pipelines have nothing deployed to verify until #17, so their `dev` follows `dev-canary` after a soak
   (`appSoak`, 15 min). App verification (Components/ReleaseBindings Ready on the hub) belongs to #17/#18.
+
+## Addendum: clusters → OpenChoreo as built (#13, 2026-09-19)
+Supersedes "Clusters → OpenChoreo" above; details in the plan, Task 2.7 "As built (#13)".
+- No `openchoreo.enabled`: the `cluster` chart renders the registration for workers when the hub serves
+  `openchoreo.dev/v1alpha1/ClusterDataPlane` (helm `.Capabilities` from Argo), i.e. while the control-plane addon is on.
+  The API versions are part of Argo's manifest cache key: once the CRDs appear, the objects render within
+  ~120s (`timeout.reconciliation`), no commit or hard refresh needed. Disabling the addon leaves them (prune: false).
+- Per-cluster agent CA + client cert in `openchoreo-control-plane`; `ClusterDataPlane.clientCA.secretKeyRef` → that CA,
+  no `secretStoreRef`; `Environment <name>` in `default`.
+- Pull model, no hub → worker writes: client cert (tls.crt, tls.key) → `secret/clusters/<name>/openchoreo-agent`, the gateway's server CA
+  (`ca.crt` only) → `secret/clusters/<name>/openchoreo-gateway-ca`; the worker's ESO pulls them (#14). The CA is not
+  exported into git.
+- Client cert `duration: 8760h`, `renewBefore: 720h`: upstream cluster-agent loads it once at startup
+  (`internal/cluster-agent/agent.go:83`) and never reloads, so #14 must restart the agent when the pulled Secret
+  changes (reloader/checksum annotation). The agent's own CA is not pushed: the worker verifies the gateway with
+  `openchoreo-gateway-ca` only.
