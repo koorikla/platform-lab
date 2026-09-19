@@ -7,6 +7,8 @@ version: 0.1.0
 # CAAPH release per worker (HelmChartProxy worker-birth-kit, valuesTemplate `clusterName: {{ .Cluster.metadata.name }}`):
 # the agent needs argo-cd's redis and the secrets ESO pulls from the hub; ESO needs its CRDs before the store and
 # ExternalSecrets in templates/ can even be mapped (crds/ + external-secrets.webhook in values.yaml explain how).
+# Why not post-install hooks for the store/ExternalSecrets instead: Helm deletes and recreates hook objects on every
+# upgrade, and deleting an ExternalSecret makes ESO delete the Secret it owns -> the agent loses its client cert.
 # Everything after birth comes from the hub through the agent (worker-addons ApplicationSet).
 dependencies:
   - name: argo-cd

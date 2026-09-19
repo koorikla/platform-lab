@@ -15,9 +15,18 @@ o=$(render $release $kit -n argocd --set clusterName=dev1)
 [ ! -e $config/addons/workers/external-secrets ] || fail "ESO is birth kit now: remove addons/workers/external-secrets"
 
 # --- clusterName: required, a DNS-1123 label (auth mount k8s-<name>, OpenBao path, agent identity)
-assert_fails helm template $release $kit -n argocd
-assert_fails helm template $release $kit -n argocd --set clusterName=Dev_1
-assert_fails helm template $release $kit -n argocd --set clusterName="$(printf 'a%.0s' {1..64})"
+# fails_with <message> <cmd...>: the command must fail with that message (not just any render error)
+fails_with() {
+  local out
+  if out=$("${@:2}" 2>&1); then fail "line ${BASH_LINENO[0]}: expected failure: ${*:2}"; fi
+  grep -qF -- "$1" <<<"$out" || fail "line ${BASH_LINENO[0]}: want error '$1', got: $out"
+}
+fails_with 'clusterName is required' helm template $release $kit -n argocd
+fails_with 'clusterName "Dev_1" is not a DNS-1123 label' helm template $release $kit -n argocd --set clusterName=Dev_1
+long=$(printf 'a%.0s' {1..64})
+fails_with "clusterName \"$long\" is not a DNS-1123 label" helm template $release $kit -n argocd --set clusterName="$long"
+fails_with 'external-secrets.namespaceOverride is required' \
+  helm template $release $kit -n argocd --set clusterName=dev1 --set external-secrets.namespaceOverride=
 
 # --- OpenBao pull wiring (store + TokenReview binding + agent identity)
 css='select(.kind=="ClusterSecretStore")'
@@ -94,10 +103,13 @@ for n in clustersecretstores externalsecrets; do
     fail "crds/: $n differs from external-secrets $(dep $kit external-secrets): run hack/birth-kit-crds.sh"
 done
 
-# --- Helm stores each release in one Secret (<1 MiB, base64 of gzip): chart files (crds/) + rendered manifest.
-# Rough gzip estimate (0.1.0: ~376 KB; the real release Secret on k3d held 522 KB after base64).
-sz=$(( $(base64 < "$crds" | gzip -9 | wc -c) + $(gzip -9 < "$o" | wc -c) ))
-[ "$sz" -lt 700000 ] || fail "release payload ~${sz}B gzip: too close to the 1 MiB Secret limit"
+# --- Helm stores each release in one Secret (<1 MiB): base64(gzip(release JSON)) = chart templates + files (crds/),
+# values and the rendered manifest (subcharts aren't stored). Same encoding as Helm's storage driver; 0.1.0: 522 KB
+# (the release Secret on a k3d test cluster held the same).
+helm install $release $kit -n argocd --set clusterName=dev1 --dry-run=client -o json > "$tmp/release.json" ||
+  fail "helm install --dry-run=client"
+sz=$(gzip -9 < "$tmp/release.json" | base64 | wc -c)
+[ "$sz" -lt 900000 ] || fail "release Secret would be ${sz}B: too close to the 1 MiB limit"
 
 # --- equivalence with the 4 HelmChartProxies this chart replaces (#2; this section leaves with them).
 # Render each HCP as CAAPH does, normalise release-bound noise, compare object by object. Intentional differences:

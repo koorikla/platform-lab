@@ -15,5 +15,9 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- end }}
 
 {{/* ESO's namespace and ServiceAccount, from the subchart's values (one source for the store and the binding) */}}
-{{- define "birth-kit.esoNamespace" -}}{{ (index .Values "external-secrets").namespaceOverride }}{{- end }}
-{{- define "birth-kit.esoServiceAccount" -}}{{ (index .Values "external-secrets").fullnameOverride }}{{- end }}
+{{- define "birth-kit.esoNamespace" -}}
+{{- required "external-secrets.namespaceOverride is required (OpenBao role eso binds external-secrets/external-secrets)" (index .Values "external-secrets").namespaceOverride -}}
+{{- end }}
+{{- define "birth-kit.esoServiceAccount" -}}
+{{- required "external-secrets.fullnameOverride is required (it names ESO's ServiceAccount)" (index .Values "external-secrets").fullnameOverride -}}
+{{- end }}
