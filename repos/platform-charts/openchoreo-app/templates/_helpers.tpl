@@ -4,7 +4,17 @@
 {{- range rest . }}{{ if not (index $v .) }}{{ fail (printf "openchoreo-app (mode %s): %s is required" $v.mode .) }}{{ end }}{{ end -}}
 {{- end }}
 
-{{- define "oc.stage" -}}{{ .Values.stage | default .Values.env }}{{- end }}
+{{/* include "oc.dns1123" (list $ "key" ...): each set value must be a DNS-1123 label (it ends up in object names),
+     so a bad value fails the render instead of the apply */}}
+{{- define "oc.dns1123" -}}
+{{- $v := (first .).Values -}}
+{{- range rest . }}
+{{- $x := index $v . | toString }}
+{{- if and $x (or (gt (len $x) 63) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $x))) }}
+{{- fail (printf "openchoreo-app: %s %q is not a DNS-1123 label" . $x) }}
+{{- end }}
+{{- end -}}
+{{- end }}
 
 {{/* Frozen spec (JSON) of the ClusterComponentType named by .Values.componentType ("<workloadType>/<name>"),
      read from the same files/types the types mode applies. */}}
@@ -32,7 +42,6 @@
 {{/* ComponentRelease spec (JSON), shaped like upstream componentrelease.BuildSpec (internal/componentrelease/builder.go):
      componentProfile only when there are parameters, traits unset (none supported yet). */}}
 {{- define "oc.releaseSpec" -}}
-{{- include "oc.required" (list . "name" "project" "env") -}}
 {{- if not (and .Values.image.repository .Values.image.tag) }}{{ fail (printf "openchoreo-app (mode %s): image.repository and image.tag are required" .Values.mode) }}{{ end -}}
 {{- if .Values.traits }}{{ fail "openchoreo-app: traits are not supported yet (vendor the ClusterTrait specs to freeze them first)" }}{{ end -}}
 {{- if hasKey .Values.container "image" }}{{ fail "openchoreo-app: set image.repository/image.tag, not container.image" }}{{ end -}}
@@ -48,17 +57,21 @@
 {{- toJson $spec -}}
 {{- end }}
 
-{{/* <name>-<stage>-<tag>-<hash8>: stage keeps env branches apart, tag is for humans, the hash covers the whole spec
+{{/* <name>-<stage>-<tag>-<hash8>: stage keeps branches apart, tag is for humans, the hash covers the whole spec
      (toJson sorts map keys, so it is stable). Unlike upstream's ComputeReleaseHash it includes owner: owner is
-     immutable too, so a changed project must mean a new object. */}}
+     immutable too, so a changed project must mean a new object. Only mode=release computes it; bindings are handed
+     the rendered name. */}}
 {{- define "oc.releaseName" -}}
 {{- $tag := regexReplaceAll "[^a-z0-9-]+" (.Values.image.tag | toString | lower) "-" | trimAll "-" -}}
-{{- printf "%s-%s-%s-%s" .Values.name (include "oc.stage" .) $tag (include "oc.releaseSpec" . | sha256sum | trunc 8) -}}
+{{- printf "%s-%s-%s-%s" .Values.name .Values.stage $tag (include "oc.releaseSpec" . | sha256sum | trunc 8) -}}
 {{- end }}
 
+{{/* upstream labels (API-cut releases carry them) + ours */}}
 {{- define "oc.labels" -}}
+openchoreo.dev/project: {{ .Values.project }}
+openchoreo.dev/component: {{ .Values.name }}
 platform.lab/app: {{ .Values.name }}
-{{- with (include "oc.stage" .) }}
+{{- with .Values.stage }}
 platform.lab/stage: {{ . }}
 {{- end }}
 {{- end }}

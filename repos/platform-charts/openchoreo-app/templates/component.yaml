@@ -1,5 +1,6 @@
 {{- if eq .Values.mode "component" }}
 {{- include "oc.required" (list . "name" "project") }}
+{{- include "oc.dns1123" (list . "name" "project") }}
 {{- $_ := include "oc.componentTypeSpec" . }}{{/* fail early on a type the hub doesn't serve */}}
 {{- if .Values.createProject }}
 apiVersion: openchoreo.dev/v1alpha1

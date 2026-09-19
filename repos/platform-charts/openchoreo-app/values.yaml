@@ -2,7 +2,10 @@
 #   types     hub addon: ClusterComponentTypes + ClusterProjectType from files/types (vendored upstream samples)
 #   component hub, from main: Component (autoDeploy off: Kargo cuts releases) [+ Project if createProject]
 #   release   Kargo, per stage: ComponentRelease <name>-<stage>-<tag>-<hash8> [+ Workload on the workload stage]
-#   binding   Kargo / per-cluster stamper: ReleaseBinding <name>-<environment> -> that release
+#   binding   hub appset, from main, one per (rendered release x worker cluster): ReleaseBinding <name>-<environment>.
+#             Identity only; everything env-specific is in the promoted release. The appset reads each
+#             rendered/<branch>/apps/*/release/ ComponentRelease and passes: name=spec.owner.componentName,
+#             project=spec.owner.projectName, releaseName=metadata.name, environment=<cluster>.
 mode: component
 namespace: default
 
@@ -22,15 +25,11 @@ createProject: false              # the shared `lab` Project comes from the open
 deploymentPipeline: default
 projectType: default              # ClusterProjectType
 
-# --- release / binding modes
-env: ""                           # values env (dev|test|prod), set by Kargo
-stage: ""                         # Kargo stage/branch (defaults to env): names the release, so dev-canary and dev
-                                  # branches never own the same object
+# --- release mode
+stage: ""                         # Kargo stage = rendered branch (required): names the release, so dev-canary (which
+                                  # renders env=dev too) and dev never own the same object
 workloadStage: dev                # the one stage that also renders the Workload (a Component may have exactly one)
 
-# --- binding mode
-environment: __CLUSTER__          # OpenChoreo Environment (= worker cluster name); the placeholder is deliberately
-                                  # not a valid object name, so an unstamped binding can never be applied
-releaseName: ""                   # bind this release instead of computing it (stamper already knows it)
-environmentConfigs: {}            # -> spec.componentTypeEnvironmentConfigs (schema: the type's environmentConfigs)
-workloadOverrides: {}             # -> spec.workloadOverrides ({container: {env, files}})
+# --- binding mode (all required, no defaults: a binding never recomputes or guesses its release)
+environment: ""                   # OpenChoreo Environment = worker cluster name
+releaseName: ""                   # the Kargo-rendered ComponentRelease to bind

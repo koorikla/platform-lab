@@ -1,4 +1,6 @@
 {{- if eq .Values.mode "release" }}
+{{- include "oc.required" (list . "name" "project" "stage") }}
+{{- include "oc.dns1123" (list . "name" "project" "stage") }}
 {{- $spec := include "oc.releaseSpec" . | fromJson }}
 # Immutable (CEL self == oldSelf on every spec field): a new tag or config is a new name, never an update.
 apiVersion: openchoreo.dev/v1alpha1
@@ -8,9 +10,10 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels: {{- include "oc.labels" . | nindent 4 }}
 spec: {{- toYaml $spec | nindent 2 }}
-{{- if eq (include "oc.stage" .) .Values.workloadStage }}
+{{- if eq .Values.stage .Values.workloadStage }}
 ---
 # The Component's "latest" Workload (UI, autoDeploy). Exactly one per Component, so only one stage renders it.
+# spec.owner is immutable and the name has no project: moving the app to another project needs a delete/Replace.
 apiVersion: openchoreo.dev/v1alpha1
 kind: Workload
 metadata:

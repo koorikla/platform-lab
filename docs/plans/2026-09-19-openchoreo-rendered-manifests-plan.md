@@ -872,12 +872,19 @@ assert_yq "$t" '[select(.kind=="ClusterComponentType")] | length' 4
 
 **Step 4:** PASS; `make lint`. Commit.
 
-**As built (#15):** `env` is the values env (Kargo `vars.env`), so the Workload container fields live under
-`container:` (`container.env: [{key, value}]`, `command`, `args`, `files`); `stage` (default `env`) names the release
-and must be the Kargo branch (`dev-canary` renders `env=dev` too); only `workloadStage` (dev) renders the Workload.
-Binding: `ReleaseBinding <app>-<environment>`, `environment` default `__CLUSTER__` (unappliable on purpose),
-`releaseName` override for the per-cluster stamper, `environmentConfigs` → `componentTypeEnvironmentConfigs`.
-`traits` fail (not supported yet). Schema check: `hack/tests/test_openchoreo_app_schema.sh` (kubeconform, real CRDs).
+**As built (#15, after review):** `env` only selects the Kargo values files; the chart itself uses `stage` (required,
+the Kargo branch: `dev-canary` renders `env=dev` too) to name the release, and only `workloadStage` (dev) renders the
+Workload. Workload container fields live under `container:` (`container.env: [{key, value}]`, `command`, `args`,
+`files`). `name`/`project`/`stage`/`environment` must be DNS-1123 labels. Releases and Workloads carry
+`openchoreo.dev/{project,component}`. `traits` fail (not supported yet).
+**Binding contract (coordinator, #17):** Kargo does **not** render bindings. A hub ApplicationSet (matrix of worker
+clusters x a files generator on `rendered/<branch>/apps/*/release/*componentrelease*.yaml`, branches incl.
+`dev-canary`) renders this chart from main with `mode=binding` and exactly these parameters: `name` =
+`spec.owner.componentName`, `project` = `spec.owner.projectName`, `releaseName` = `metadata.name`, `environment` =
+cluster name. All four are required; the release name is never recomputed. The binding is identity only (no
+`componentTypeEnvironmentConfigs` / `workloadOverrides`): env-specific config is frozen in the promoted release.
+Schema check: `hack/tests/test_openchoreo_app_schema.sh` (kubeconform against the real CRDs; `REQUIRE_SCHEMA=1` in CI).
+A golden release name in `test_openchoreo_app.sh` catches hash drift (tests use Helm 4, Kargo embeds Helm 3).
 
 ### Task 3.2: App definition for podinfo
 
