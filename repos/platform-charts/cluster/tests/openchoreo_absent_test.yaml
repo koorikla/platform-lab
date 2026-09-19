@@ -1,0 +1,10 @@
+suite: OpenChoreo registration follows the hub serving the OpenChoreo CRDs
+templates:
+  - openchoreo.yaml
+values:
+  - values/dev1.yaml
+tests:
+  # cluster apps must keep syncing on a hub without OpenChoreo (addon disabled)
+  - it: renders nothing OpenChoreo-related when the hub doesn't serve the CRDs
+    asserts:
+      - hasDocuments: { count: 0 }
