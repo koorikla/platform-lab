@@ -1,5 +1,6 @@
 # HAProxy config for the hub's CAPD load balancer (container `<hub>-lb`): CAPD's default template plus TCP frontends
-# for hub NodePorts that workers dial: argocd-agent principal (30443) and OpenBao (30820, plain HTTP in lab mode).
+# for hub NodePorts that workers dial: argocd-agent principal (30443), OpenBao (30820, plain HTTP in lab mode) and
+# the OpenChoreo cluster-gateway (30843, mTLS websocket; TCP passthrough, the gateway terminates TLS).
 # Backends = control-plane nodes. Labelled for `clusterctl move`, because the hub's DockerCluster references it.
 # CAPD renders this template ONLY when a control-plane machine is created or deleted (DockerMachine
 # status.loadBalancerConfigured), not when the ConfigMap changes. A fresh `make up` picks edits up; on a running hub
@@ -68,4 +69,13 @@ data:
     backend openbao
       {{range $server, $backend := .BackendServers}}
       server {{ $server }} {{ JoinHostPort $backend.Address "30820" }} check resolvers docker resolve-prefer ipv4
+      {{- end}}
+
+    frontend openchoreo-cluster-gateway
+      bind *:30843
+      default_backend openchoreo-cluster-gateway
+
+    backend openchoreo-cluster-gateway
+      {{range $server, $backend := .BackendServers}}
+      server {{ $server }} {{ JoinHostPort $backend.Address "30843" }} check resolvers docker resolve-prefer ipv4
       {{- end}}

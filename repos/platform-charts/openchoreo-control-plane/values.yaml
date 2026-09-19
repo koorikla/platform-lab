@@ -1,29 +1,63 @@
-# Phase 2. Needs: cert-manager, external-secrets, kgateway, Gateway API CRDs, an IdP (ThunderID) and a
-# ClusterSecretStore "default" (openbao umbrella chart; feeds templates/backstage-secrets.yaml). K8s >= 1.34.
-# Keys below are from upstream docs.
+# OpenChoreo control plane on the hub. Needs (all mgmt addons): cert-manager, external-secrets, Gateway API CRDs
+# (gateway-api-crds), kgateway (GatewayClass `kgateway`, plus the kgateway CRDs for HTTPListenerPolicy/TrafficPolicy),
+# ClusterSecretStore `default` (openbao; feeds templates/backstage-secrets.yaml) and Thunder as the IdP. K8s >= 1.34.
+# Until those are up, Argo's retries cover the ordering.
+#
+# Values = upstream install/k3d/multi-cluster/values-cp.yaml @ v1.2.5 verbatim, except the lines marked LAB.
+# Upstream k3d serves everything as http://<x>.openchoreo.localhost:8080 (host port 8080 -> the Gateway's :8080
+# listener). The hub publishes no host ports, so the same URLs work through:
+#   - browser: `make ui` port-forwards svc/gateway-default 8080:8080 (*.localhost is loopback);
+#   - pods: CoreDNS rewrites *.openchoreo.localhost to gateway-default.openchoreo-control-plane (fleet/base/hub-coredns.yaml).
+# Resources: upstream requests for every Deployment (sum ~750m CPU / ~900Mi) are modest enough for the hub; the only
+# container without requests is the authz bootstrap Job (short-lived PostSync hook, the chart has no knob for it).
 openchoreo-control-plane:
   openchoreoApi:
     http:
-      hostnames: ["api.openchoreo.localhost"]
+      hostnames:
+        - api.openchoreo.localhost
+    config:
+      server:
+        publicUrl: "http://api.openchoreo.localhost:8080"
+
   backstage:
-    baseUrl: "https://console.openchoreo.localhost"
-    secretName: backstage-secrets
+    secretName: backstage-secrets     # templates/backstage-secrets.yaml (OpenBao via ClusterSecretStore default)
+    baseUrl: "http://openchoreo.localhost:8080"   # Thunder's Backstage redirect_uri lives under it (platform-charts/thunder)
     http:
-      hostnames: ["console.openchoreo.localhost"]
+      hostnames:
+        - openchoreo.localhost
+
   security:
     oidc:
-      issuer: "https://thunder.openchoreo.localhost"
-  gateway:
-    # Service gateway-default:8080 (kgateway names it after the Gateway). Upstream's public URLs carry :8080; pods reach
-    # it via the hub CoreDNS rewrite (fleet/base/hub-coredns.yaml), browsers via `make ui` (port-forward 8080:8080).
-    httpPort: 8080
-    tls:
-      enabled: false
+      issuer: "http://thunder.openchoreo.localhost:8080"   # = Thunder publicUrl (id_token iss)
+      jwksUrl: "http://thunder.openchoreo.localhost:8080/oauth2/jwks"
+      authorizationUrl: "http://thunder.openchoreo.localhost:8080/oauth2/authorize"
+      tokenUrl: "http://thunder.openchoreo.localhost:8080/oauth2/token"
+
   clusterGateway:
+    # LAB: workers dial wss://mgmt-lb:30843/ws (fleet/base/hub-lb.yaml frontend -> this NodePort on the hub nodes),
+    # like the argocd-agent principal (30443) and OpenBao (30820). Upstream instead passes the agent's TLS through the
+    # Gateway (tlsRoute on host cluster-gateway.openchoreo.localhost, port 8443); the hub has no host port for that and
+    # worker pods can't resolve *.openchoreo.localhost to the hub, so the route and that dnsName are left out.
     service:
-      type: NodePort            # VERIFY: chart may not expose a fixed nodePort; workers dial mgmt-lb:<port> (needs a frontend in fleet/base/hub-lb.yaml)
+      type: NodePort
+      port: 8443
+      nodePort: 30843
+    tlsRoute:
+      enabled: false
     tls:
+      issuerRef:
+        name: cluster-gateway-server-issuer
       dnsNames:
         - cluster-gateway.openchoreo-control-plane.svc
         - cluster-gateway.openchoreo-control-plane.svc.cluster.local
-        - mgmt-lb
+        - mgmt-lb                     # LAB: the name workers dial (server cert SAN, no hostname verification bypass)
+
+  gateway:
+    # Service gateway-default:8080 (kgateway names it after the Gateway, one port per listener): see header.
+    httpPort: 8080
+    httpsPort: 8443                   # unused: no https listener (tls off) and no tls-passthrough (tlsRoute off)
+    tls:
+      enabled: false
+
+# Label the org namespace OpenChoreo reads Environments/Projects from (templates/namespace.yaml).
+orgNamespace: default
