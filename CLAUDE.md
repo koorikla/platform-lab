@@ -23,20 +23,25 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
    `envs/<env>.yaml` (addons) or `envs/<env>/values.yaml` (apps).
 6. `repos/*` folders are future repositories: no relative references across them except via ApplicationSet
    `repoURL`/`$values`. Splitting = change repoURLs + drop the `repos/<x>/` path prefix.
-7. CA private keys never leave the hub. Worker credentials are issued on the hub (cert-manager) and pushed with ESO
-   `PushSecret` through the CAPI-generated kubeconfig (`<name>-kubeconfig`, key `value`).
+7. CA private keys never leave the hub. Worker credentials are issued on the hub (cert-manager), written to the hub's
+   OpenBao (`secret/clusters/<name>/*`, hub-local `PushSecret` → `ClusterSecretStore openbao`) and **pulled** by the
+   worker's ESO (`ClusterSecretStore hub-openbao`, auth `k8s-<name>`: a worker can read only its own path). Nothing on
+   the hub writes into a worker with the CAPI admin kubeconfig. Identity-bound worker components (agent, ESO, the
+   OpenBao store + ExternalSecrets) are the CAAPH birth kit (`fleet/base/helmchartproxies.yaml`), not worker-addons.
 8. Enable/disable by file extension (`.yaml.disabled`), never by commenting blocks.
 
 ## Flow
 bootstrap.sh → k3d `bootstrap` + cert-manager/capi-operator/capi-providers (same charts+values as GitOps, applied with
 `helm template | kubectl apply`) → Cluster `mgmt` (`fleet/clusters/mgmt/mgmt.yaml`, role=management, ClusterClass
-variable `managementCluster=true`: docker.sock in nodes + LB frontend :30443) → same CAPI stack on mgmt →
+variable `managementCluster=true`: docker.sock in nodes + LB frontends :30443, :30820) → same CAPI stack on mgmt →
 `clusterctl move -n fleet` → delete k3d → helm install `repos/platform-charts/argo-cd` (release `argocd`) → `root` app →
-`platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, principal, capi-operator, capi-providers,
-kargo + argo-rollouts, argo-cd itself) + `fleet-base` (ClusterClass, HelmChartProxies) + `fleet-clusters` appset →
-`cluster` chart per file → CAPI builds k3s cluster → CAAPH installs argo-cd (controller/repo/redis) + argocd-agent →
-ESO pushes client cert → agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) → ESO-rendered cluster
-secret makes the cluster selectable → `worker-addons` / `workloads` appsets generate labelled Applications → principal
+`platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, OpenBao, principal, capi-operator,
+capi-providers, kargo + argo-rollouts, argo-cd itself) + `fleet-base` (ClusterClass, HelmChartProxies) + `fleet-clusters` appset →
+`cluster` chart per file (agent client cert → hub PushSecret → OpenBao `secret/clusters/<name>/argocd-agent`) → CAPI
+builds k3s cluster → `openbao-fleet-sync` CronJob adds `auth/k8s-<name>` → CAAPH birth kit installs argo-cd
+(controller/repo/redis), argocd-agent, ESO and `secret-bootstrap` (store `hub-openbao` + agent ExternalSecrets) →
+worker ESO pulls the cert via `mgmt-lb:30820` → agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) →
+ESO-rendered cluster secret makes the cluster selectable → `worker-addons` / `workloads` appsets generate labelled Applications → principal
 ships them → worker reconciles.
 
 ## Hub access
@@ -75,13 +80,14 @@ k3s-agent Type=notify deadlocks CAPD bootstrap until timeout (~5 min, Type=exec 
    HelmChartProxies at the umbrellas. Per-env HelmChartProxies so agent upgrades are staged too.
 5. OpenChoreo (phase 2) — enable `kgateway`, `openchoreo-control-plane` (hub), `kgateway`, `openchoreo-data-plane`
    (workers), `openchoreo.enabled` in cluster files. Missing pieces:
-   - Gateway API CRDs v1.5.1 (no chart upstream → small CRD chart or kustomize app), ThunderID, OpenBao +
-     `ClusterSecretStore/default`, hostnames/TLS for the lab, default resources (Project, Environments, DeploymentPipeline).
+   - Gateway API CRDs v1.5.1 (no chart upstream → small CRD chart or kustomize app), ThunderID, OpenChoreo seeds in
+     OpenBao (hub, `addons/management/openbao`) + `ClusterSecretStore/default`, hostnames/TLS for the lab, default resources (Project, Environments, DeploymentPipeline).
    - **OpenChoreo trust, declaratively**: upstream flow extracts the agent's self-signed CA by hand. Target design:
-     issue `cluster-agent-tls` on the hub from a dedicated CA, PushSecret it to `openchoreo-data-plane` on the worker
+     issue `cluster-agent-tls` on the hub from a dedicated CA, PushSecret it to OpenBao
+     (`secret/clusters/<name>/…`) and pull it into `openchoreo-data-plane` with a birth-kit ExternalSecret
      (`clusterAgent.tls.generateCerts=false`), and reference that CA in `DataPlane.spec.clusterAgent.clientCA`
      (check whether the CRD supports `secretRef`; see upstream "mTLS with External CA" guide). The gateway server CA
-     must land on the worker as ConfigMap `cluster-gateway-ca` (PushSecret makes Secrets → needs a converter or chart support).
+     must land on the worker as ConfigMap `cluster-gateway-ca` (ESO generic target / `target.manifest: ConfigMap`).
    - per-cluster `clusterAgent.planeId` (= cluster name): add an appset `helm.parameters` hook or per-cluster values.
    - Decide ownership between OpenChoreo deployment pipelines and Kargo for app promotion.
    - Requires Kubernetes >= 1.34 (k3s version in fleet files already is).

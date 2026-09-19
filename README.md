@@ -11,16 +11,20 @@ flowchart LR
     capi["CAPI operator: core, k3s, CAPD, CAAPH"]
     kargo[Kargo]
     eso["cert-manager + ESO"]
+    bao["OpenBao (secret/clusters/&lt;name&gt;)"]
     oc["OpenChoreo control plane (phase 2)"]
   end
   subgraph dev1["dev1 (k3s via CAPI)"]
     agent["argocd-agent (managed)"]
+    weso["ESO (birth kit)"]
     ctrl["app-controller + repo-server + redis"]
     dp["OpenChoreo data plane (phase 2)"]
   end
   git[(git)] --> argo
   argo -->|"cluster chart"| capi -->|"Cluster + HelmChartProxy"| dev1
-  eso -->|"PushSecret: agent client cert"| agent
+  eso -->|"PushSecret: agent client cert"| bao
+  weso -->|"pulls its own path :30820"| bao
+  weso -->|"argocd-agent-client-tls"| agent
   agent -->|"gRPC mTLS :30443"| principal
   argo -->|"Applications labelled argocd-agent=true"| principal
   kargo -->|"commit envs/<env>"| git
