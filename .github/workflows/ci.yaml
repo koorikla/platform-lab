@@ -16,6 +16,8 @@ env:
   YQ_VERSION: v4.53.6
   KUBECONFORM_VERSION: v0.8.0
   ACTIONLINT_VERSION: 1.7.12
+  # the runner image ships shellcheck 0.9, whose false SC2317 on trap handlers fails test_fleet_sync.sh
+  SHELLCHECK_VERSION: v0.11.0
 jobs:
   lint-test:
     runs-on: ubuntu-24.04
@@ -27,8 +29,8 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
-      # shellcheck and jq come with the runner image; the runner's yq is not pinned, ours goes first on PATH
-      - name: Install yq, kubeconform, actionlint
+      # jq comes with the runner image; the runner's yq/shellcheck are not pinned, ours go first on PATH
+      - name: Install yq, kubeconform, actionlint, shellcheck
         run: |
           bin="$HOME/.local/bin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
           curl -fsSLo "$bin/yq" "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
@@ -37,6 +39,8 @@ jobs:
             tar -xz -C "$bin" kubeconform
           curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" |
             tar -xz -C "$bin" actionlint
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" |
+            tar -xJ -C "$bin" --strip-components=1 "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
       - name: Tool versions
         run: helm version && yq --version && kubeconform -v && shellcheck --version && jq --version && actionlint -version
       - name: actionlint
