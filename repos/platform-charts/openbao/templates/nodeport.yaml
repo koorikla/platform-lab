@@ -1,0 +1,15 @@
+# Workers reach OpenBao through mgmt-lb:30820 -> this NodePort. Separate from the chart's Service because that one
+# also carries the 8201 cluster port, which must not get a NodePort.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-nodeport
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    component: server
+  ports:
+    - { name: http, port: 8200, targetPort: 8200, nodePort: {{ .Values.nodePort }} }

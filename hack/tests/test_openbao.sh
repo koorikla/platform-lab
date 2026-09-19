@@ -3,7 +3,15 @@
 source "$(dirname "$0")/lib.sh"
 o=$(render openbao $charts/openbao -n openbao -f $config/addons/management/openbao/values.yaml)
 assert_yq "$o" '[select(.kind=="StatefulSet")] | length' 1
-assert_yq "$o" 'select(.kind=="Service" and .spec.type=="NodePort") | .spec.ports[] | select(.port==8200) | .nodePort' 30820
+# only the API port is published (the chart Service also carries 8201, cluster-internal)
+assert_yq "$o" '[select(.kind=="Service" and .spec.type=="NodePort")] | length' 1
+assert_yq "$o" 'select(.kind=="Service" and .spec.type=="NodePort") | [.spec.ports[] | .port + ":" + .nodePort] | join(",")' 8200:30820
+assert_yq "$o" 'select(.kind=="Service" and .spec.type=="NodePort") | .spec.selector | to_entries | map(.key + "=" + .value) | sort | join(",")' \
+  "$(yq 'select(.kind=="StatefulSet") | .spec.selector.matchLabels | to_entries | map(.key + "=" + .value) | sort | join(",")' "$o")"
+# ... and mgmt-lb forwards 30820 to it
+lb=$(yq '.data.value' $config/fleet/base/hub-lb.yaml)
+grep -qE '^ *bind \*:30820$' <<<"$lb" || fail "hub-lb.yaml: no frontend bound to :30820"
+grep -qF 'JoinHostPort $backend.Address "30820"' <<<"$lb" || fail "hub-lb.yaml: no backend on node port 30820"
 assert_yq "$o" 'select(.kind=="ClusterSecretStore") | .metadata.name' openbao
 assert_yq "$o" 'select(.kind=="ClusterSecretStore") | .spec.provider.vault.server' http://openbao.openbao.svc:8200
 assert_yq "$o" 'select(.kind=="ClusterSecretStore") | .spec.provider.vault.auth.kubernetes.role' hub-writer

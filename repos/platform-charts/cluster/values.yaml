@@ -24,8 +24,11 @@ network:                       # k3s defaults; the k3s provider does not derive 
 
 resourceProxy: argocd-agent-resource-proxy:9090
 
-openbao:
-  store: openbao                # hub ClusterSecretStore (platform-charts/openbao); workers pull secret/clusters/<name>/*
+openbao:                       # platform-charts/openbao on the hub
+  store: openbao                # ClusterSecretStore the hub writes with; workers pull secret/clusters/<name>/*
+  namespace: openbao
+  caProjector: fleet-ca-projector   # SA + SecretStore that project <name>-ca's public cert for fleet-sync
+  caStore: fleet-ca
 
 openchoreo:
   enabled: false               # Phase 2

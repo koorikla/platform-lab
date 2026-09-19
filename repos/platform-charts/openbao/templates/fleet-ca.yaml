@@ -1,0 +1,22 @@
+# Worker API CAs for fleet-sync without access to the fleet namespace (which holds CAPI kubeconfigs and CA keys).
+# The cluster chart (per worker) grants this SA `get` on exactly <name>-ca and renders an ExternalSecret here that
+# keeps only its public cert: Secret <name>-ca-public, key ca.crt.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.fleetSync.caProjector }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: fleet-ca
+  namespace: {{ .Release.Namespace }}
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: {{ .Values.fleetSync.fleetNamespace }}
+      server:
+        caProvider: { type: ConfigMap, name: kube-root-ca.crt, key: ca.crt }
+      auth:
+        serviceAccount: { name: {{ .Values.fleetSync.caProjector }} }

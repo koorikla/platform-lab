@@ -16,9 +16,7 @@ openbao:
     dev:
       enabled: true
       devRootToken: ""            # empty -> random per start (chart default is the literal "root")
-    service:
-      type: NodePort
-      nodePort: 30820             # workers: http://mgmt-lb:30820 (fleet/base/hub-lb.yaml frontend)
+    # chart Service stays ClusterIP (8200 + 8201 cluster port); workers get only 8200 via templates/nodeport.yaml
     # Hub-side config, re-applied on every start (dev mode forgets it). Names must match templates/*.yaml.
     postStart:
       - /bin/sh
@@ -34,10 +32,27 @@ openbao:
         path "secret/data/clusters/*"     { capabilities = ["create", "read", "update", "delete"] }
         path "secret/metadata/clusters/*" { capabilities = ["create", "read", "update", "delete", "list"] }
         EOP
+        # fleet-sync can only create kubernetes mounts named k8s-*, point them at a worker API, and bind ONE role shape:
+        # external-secrets/external-secrets -> a single cluster-* policy (plain strings only: OpenBao compares list
+        # values as a whole, and "a,b" would pass the cluster-* glob -> commas/spaces denied). Residual risk: the body
+        # of sys/policies/acl/cluster-* can't be constrained (allowed_parameters globs are prefix/suffix only), so this
+        # role can still write a broad cluster-* policy and attach it to a k8s-* role. Treat openbao-fleet-sync as
+        # sensitive; prod: a controller with a fixed policy template, or Sentinel/EGP-style checks.
         bao policy write fleet-sync - >/dev/null <<'EOP'
         path "sys/auth"                   { capabilities = ["read", "sudo"] }
-        path "sys/auth/k8s-*"             { capabilities = ["create", "read", "update", "delete", "sudo"] }
-        path "auth/k8s-*"                 { capabilities = ["create", "read", "update", "delete", "list"] }
+        path "sys/auth/k8s-*" {
+          capabilities = ["create", "update", "delete", "sudo"]
+          allowed_parameters = { "type" = ["kubernetes"], "description" = [] }
+        }
+        path "auth/k8s-*" {
+          capabilities = ["create", "read", "update", "delete"]
+          allowed_parameters = {
+            "kubernetes_host" = [], "kubernetes_ca_cert" = [], "disable_local_ca_jwt" = [true],
+            "bound_service_account_names" = ["external-secrets"], "bound_service_account_namespaces" = ["external-secrets"],
+            "token_policies" = ["cluster-*"], "token_ttl" = []
+          }
+          denied_parameters = { "token_policies" = ["*,*", "* *"] }
+        }
         path "sys/policies/acl"           { capabilities = ["list"] }
         path "sys/policies/acl/cluster-*" { capabilities = ["create", "read", "update", "delete"] }
         EOP
@@ -50,11 +65,16 @@ openbao:
 hubWriter:
   namespaces: [argocd]            # cluster chart: PushSecret <name>-argocd-agent
 
+# API for workers: http://mgmt-lb:30820 (fleet/base/hub-lb.yaml frontend -> this NodePort)
+nodePort: 30820
+
 # fleet-sync: per worker cluster, auth/k8s-<name> + role eso + policy cluster-<name>
 fleetSync:
   schedule: "*/2 * * * *"
-  image: alpine/k8s:1.34.11      # kubectl + curl + jq + bash; tag follows the fleet's Kubernetes minor
-  fleetNamespace: fleet
+  # kubectl + curl + jq + bash; tag follows the fleet's Kubernetes minor, digest = multi-arch index of that tag
+  image: alpine/k8s:1.34.11@sha256:0382123ab8ae17d8da5d43cc299242933eb012cfbe56787b43731c942c3eed80
+  fleetNamespace: fleet           # reads only CAPI Clusters there (endpoint); CAs come from <name>-ca-public below
+  caProjector: fleet-ca-projector # SA + SecretStore fleet-ca: the cluster chart grants it get on <name>-ca only
   workerSelector: platform.lab/role=worker
   # the worker's ESO (CAAPH birth kit, fleet/base/helmchartproxies.yaml worker-external-secrets)
   esoServiceAccount: external-secrets

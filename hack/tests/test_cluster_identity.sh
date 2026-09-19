@@ -9,6 +9,15 @@ assert_yq "$w" 'select(.kind=="PushSecret") | [.spec.data[].match.remoteRef.remo
 assert_yq "$w" 'select(.kind=="PushSecret") | [.spec.data[].match.remoteRef.property] | sort | join(",")' ca.crt,tls.crt,tls.key
 assert_yq "$w" '[select(.kind=="ClusterSecretStore")] | length' 0
 # the hub Argo cluster secret stays (in-cluster store)
-assert_yq "$w" 'select(.kind=="ExternalSecret") | .spec.secretStoreRef.name' in-cluster
+assert_yq "$w" 'select(.kind=="ExternalSecret" and .metadata.name=="cluster-dev1") | .spec.secretStoreRef.name' in-cluster
+# worker API CA for fleet-sync: projector may get exactly dev1-ca; only its public cert lands in openbao
+assert_yq "$w" 'select(.kind=="Role" and .metadata.namespace=="fleet") | .rules[0].resourceNames | join(",")' dev1-ca
+assert_yq "$w" 'select(.kind=="Role" and .metadata.namespace=="fleet") | .rules[0].verbs | join(",")' get
+assert_yq "$w" 'select(.kind=="RoleBinding") | .subjects[0].namespace + "/" + .subjects[0].name' openbao/fleet-ca-projector
+es='select(.kind=="ExternalSecret" and .metadata.name=="dev1-ca-public")'
+assert_yq "$w" "$es | .metadata.namespace" openbao
+assert_yq "$w" "$es | .spec.secretStoreRef.kind + \"/\" + .spec.secretStoreRef.name" SecretStore/fleet-ca
+assert_yq "$w" "$es | [.spec.data[].secretKey] | join(\",\")" ca.crt
+assert_yq "$w" "$es | .spec.data[0].remoteRef.key + \"#\" + .spec.data[0].remoteRef.property" dev1-ca#tls.crt
 h=$(render mgmt $charts/cluster -f $config/fleet/clusters/mgmt/mgmt.yaml)
-assert_yq "$h" '[select(.kind=="PushSecret")] | length' 0
+assert_yq "$h" '[select(.kind=="PushSecret" or .kind=="Role" or .kind=="RoleBinding")] | length' 0

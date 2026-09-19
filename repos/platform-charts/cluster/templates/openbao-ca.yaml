@@ -1,0 +1,39 @@
+{{- if eq .Values.role "worker" }}
+{{- $n := .Values.name }}
+{{- $ob := .Values.openbao }}
+# Worker API CA for OpenBao auth/k8s-<name> (fleet-sync CronJob, platform-charts/openbao). The fleet-sync SA may not
+# read the fleet namespace; instead the CA projector gets `get` on exactly CAPI's <name>-ca and ESO copies its
+# public cert (never tls.key) to <name>-ca-public in the OpenBao namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $n }}-ca-projector
+  namespace: {{ .Values.fleetNamespace }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $n }}-ca]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $n }}-ca-projector
+  namespace: {{ .Values.fleetNamespace }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $n }}-ca-projector }
+subjects:
+  - { kind: ServiceAccount, name: {{ $ob.caProjector }}, namespace: {{ $ob.namespace }} }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $n }}-ca-public
+  namespace: {{ $ob.namespace }}
+spec:
+  refreshInterval: 10m          # the CA changes only when the cluster is reborn
+  secretStoreRef: { kind: SecretStore, name: {{ $ob.caStore }} }
+  target:
+    name: {{ $n }}-ca-public
+  data:
+    - { secretKey: ca.crt, remoteRef: { key: {{ $n }}-ca, property: tls.crt } }
+{{- end }}
