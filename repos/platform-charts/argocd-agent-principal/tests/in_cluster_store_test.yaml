@@ -1,0 +1,59 @@
+suite: SecretStore argocd/in-cluster (#40) - name-scoped get only, never the whole argocd namespace
+# ESO's kubernetes provider (v2.10.0) reads a remoteRef with a single GET and validates the store with a
+# SelfSubjectRulesReview: no list/watch, resourceNames everywhere. This chart owns SA + store + the JWT key rule; the
+# cluster chart adds one Role/RoleBinding per worker for its client cert.
+release:
+  name: argocd-agent
+  namespace: argocd
+templates:
+  - templates/eso-in-cluster-store.yaml
+  - templates/jwt-key.yaml
+  - charts/argocd-agent-principal/templates/principal-rolebinding.yaml
+  - charts/argocd-agent-principal/templates/principal-clusterrolebinding.yaml
+tests:
+  - it: authenticates the store as ServiceAccount eso-in-cluster
+    template: templates/eso-in-cluster-store.yaml
+    asserts:
+      - equal: { path: spec.provider.kubernetes.auth.serviceAccount.name, value: eso-in-cluster }
+        documentSelector: { path: kind, value: SecretStore }
+      - equal: { path: metadata.name, value: in-cluster }
+        documentSelector: { path: kind, value: SecretStore }
+      - equal: { path: metadata.name, value: eso-in-cluster }
+        documentSelector: { path: kind, value: ServiceAccount }
+
+  # store validation: SelfSubjectRulesReview (system:basic-user grants it too; explicit so the store never depends on it)
+  - it: grants get on the JWT key source only, plus the store's self-check
+    template: templates/eso-in-cluster-store.yaml
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal: { path: metadata.name, value: eso-in-cluster }
+      - equal: { path: metadata.namespace, value: argocd }
+      - equal:
+          path: rules
+          value:
+            - { apiGroups: [""], resources: [secrets], resourceNames: [argocd-agent-jwt-key], verbs: [get] }
+            - { apiGroups: [authorization.k8s.io], resources: [selfsubjectrulesreviews], verbs: [create] }
+
+  - it: binds that Role to the store's SA in argocd
+    template: templates/eso-in-cluster-store.yaml
+    documentSelector: { path: kind, value: RoleBinding }
+    asserts:
+      - equal: { path: roleRef, value: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: eso-in-cluster } }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: eso-in-cluster, namespace: argocd }] }
+
+  # a stray binding would bypass the name-scoped Roles
+  - it: nothing else in the chart binds the store's SA
+    asserts:
+      - notEqual: { path: 'subjects[*].name', value: eso-in-cluster }
+        template: charts/argocd-agent-principal/templates/principal-rolebinding.yaml
+      - notEqual: { path: 'subjects[*].name', value: eso-in-cluster }
+        template: charts/argocd-agent-principal/templates/principal-clusterrolebinding.yaml
+
+  # every key read through the store must be granted by name, and find/dataFrom would need list
+  - it: reads only the granted key through the store, without dataFrom
+    template: templates/jwt-key.yaml
+    documentSelector: { path: kind, value: ExternalSecret }
+    asserts:
+      - equal: { path: spec.secretStoreRef, value: { kind: SecretStore, name: in-cluster } }
+      - equal: { path: 'spec.data[*].remoteRef.key', value: argocd-agent-jwt-key }
+      - notExists: { path: spec.dataFrom }
