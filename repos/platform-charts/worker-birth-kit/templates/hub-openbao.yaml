@@ -1,0 +1,39 @@
+# Per-cluster OpenBao pull wiring. In the birth kit (not worker-addons) because it carries the cluster's identity and
+# must exist before the agent can connect.
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: hub-openbao
+  labels:
+    {{- include "birth-kit.labels" . | nindent 4 }}
+spec:
+  conditions:
+    - namespaces: {{ toJson .Values.hubOpenbao.namespaces }}
+  provider:
+    vault:
+      server: http://{{ .Values.hub.host }}:{{ .Values.hub.openbaoPort }}
+      path: secret
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: k8s-{{ include "birth-kit.clusterName" . }}
+          role: eso
+          serviceAccountRef:
+            name: {{ include "birth-kit.esoServiceAccount" . }}
+            namespace: {{ include "birth-kit.esoNamespace" . }}
+---
+# OpenBao reviews the ESO token with that same token (disable_local_ca_jwt): it must be allowed to TokenReview
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: external-secrets-openbao-tokenreview
+  labels:
+    {{- include "birth-kit.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "birth-kit.esoServiceAccount" . }}
+    namespace: {{ include "birth-kit.esoNamespace" . }}

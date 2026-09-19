@@ -1,0 +1,42 @@
+{{- $key := printf "clusters/%s/argocd-agent" (include "birth-kit.clusterName" .) }}
+# The agent's mTLS identity, issued on the hub (cluster chart, cert-manager) and pushed to OpenBao; pulled here.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-agent-client-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "birth-kit.labels" . | nindent 4 }}
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: hub-openbao
+  target:
+    name: argocd-agent-client-tls
+    template:
+      type: kubernetes.io/tls          # the agent requires it; no template.data -> keys pass through
+  data:
+    - secretKey: tls.crt
+      remoteRef: { key: {{ $key }}, property: tls.crt }
+    - secretKey: tls.key
+      remoteRef: { key: {{ $key }}, property: tls.key }
+---
+# CA only, as Opaque: the agent parses every key of this secret as a certificate
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-agent-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "birth-kit.labels" . | nindent 4 }}
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: hub-openbao
+  target:
+    name: argocd-agent-ca
+  data:
+    - secretKey: ca.crt
+      remoteRef: { key: {{ $key }}, property: ca.crt }

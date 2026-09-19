@@ -1,0 +1,12 @@
+dependencies:
+- name: argo-cd
+  repository: oci://ghcr.io/argoproj/argo-helm
+  version: 10.9.2
+- name: argocd-agent-agent
+  repository: oci://ghcr.io/argoproj-labs/argocd-agent
+  version: 0.2.7
+- name: external-secrets
+  repository: oci://ghcr.io/external-secrets/charts
+  version: 2.10.0
+digest: sha256:81c3fd559b557cb08a56a3b5165e0c7080c3d638b119e1f70e26f84eea52fe9e
+generated: "2026-09-19T05:29:51.563469+03:00"

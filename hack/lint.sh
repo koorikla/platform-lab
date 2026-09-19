@@ -9,9 +9,10 @@ config=repos/platform-config
 grep -ho 'repository: https://[^ ]*' $charts/*/Chart.yaml repos/apps/*/chart/Chart.yaml | sort -u | awk '{print $2}' |
   while read -r url; do helm repo add "$(echo "$url" | md5 -q 2>/dev/null || echo "$url" | md5sum | cut -c1-32)" "$url" --force-update >/dev/null; done
 
+# required values: name/env (cluster chart), clusterName (worker-birth-kit)
 for c in $charts/*/ repos/apps/*/chart/; do
   helm dependency update "$c" >/dev/null
-  helm lint --quiet "$c" --set name=lint,env=dev
+  helm lint --quiet "$c" --set name=lint,env=dev,clusterName=lint
 done
 
 render() { helm template "$@" >/dev/null || { echo "FAIL: helm template $*"; exit 1; }; }

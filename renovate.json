@@ -288,6 +288,18 @@
       ]
     },
     {
+      "description": "The birth kit ships bootstrap copies of two ESO CRDs in crds/ (generated from the pinned version)",
+      "matchFileNames": [
+        "repos/platform-charts/worker-birth-kit/**"
+      ],
+      "matchDepNames": [
+        "external-secrets"
+      ],
+      "prBodyNotes": [
+        "Run `hack/birth-kit-crds.sh` and commit `worker-birth-kit/crds/` (hack/tests/test_birth_kit.sh fails until then)."
+      ]
+    },
+    {
       "groupName": "openbao",
       "matchDepNames": [
         "openbao"
