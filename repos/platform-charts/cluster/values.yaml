@@ -32,6 +32,7 @@ openbao:                       # platform-charts/openbao on the hub
   namespace: openbao
   caProjector: fleet-ca-projector   # SA + SecretStore that project <name>-ca's public cert for fleet-sync
   caStore: fleet-ca
+  fleetSync: openbao-fleet-sync     # SA of the fleet-sync CronJob: may get exactly <name>-ca-public (openbao-ca.yaml)
 
 # OpenChoreo registration (templates/openchoreo.yaml): rendered for workers whenever the hub serves the OpenChoreo CRDs,
 # i.e. while addons/management/openchoreo-control-plane is enabled. Names must match that umbrella chart.

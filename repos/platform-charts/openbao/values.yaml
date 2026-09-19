@@ -9,7 +9,8 @@
 #   - Unseal: `seal "static"` with a 32-byte key that the unseal-key init container generates ONCE into Secret
 #     openbao/openbao-unseal-key (create-only; not managed by Argo CD, so no prune/cascade can remove it) and copies to
 #     an in-memory volume at every start. LAB STAND-IN for KMS/transit auto-unseal: whoever can read that Secret and
-#     the PVC can decrypt the data. Back it up off-cluster; losing it makes the PVC unreadable (the init container then
+#     the PVC can decrypt the data. Back it up off-cluster (`make openbao-key-backup`: 0600 file, never printed;
+#     restore = `kubectl create -f` it before the pod starts); losing it makes the PVC unreadable (the init container then
 #     refuses to mint a new key over existing data). Prod: replace the stanza with awskms/gcpckms/azurekeyvault/
 #     transit/pkcs11 and drop the init container.
 #   - Init: declarative self-init (`initialize` below) runs once, on empty storage: kubernetes auth + the openbao-config

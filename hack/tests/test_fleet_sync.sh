@@ -12,7 +12,13 @@ assert_yq "$o" "$cj | .spec.jobTemplate.spec.template.spec.serviceAccountName" o
 assert_yq "$o" "$cj | .spec.jobTemplate.spec.template.spec.containers[0].image | test(\"^alpine/k8s:[0-9.]+@sha256:[0-9a-f]{64}\$\")" true
 # fleet namespace: CAPI Clusters only (kubeconfigs and CA keys live there); secrets only in openbao (<name>-ca-public)
 assert_yq "$o" '[select(.kind=="Role" and .metadata.namespace=="fleet") | .rules[] | .resources[]] | join(",")' clusters
-assert_yq "$o" 'select(.kind=="Role" and .metadata.namespace=="openbao" and .metadata.name=="openbao-fleet-sync") | .rules[] | .resources[0] + ":" + (.verbs | join(","))' secrets:get
+# ... and no Secret in openbao by chart: that namespace holds openbao-unseal-key and the openchoreo-* sources. The
+# cluster chart grants `get` on exactly <name>-ca-public per worker (test_cluster_identity.sh); the list of clusters
+# comes from CAPI Clusters, never from listing Secrets.
+sa_bindings='[select(.kind=="RoleBinding" or .kind=="ClusterRoleBinding") | select(.subjects | any_c(.name=="openbao-fleet-sync"))]'
+assert_yq "$o" "$sa_bindings | map(.metadata.namespace) | join(\",\")" fleet
+! grep -qE 'kubectl (get|list) secrets?( |$).*(-l|--selector|-A|--all)' <<<"$(yq 'select(.kind=="ConfigMap" and .metadata.name=="openbao-fleet-sync") | .data["fleet-sync.sh"]' "$o")" ||
+  fail "fleet-sync must get Secrets by name only"
 assert_yq "$o" 'select(.kind=="SecretStore" and .metadata.name=="fleet-ca") | .spec.provider.kubernetes.auth.serviceAccount.name' fleet-ca-projector
 
 script=$tmp/fleet-sync.sh

@@ -83,6 +83,10 @@ if command -v shellcheck >/dev/null; then shellcheck -s sh "$ukey" || fail "shel
 ! grep -qE 'kubectl (apply|replace|patch|delete|edit)' "$ukey" || fail "unseal-key must only get/create: $(cat "$ukey")"
 secret=$(yq "$ic | .env[] | select(.name==\"SECRET\") | .value" "$o")
 [ "$secret" = openbao-unseal-key ] || fail "init: SECRET env = $secret"
+# nothing in this chart may read Secrets in openbao by namespace (unseal key, openchoreo-* sources): every get/list/
+# watch rule on secrets is name-scoped
+assert_yq "$o" '[select(.kind=="Role" or .kind=="ClusterRole") | .rules[] | select((.resources // []) | contains(["secrets"])) |
+  select((.verbs | contains(["list"])) or (.verbs | contains(["watch"])) or ((.verbs | contains(["get"])) and ((.resourceNames // []) | length == 0)))] | length' 0
 # the server SA may read exactly that Secret and create Secrets; nothing else
 role='select(.kind=="Role" and .metadata.name=="openbao-unseal-key")'
 assert_yq "$o" "$role | .rules | map(.verbs | join(\",\")) | sort | join(\"|\")" "create|get"
@@ -216,3 +220,23 @@ grep -qE '^bao:' Makefile || fail "Makefile: no bao target (operator shell)"
 mk=$(awk '/^bao:/ {f=1; print; next} f && /^\t/ {print; next} f {exit}' Makefile)
 grep -q 'create token openbao-operator' <<<"$mk" || fail "make bao must use a short-lived openbao-operator token: $mk"
 ! grep -qE 'jwt=\$|JWT=' <<<"$mk" || fail "make bao must not put the JWT on an argv: $mk"
+
+# --- make openbao-key-backup: the unseal key goes to a 0600 file outside the repo, never to the terminal
+kb=$tmp/kbin; mkdir -p "$kb"
+cat > "$kb/kubectl" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "--context mgmt -n openbao get secret openbao-unseal-key -o json" ] || { echo "unexpected kubectl $*" >&2; exit 1; }
+echo '{"apiVersion":"v1","kind":"Secret","type":"Opaque","metadata":{"name":"openbao-unseal-key","namespace":"openbao","uid":"u","resourceVersion":"1","managedFields":[]},"data":{"key":"S0VZTUFURVJJQUw="}}'
+STUB
+chmod +x "$kb/kubectl"
+backup() { set +e; out=$(env PATH="$kb:$PATH" make -s openbao-key-backup OUT="$1" 2>&1); st=$?; set -e; }
+backup "$PWD/unseal-backup.json"
+[ "$st" != 0 ] && grep -q 'inside the repo' <<<"$out" && [ ! -e unseal-backup.json ] || fail "backup into the repo must be refused: $out"
+backup "$tmp/bk/key.json"
+[ "$st" = 0 ] || fail "backup exit $st: $out"
+! grep -q 'S0VZTUFURVJJQUw=' <<<"$out" || fail "backup printed the key"
+[ "$(stat -c %a "$tmp/bk/key.json" 2>/dev/null || stat -f %Lp "$tmp/bk/key.json")" = 600 ] || fail "backup file must be 0600"
+[ "$(jq -c '[.metadata | keys[]], .data.key' "$tmp/bk/key.json" | paste -sd' ' -)" = '["name","namespace"] "S0VZTUFURVJJQUw="' ] ||
+  fail "backup must be a re-creatable Secret (name/namespace/data only): $(jq -c .metadata "$tmp/bk/key.json")"
+backup "$tmp/bk/key.json"
+[ "$st" != 0 ] && grep -q 'exists' <<<"$out" || fail "backup must not overwrite: $out"

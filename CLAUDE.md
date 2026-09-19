@@ -103,9 +103,9 @@ webhook `Ignore`.)
   and the PVC is unreadable), self-init bootstrap + `configure` sidecar (policies/roles from git, every 5 min). No root
   token or recovery keys exist; humans: `make bao` (role `operator`, `secret/hub/*`). Deleting the PVC empties it:
   PushSecrets (1 min) and fleet-sync (≤2 min) refill everything hub-owned; workers keep synced secrets meanwhile.
-- Hardening gap: `openbao-fleet-sync` may `get` every Secret in `openbao` (its CA names are dynamic), including the
-  generated `openchoreo-*` sources and `openbao-unseal-key`. Inside OpenBao it is bounded (no policy writes; worst case
-  one worker reads another's `secret/clusters/*`), but that Secret access keeps it sensitive.
+- `openbao-fleet-sync` gets exactly `openbao/<name>-ca-public` per worker (Role `fleet-sync-<name>` from the cluster
+  chart), never the unseal key or `openchoreo-*`. Inside OpenBao it writes no policy; worst case if compromised: one
+  worker reads another's `secret/clusters/*`.
 
 ## Backlog
 Lives in **GitHub issues** (koorikla/platform-lab, labels `status:*`, `phase:*`, `area:*`, `needs-lab`). Work them with

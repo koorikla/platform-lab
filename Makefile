@@ -41,6 +41,17 @@ bao:             ## shell in openbao-0 logged in as role operator (30 min): hand
 	@kubectl $(CTX) -n openbao exec -it openbao-0 -c openbao -- sh -c \
 	  'BAO_TOKEN=$$(bao write -field=token auth/kubernetes/login role=operator jwt=@/home/openbao/.operator-jwt); \
 	   rm -f /home/openbao/.operator-jwt; export BAO_TOKEN; echo "operator: secret/hub/* (bao kv put/get secret/hub/<item>)"; exec sh'
+# The unseal key is the only way to read OpenBao's PVC (#30). Written straight to a 0600 file outside the repo, never to
+# the terminal; restore with `kubectl --context mgmt create -f <file>` before openbao-0 starts again.
+.PHONY: openbao-key-backup
+OUT ?= $(HOME)/.platform-lab/openbao-unseal-key.json
+openbao-key-backup: ## copy Secret openbao/openbao-unseal-key to $(OUT) (0600; refuses to overwrite or to write into the repo)
+	@case "$$(cd "$$(dirname "$(OUT)")" 2>/dev/null && pwd)/" in "$(CURDIR)/"*) echo "refusing: $(OUT) is inside the repo"; exit 1;; esac
+	@[ ! -e "$(OUT)" ] || { echo "refusing: $(OUT) exists"; exit 1; }
+	@mkdir -p "$$(dirname "$(OUT)")" && umask 077 && \
+	  kubectl $(CTX) -n openbao get secret openbao-unseal-key -o json | \
+	  jq '{apiVersion, kind, type, metadata: {name: .metadata.name, namespace: .metadata.namespace}, data}' > "$(OUT)" && \
+	  echo "wrote $(OUT) (keep it off this machine too)" || { rm -f "$(OUT)"; exit 1; }
 kubeconfig:      ## make kubeconfig CLUSTER=dev1 > dev1.kubeconfig   (server = LB IP on the docker network)
 	@kubectl $(CTX) -n fleet get secret $(CLUSTER)-kubeconfig -o jsonpath='{.data.value}' | base64 -d
 lint:            ## helm lint every chart; render every addon and cluster file

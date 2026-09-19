@@ -60,7 +60,8 @@ sync_cluster() {
   # a cluster that is still being born has no endpoint / projected CA yet: skip, keep whatever exists, retry next run
   if [ -z "$host" ] || [ -z "$port" ]; then echo "skipped $name: no controlPlaneEndpoint yet"; return 0; fi
   if ! ca=$(kubectl get secret "$name-ca-public" -n "$CA_NS" -o jsonpath='{.data.ca\.crt}' 2>/dev/null) || [ -z "$ca" ]; then
-    echo "skipped $name: no $CA_NS/$name-ca-public yet"; return 0
+    # missing, or its name-scoped Role (cluster chart) not synced yet: both settle within minutes of a birth
+    echo "skipped $name: no $CA_NS/$name-ca-public yet (or no get on it yet)"; return 0
   fi
   ca=$(base64 -d <<<"$ca")
 

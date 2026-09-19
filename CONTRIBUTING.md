@@ -373,7 +373,7 @@ need internet egress.
   `repos/platform-charts/cluster/templates/argocd-identity.yaml` (push) and
   `repos/platform-charts/worker-birth-kit/templates/` (pull).
 - OpenBao (#30) keeps its data on a PVC (raft), unseals itself (static key in Secret `openbao/openbao-unseal-key`,
-  a lab stand-in for KMS: back it up) and is configured from git: new policies go in
+  a lab stand-in for KMS: back it up with `make openbao-key-backup`) and is configured from git: new policies go in
   `repos/platform-charts/openbao/files/policies/<name>.hcl`, roles in `files/configure.sh` (the `configure` sidecar
   applies both within ~5 min, no restart). Hub-owned material still comes from PushSecrets (source of truth stays in
   the cluster; an emptied OpenBao refills itself). Only material with no cluster source is hand-written, under
