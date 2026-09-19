@@ -39,7 +39,9 @@ openbao:
         # values as a whole, and "a,b" would pass the cluster-* glob -> commas/spaces denied). Residual risk: the body
         # of sys/policies/acl/cluster-* can't be constrained (allowed_parameters globs are prefix/suffix only), so this
         # role can still write a broad cluster-* policy and attach it to a k8s-* role. Treat openbao-fleet-sync as
-        # sensitive; prod: a controller with a fixed policy template, or Sentinel/EGP-style checks.
+        # sensitive; prod: a controller with a fixed policy template, or Sentinel/EGP-style checks. Its hub Role also
+        # has `get` on every Secret in this namespace (names <cluster>-ca-public are dynamic), which includes the
+        # generated openchoreo-* sources: nothing it couldn't already reach through the policy escalation above.
         bao policy write fleet-sync - >/dev/null <<'EOP'
         path "sys/auth"                   { capabilities = ["read", "sudo"] }
         path "sys/auth/k8s-*" {
@@ -64,9 +66,10 @@ openbao:
           bound_service_account_names=openbao-fleet-sync bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
         # OpenChoreo (templates/openchoreo.yaml): the seeder PushSecret writes secret/openchoreo/*, ClusterSecretStore
         # `default` only reads it. No KV values here: they are generated in-cluster and re-pushed after every restart.
+        # No delete: the PushSecrets use deletionPolicy None (delete on metadata/ would destroy every version).
         bao policy write openchoreo-seeder - >/dev/null <<'EOP'
-        path "secret/data/openchoreo/*"     { capabilities = ["create", "read", "update", "delete"] }
-        path "secret/metadata/openchoreo/*" { capabilities = ["create", "read", "update", "delete"] }
+        path "secret/data/openchoreo/*"     { capabilities = ["create", "read", "update"] }
+        path "secret/metadata/openchoreo/*" { capabilities = ["create", "read", "update"] }
         EOP
         bao policy write openchoreo-reader - >/dev/null <<'EOP'
         path "secret/data/openchoreo/*"     { capabilities = ["read"] }
@@ -80,10 +83,13 @@ openbao:
 hubWriter:
   namespaces: [argocd]            # cluster chart: PushSecret <name>-argocd-agent
 
-# OpenChoreo secrets (templates/openchoreo.yaml): generated once in-cluster, kept in Secret openbao/openchoreo-generated
-# and pushed to secret/openchoreo/<key> (property `value`); ClusterSecretStore `default` serves them read-only.
+# OpenChoreo secrets (templates/openchoreo.yaml): each key generated once in-cluster, kept in Secret
+# openbao/openchoreo-<key> (key `value`) and pushed to secret/openchoreo/<key> (property `value`);
+# ClusterSecretStore `default` serves them read-only.
 openchoreo:
-  # upstream key names (install/k3d/common/values-openbao.yaml @ v1.2.5) minus the optional github-* placeholders
+  # upstream key names (install/k3d/common/values-openbao.yaml @ v1.2.5) minus the optional github-* placeholders.
+  # One generator/Secret/PushSecret per key: adding a key generates only that one; rotating one (delete its Secret)
+  # leaves the others alone. Regeneration triggers: templates/openchoreo.yaml header.
   generated: [backstage-backend-secret, backstage-client-secret, backstage-jenkins-api-key]
   # namespaces allowed to use ClusterSecretStore `default`:
   # - openchoreo-control-plane: ExternalSecret backstage-secrets (openchoreo-control-plane umbrella chart)

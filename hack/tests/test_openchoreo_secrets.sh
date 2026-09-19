@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # #9: OpenChoreo's secrets in OpenBao + hub ClusterSecretStore `default`.
-# Values are generated once in-cluster (ESO Password, CreatedOnce) into Secret openbao/openchoreo-generated (source of
-# truth: it outlives OpenBao's in-memory dev mode) and pushed to secret/openchoreo/<key> through a seeder store. The
-# `default` store reads that prefix only, from the OpenChoreo namespaces only. Every path the PushSecret and the
-# backstage-secrets ExternalSecret touch must be granted by the matching policy that server.postStart writes.
+# Each value is generated once in-cluster (ESO Password, CreatedOnce) into its own Secret openbao/openchoreo-<key>
+# (source of truth: it outlives OpenBao's in-memory dev mode) and pushed to secret/openchoreo/<key> through a seeder
+# store. The `default` store reads that prefix only, from the OpenChoreo namespaces only. Every path the PushSecrets and
+# the backstage-secrets ExternalSecret touch must be granted by the matching policy that server.postStart writes.
 source "$(dirname "$0")/lib.sh"
 o=$(render openbao $charts/openbao -n openbao -f $config/addons/management/openbao/values.yaml)
 post=$(yq 'select(.kind=="StatefulSet") | .spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]' "$o")
@@ -12,30 +12,35 @@ keys=backstage-backend-secret,backstage-client-secret,backstage-jenkins-api-key
 # --- no literal secret values in git: postStart seeds config only, never KV data
 ! grep -qE 'kv put|kv patch|/v1/secret/data' <<<"$post" || fail "postStart writes KV data (values belong in the generator)"
 
-# --- source of truth: generated once, never rotated by a refresh
-gen='select(.kind=="Password" and .metadata.name=="openchoreo-generated")'
-assert_yq "$o" "$gen | .apiVersion" generators.external-secrets.io/v1alpha1
-assert_yq "$o" "$gen | .metadata.namespace" openbao
-assert_yq "$o" "$gen | .spec.secretKeys | sort | join(\",\")" "$keys"
-assert_yq "$o" "$gen | .spec.length >= 32" true
-assert_yq "$o" "$gen | .spec.symbols" 0          # OAuth client secret goes into forms/headers/JSON as is
-src='select(.kind=="ExternalSecret" and .metadata.name=="openchoreo-generated")'
-assert_yq "$o" "$src | .metadata.namespace" openbao
-assert_yq "$o" "$src | .spec.refreshPolicy" CreatedOnce
-assert_yq "$o" "$src | .spec.target.name" openchoreo-generated
-assert_yq "$o" "$src | .spec.dataFrom[0].sourceRef.generatorRef | .apiVersion + \"/\" + .kind + \"/\" + .name" \
-  generators.external-secrets.io/v1alpha1/Password/openchoreo-generated
-
-# --- seeding: the k8s Secret -> secret/openchoreo/<key> (property value), re-pushed after an OpenBao restart
-ps='select(.kind=="PushSecret" and .metadata.name=="openchoreo-generated")'
-assert_yq "$o" "$ps | .metadata.namespace" openbao
-assert_yq "$o" "$ps | .spec.selector.secret.name" openchoreo-generated
-assert_yq "$o" "$ps | .spec.refreshInterval" 1m
-# same chart as OpenBao: a Delete finalizer could never reach a server that is being removed with it
-assert_yq "$o" "$ps | .spec.deletionPolicy" None
-assert_yq "$o" "$ps | .spec.secretStoreRefs | map(.kind + \"/\" + .name) | join(\",\")" SecretStore/openchoreo-seeder
-assert_yq "$o" "$ps | [.spec.data[] | .match.secretKey] | sort | join(\",\")" "$keys"
-assert_yq "$o" "$ps | [.spec.data[] | select(.match.remoteRef.remoteKey != \"openchoreo/\" + .match.secretKey or .match.remoteRef.property != \"value\")] | length" 0
+# --- one chain per key: CreatedOnce regenerates a whole Secret, so adding or rotating one key must not touch the
+#     others -> every generator, Secret and PushSecret carries exactly one value
+names=$(tr , '\n' <<<"$keys" | sed 's/^/openchoreo-/' | paste -sd, -)
+for kind in Password ExternalSecret PushSecret; do
+  assert_yq "$o" "[select(.kind==\"$kind\" and .metadata.namespace==\"openbao\" and (.metadata.name | test(\"^openchoreo-\"))) | .metadata.name] | sort | join(\",\")" "$names"
+done
+for k in ${keys//,/ }; do
+  n=openchoreo-$k
+  # source of truth: generated once, never rotated by a refresh
+  gen="select(.kind==\"Password\" and .metadata.name==\"$n\")"
+  assert_yq "$o" "$gen | .apiVersion" generators.external-secrets.io/v1alpha1
+  assert_yq "$o" "$gen | .spec.secretKeys | join(\",\")" value
+  assert_yq "$o" "$gen | .spec.length >= 32" true
+  assert_yq "$o" "$gen | .spec.symbols" 0          # OAuth client secret goes into forms/headers/JSON as is
+  src="select(.kind==\"ExternalSecret\" and .metadata.name==\"$n\")"
+  assert_yq "$o" "$src | .spec.refreshPolicy" CreatedOnce
+  assert_yq "$o" "$src | .spec.target.name" "$n"
+  assert_yq "$o" "$src | .spec.dataFrom[0].sourceRef.generatorRef | .apiVersion + \"/\" + .kind + \"/\" + .name" \
+    "generators.external-secrets.io/v1alpha1/Password/$n"
+  # seeding: Secret key `value` -> secret/openchoreo/<key> property value, re-pushed after an OpenBao restart
+  ps="select(.kind==\"PushSecret\" and .metadata.name==\"$n\")"
+  assert_yq "$o" "$ps | .spec.selector.secret.name" "$n"
+  assert_yq "$o" "$ps | .spec.refreshInterval" 1m
+  # same chart as OpenBao: a Delete finalizer could never reach a server that is being removed with it
+  assert_yq "$o" "$ps | .spec.deletionPolicy" None
+  assert_yq "$o" "$ps | .spec.secretStoreRefs | map(.kind + \"/\" + .name) | join(\",\")" SecretStore/openchoreo-seeder
+  assert_yq "$o" "$ps | .spec.data | map(.match.secretKey + \"->\" + .match.remoteRef.remoteKey + \"/\" + .match.remoteRef.property) | join(\",\")" \
+    "value->openchoreo/$k/value"
+done
 seed='select(.kind=="SecretStore" and .metadata.name=="openchoreo-seeder")'
 assert_yq "$o" "$seed | .metadata.namespace" openbao
 assert_yq "$o" "$seed | .spec.provider.vault | .server + \" \" + .path + \" \" + .version" "http://openbao.openbao.svc:8200 secret v2"
@@ -89,6 +94,8 @@ done
 # least privilege: the reader never writes; neither role reaches beyond secret/openchoreo/
 reader=$(policy openchoreo-reader)
 ! grep -qE 'create|update|delete|sudo' <<<"$reader" || fail "openchoreo-reader must be read-only: $reader"
+# deletionPolicy None -> ESO never deletes; delete on metadata/ would destroy every version
+! grep -qE 'delete|sudo|list' <<<"$(policy openchoreo-seeder)" || fail "openchoreo-seeder: create/read/update only: $(policy openchoreo-seeder)"
 for p in secret/data/clusters/dev1/argocd-agent secret/data/other sys/policies/acl/x auth/kubernetes/role/x; do
   [ -z "$(caps openchoreo-reader $p)$(caps openchoreo-seeder $p)" ] || fail "openchoreo policies reach $p"
 done
