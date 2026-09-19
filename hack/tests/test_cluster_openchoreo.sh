@@ -48,7 +48,9 @@ c=$(render openchoreo-control-plane $charts/openchoreo-control-plane -n $ns \
 assert_yq "$c" 'select(.kind=="Namespace" and .metadata.name=="default") | .metadata.labels["openchoreo.dev/control-plane"]' true
 assert_yq "$(render p $charts/cluster -f $config/fleet/clusters/prod/prod1.yaml.disabled "${oc[@]}")" \
   "$env | .spec.isProduction" true
-d2=$(render dev2 $charts/cluster -f $config/fleet/clusters/dev/dev2.yaml "${oc[@]}")
+# dev2 may be disabled for a while (#83): the file's content is what matters here
+d2f=$config/fleet/clusters/dev/dev2.yaml; [ -f "$d2f" ] || d2f=$d2f.disabled
+d2=$(render dev2 $charts/cluster -f "$d2f" "${oc[@]}")
 assert_yq "$d2" "$cdp | .metadata.labels[\"platform.lab/ring\"]" canary
 assert_yq "$d2" "$env | .spec.dataPlaneRef.name" dev2
 
