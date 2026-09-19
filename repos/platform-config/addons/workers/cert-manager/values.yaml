@@ -1,4 +1,1 @@
 # Fleet-wide values for cert-manager
-cert-manager:
-  podAnnotations:
-    platform.lab/canary-demo: issue-5   # temporary: canary-first rollout demo (#5); reverted right after
