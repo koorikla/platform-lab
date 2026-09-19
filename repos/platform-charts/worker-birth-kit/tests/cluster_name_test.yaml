@@ -1,0 +1,25 @@
+suite: clusterName - required, a DNS-1123 label (auth mount k8s-<name>, OpenBao path, agent identity)
+release:
+  name: worker-birth-kit
+  namespace: argocd
+templates:
+  - templates/hub-openbao.yaml
+tests:
+  - it: fails without clusterName
+    asserts:
+      - failedTemplate: { errorPattern: "clusterName is required" }
+
+  - it: rejects a name that is not a DNS-1123 label
+    set: { clusterName: Dev_1 }
+    asserts:
+      - failedTemplate: { errorPattern: 'clusterName "Dev_1" is not a DNS-1123 label' }
+
+  - it: rejects a name longer than 63 characters
+    set: { clusterName: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+    asserts:
+      - failedTemplate: { errorPattern: 'clusterName "a{64}" is not a DNS-1123 label' }
+
+  - it: requires ESO's namespace (OpenBao role eso binds external-secrets/external-secrets)
+    set: { clusterName: dev1, external-secrets.namespaceOverride: "" }
+    asserts:
+      - failedTemplate: { errorPattern: "external-secrets.namespaceOverride is required" }
