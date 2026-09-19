@@ -7,7 +7,9 @@ argocd-agent-principal:
   image:                       # chart appVersion still says v0.8.1; releases are published on quay only
     repository: quay.io/argoprojlabs/argocd-agent
     tag: v0.10.0
-  # The chart has no config checksum: changing the JWT key source must roll the pod (the key is read at startup only).
+  # The chart has no config checksum and the principal reads its JWT key at startup only: this value is the roll
+  # trigger. To rotate the key from git: delete Secret argocd-agent-jwt-key (cert-manager mints a new key, ESO copies
+  # it within refreshInterval), then bump a suffix here (secret/argocd-agent-jwt@2, @3, ...). Agents re-auth via mTLS.
   # RollingUpdate with 1 replica keeps the old pod serving until the new one has loaded the key.
   podAnnotations:
     platform.lab/jwt-key: secret/argocd-agent-jwt

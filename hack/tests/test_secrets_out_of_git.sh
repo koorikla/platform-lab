@@ -44,9 +44,10 @@ cm='select(.kind=="ConfigMap" and .metadata.name=="argocd-agent-principal-params
 assert_yq "$p" "$cm | .data.\"principal.jwt.allow-generate\"" false
 assert_yq "$p" "$cm | .data.\"principal.jwt.key-path\"" ''
 assert_yq "$p" "$cm | .data.\"principal.jwt.secret-name\"" argocd-agent-jwt
-# no config checksum in the chart: the pod template must change with the key source, or the old pod keeps its key
-assert_yq "$p" 'select(.kind=="Deployment" and .metadata.name=="argocd-agent-principal") | .spec.template.metadata.annotations."platform.lab/jwt-key"' \
-  secret/argocd-agent-jwt
+# no config checksum in the chart: the pod template must change with the key source, or the old pod keeps its key.
+# Bumpable (secret/argocd-agent-jwt@N) so a key rotation can roll the principal from git.
+assert_yq "$p" 'select(.kind=="Deployment" and .metadata.name=="argocd-agent-principal")
+  | .spec.template.metadata.annotations."platform.lab/jwt-key" | test("^secret/argocd-agent-jwt(@[0-9]+)?$")' true
 # principal parses jwt.key with x509.ParsePKCS8PrivateKey and signs RS512 -> RSA in PKCS#8; the key must survive renewals
 crt='select(.kind=="Certificate" and .metadata.name=="argocd-agent-jwt-key")'
 assert_yq "$p" "$crt | .spec.privateKey | .algorithm + \"/\" + (.size|tostring) + \"/\" + .encoding + \"/\" + .rotationPolicy" \
