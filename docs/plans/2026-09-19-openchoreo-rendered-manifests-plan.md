@@ -1072,7 +1072,7 @@ Commit.
 dropped: one shared Project) + `DeploymentPipeline default` **without spec** + CronJob `openchoreo-pipeline-sync`
 (`files/pipeline-sync.sh`), which writes `promotionPaths` from the worker Environments' labels in Kargo stage order
 (`pipelineSync.stages`, required; the addon values copy kargo-pipeline's stage names, a test keeps them equal). Replaces Task 3.7's generated file: design doc addendum "OpenChoreo platform defaults and the
-DeploymentPipeline". Tests: `openchoreo-app/tests/types_test.yaml` (helm-unittest), `hack/tests/test_openchoreo_pipeline.sh`.
+DeploymentPipeline". Tests: `openchoreo-app/tests/{types,pipeline}_test.yaml` (helm-unittest), `hack/tests/test_openchoreo_pipeline.sh`.
 
 ### Task 3.6: End to end — podinfo through OpenChoreo
 

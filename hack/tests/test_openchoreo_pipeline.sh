@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OpenChoreo platform defaults (#78): addon openchoreo-types (chart openchoreo-app, mode=types) and the pipeline-sync
 # script that writes DeploymentPipeline promotionPaths from the fleet's Environments. Chart-local render assertions:
-# repos/platform-charts/openchoreo-app/tests/types_test.yaml (helm-unittest). Here: cross-chart contracts and the script
+# repos/platform-charts/openchoreo-app/tests/{types,pipeline}_test.yaml (helm-unittest). Here: cross-chart contracts and the script
 # against a stubbed kubectl.
 source "$(dirname "$0")/lib.sh"
 a=$config/addons/management/openchoreo-types
