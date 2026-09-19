@@ -1,7 +1,7 @@
 {{/* Project (and namespace) name: <kind>-<name>. Every template includes it, so kind/name are validated once here. */}}
 {{- define "kargo-pipeline.project" -}}
-{{- if not (has .Values.kind (list "addon")) }}
-{{- fail (printf "kind %q is not supported (addon; app lands in Phase 3)" .Values.kind) }}
+{{- if not (has .Values.kind (list "addon" "app")) }}
+{{- fail (printf "kind %q is not supported (addon | app)" .Values.kind) }}
 {{- end }}
 {{- printf "%s-%s" .Values.kind (required "name is required" .Values.name) }}
 {{- end }}
@@ -21,4 +21,8 @@
 - { name: chart, value: {{ include "kargo-pipeline.chart" . | quote }} }
 - { name: namespace, value: {{ include "kargo-pipeline.namespace" . | quote }} }
 - { name: releaseName, value: {{ include "kargo-pipeline.releaseName" . | quote }} }
+{{- end }}
+{{- define "kargo-pipeline.vars.app" -}}
+- { name: app, value: {{ .Values.name | quote }} }
+- { name: image, value: {{ required "image (repository) is required for kind=app" .Values.image | quote }} }
 {{- end }}

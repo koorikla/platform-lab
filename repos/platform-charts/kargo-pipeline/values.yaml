@@ -1,12 +1,15 @@
-# One Kargo pipeline (Project <kind>-<name>) for one addon or app; an ApplicationSet instantiates it per folder.
-# Staged (travels with Freight): the chart and the addon's values. NOT staged: chart/namespace/releaseName below come
-# from addon.yaml on main and hit every stage at its next promotion - change them like a new addon, not a rollout.
-kind: addon                 # addon | app (Phase 3); anything else fails the render
-name: ""                    # required; == folder name under addons/workers/ (hack/lint.sh checks addon.yaml)
+# One Kargo pipeline (Project <kind>-<name>) for one addon or app; an ApplicationSet instantiates it per folder
+# (kargo-addon-pipelines: addons/workers/*/addon.yaml; kargo-app-pipelines: repos/apps/*/app.yaml).
+# Staged (travels with Freight): the chart and the addon's values; for apps the image tag, app.yaml, env values and the
+# openchoreo-app chart. NOT staged: chart/namespace/releaseName/image/imageConstraint below come from addon.yaml or
+# app.yaml on main and hit every stage at its next promotion - change them like a new addon/app, not a rollout.
+kind: addon                 # addon (task render-addon) | app (task render-app); anything else fails the render
+name: ""                    # required; == folder name under addons/workers/ or repos/apps/ (hack/lint.sh checks)
 chart: ""                   # addon: chart folder under repos/platform-charts (default: name)
 namespace: ""               # addon: target namespace (default: name)
 releaseName: ""             # addon: helm release name (default: name)
-image: ""                   # app: image repository (Warehouse subscription)
+image: ""                   # app (required): image repository (Warehouse subscription, render-app's imageFrom)
+imageConstraint: ""         # app: semver constraint for new tags, e.g. ^6.0.0 (empty: highest semver)
 repoURL: git@github.com:koorikla/platform-lab.git   # SSH: Kargo's credential is the repo deploy key; passed to the task
 stages:                     # order = promotion order; the first stage takes Freight straight from the Warehouse
   - { name: dev-canary, env: dev,  pr: false }   # name = stage + rendered/<name> branch; env = values overlay

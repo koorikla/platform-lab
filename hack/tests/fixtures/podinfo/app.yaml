@@ -1,4 +1,5 @@
-# Test fixture for the openchoreo-app chart, shaped like repos/apps/<app>/app.yaml (the real podinfo app is #16).
+# Test fixture for the openchoreo-app chart, shaped like repos/apps/<app>/app.yaml. Kept apart from the real
+# repos/apps/podinfo so app config changes don't move the chart tests' golden release name.
 # What the app is; no version: Kargo supplies image.tag (and env/stage) at render time.
 name: podinfo
 project: lab

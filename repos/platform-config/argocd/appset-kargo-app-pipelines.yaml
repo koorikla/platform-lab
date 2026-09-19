@@ -1,0 +1,40 @@
+# One Kargo pipeline (Project app-<name>) per app: repos/apps/<app>/app.yaml. app.yaml.disabled => no pipeline.
+# The pipeline renders the app's ComponentRelease into rendered/<stage>:apps/<app>/release/ (render-app
+# ClusterPromotionTask; the contract the hub appsets read is in its header).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: kargo-app-pipelines
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/koorikla/platform-lab.git            # apps repo
+        revision: main
+        files:
+          - path: repos/apps/*/app.yaml
+  template:
+    metadata:
+      name: 'kargo-app-{{ .path.basename }}'
+      labels:
+        platform.lab/app: '{{ .path.basename }}'
+    spec:
+      project: platform-mgmt
+      source:
+        repoURL: https://github.com/koorikla/platform-lab.git            # platform-charts repo
+        targetRevision: main
+        path: repos/platform-charts/kargo-pipeline
+        helm:
+          valuesObject:
+            kind: app
+            name: '{{ .path.basename }}'                       # folder name == app.yaml name (hack/lint.sh)
+            image: '{{ dig "image" "repository" "" . }}'       # required: empty fails the render, visibly per app
+            imageConstraint: '{{ dig "image" "constraint" "" . }}'
+      # only a default: every namespaced object sets its own app-<name> namespace, the rest is cluster-scoped
+      destination: { name: in-cluster, namespace: kargo }
+      syncPolicy:   # no preserveResourcesOnDeletion: a removed app's Kargo Project must go, or it keeps promoting
+        automated: { prune: true, selfHeal: true }
+        retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+        syncOptions: [ServerSideApply=true]

@@ -46,6 +46,16 @@ o=$(render podinfo $c -f $a/app.yaml -f $a/envs/dev/values.yaml --set env=dev --
       --set image.tag=6.15.0 --set parameters.foo=bar);                             validate release "$o"
 o=$(render podinfo $c --set mode=binding --set name=podinfo --set project=lab --set releaseName=podinfo-dev-1-0-0-abcdef12 \
       --set environment=dev1);                                                       validate binding "$o"
+# the real apps (repos/apps/<app>/app.yaml + envs/<env>/values.yaml), as render-app and #17's component appset render them
+for af in repos/apps/*/app.yaml; do
+  d=$(dirname "$af"); n=$(basename "$d")
+  o=$(render "$n" $c -f "$af" --set mode=component);                                 validate "$n component" "$o"
+  for e in "$d"/envs/*/; do
+    e=$(basename "$e")
+    o=$(render "$n" $c -f "$af" -f "$d/envs/$e/values.yaml" --set mode=release --set stage="$e" \
+          --set-literal image.tag=1.0.0);                                            validate "$n release $e" "$o"
+  done
+done
 # the check has teeth: an unknown field fails
 o=$(render podinfo $c -f $a/app.yaml --set mode=component)
 yq -i '.spec.bogus = 1' "$o"

@@ -37,3 +37,17 @@ render() {
   helm template "$@" > "$out" || fail "helm template $*"
   echo "$out"
 }
+# gotpl <template string> <context yaml file> -> the rendered string. ApplicationSets can't be rendered offline: this
+# executes a template with helm's `tpl` (text/template + sprig, like the appset controller) against params shaped like
+# the generators' output. Not covered: missingkey behaviour (helm's tpl runs missingkey=zero).
+gotpl() {
+  if [ ! -f "$tmp/tpl/Chart.yaml" ]; then
+    mkdir -p "$tmp/tpl/templates"
+    printf 'apiVersion: v2\nname: tpl\nversion: 0.0.0\n' > "$tmp/tpl/Chart.yaml"
+    echo 'out: {{ tpl .Values.t .Values.ctx | toJson }}' > "$tmp/tpl/templates/out.yaml"   # helm wants a mapping
+  fi
+  printf '%s' "$1" > "$tmp/t.txt"
+  yq -n ".ctx = load(\"$2\")" > "$tmp/ctx.yaml"
+  helm template tpl "$tmp/tpl" -f "$tmp/ctx.yaml" --set-file t="$tmp/t.txt" | yq -N '.out' ||
+    fail "gotpl: $1"
+}

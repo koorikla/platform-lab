@@ -38,6 +38,18 @@ done
 for f in $config/addons/*/*/addon.yaml*; do
   [ "$(yq '.addon.name' "$f")" = "$(basename "$(dirname "$f")")" ] || { echo "FAIL: $f: addon.name != folder"; exit 1; }
 done
+# apps: the folder names the Component and the Kargo project (app-<name>); render what Kargo's render-app (release per
+# env) and the hub (component) render. Flat file names, one release per stage: hack/tests/test_app_pipeline.sh
+for f in repos/apps/*/app.yaml; do
+  d=$(dirname "$f")
+  [ "$(yq '.name' "$f")" = "$(basename "$d")" ] || { echo "FAIL: $f: name != folder"; exit 1; }
+  [ -n "$(yq '.image.repository // ""' "$f")" ] || { echo "FAIL: $f: image.repository is required"; exit 1; }
+  render "$(basename "$d")" $charts/openchoreo-app -f "$f" --set mode=component
+  for e in "$d"/envs/*/; do
+    render "$(basename "$d")" $charts/openchoreo-app -f "$f" -f "$e/values.yaml" --set mode=release \
+      --set stage="$(basename "$e")" --set-literal image.tag=0.0.0-lint
+  done
+done
 # render-addon renders for the fleet's Kubernetes minor (charts gate on .Capabilities.KubeVersion)
 kv=$(awk -F'"' '/kubeVersion:/ {print $2}' $config/kargo/shared/render-addon.yaml | cut -d. -f1,2)
 # Enabled clusters only: disabled examples (e.g. eks-dev1, whose EKS version Renovate's k3s manager doesn't bump) are

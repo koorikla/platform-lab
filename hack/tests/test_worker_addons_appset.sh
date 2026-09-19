@@ -25,16 +25,6 @@ assert_yq "$a" '.spec | has("templatePatch")' false
 assert_yq "$a" '.spec.template.spec.syncPolicy.syncOptions | join(",")' \
   'CreateNamespace=true,ServerSideApply=true,SkipDryRunOnMissingResource=true'
 
-# gotpl <template string> <context yaml file> -> the rendered string
-mkdir -p "$tmp/tpl/templates"
-printf 'apiVersion: v2\nname: tpl\nversion: 0.0.0\n' > "$tmp/tpl/Chart.yaml"
-echo 'out: {{ tpl .Values.t .Values.ctx | toJson }}' > "$tmp/tpl/templates/out.yaml"   # helm wants a mapping
-gotpl() {
-  printf '%s' "$1" > "$tmp/t.txt"
-  yq -n ".ctx = load(\"$2\")" > "$tmp/ctx.yaml"
-  helm template tpl "$tmp/tpl" -f "$tmp/ctx.yaml" --set-file t="$tmp/t.txt" | yq -N '.out' ||
-    fail "gotpl: $1"
-}
 # [CLUSTER=<name>] app <addon folder> <cluster labels as k=v,...> [addon.yaml] -> the generated Application (file)
 app() {
   local dir=$config/addons/workers/$1 c="$tmp/cluster.yaml" p="$tmp/params.yaml" k out

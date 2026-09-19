@@ -1,6 +1,10 @@
-# env: test — image.tag is written by Kargo (stage "test")
+# env test: config frozen into the ComponentRelease (openchoreo-app values). No version: the image tag is the Kargo
+# Freight's.
+container:
+  env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ test" }]
+
+# LEGACY until #17: read only by the `workloads` appset (repos/apps/podinfo/chart, image = that chart's default tag);
+# openchoreo-app ignores it. #17 deletes this block together with chart/ and the appset.
 podinfo:
-  image:
-    tag: 6.15.0
   ui:
     message: "podinfo @ test"
