@@ -18,9 +18,12 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
      `destination.name: <cluster>`; agent cluster secrets carry `argocd.argoproj.io/skip-reconcile: "true"` (Argo CD >= 3.4).
 4. Addons are **umbrella charts** in `repos/platform-charts/<addon>` (upstream chart as dependency, extra templates
    allowed; more than one upstream dependency only when they must land in the same sync — e.g. kargo + argo-rollouts).
-   Config repo never contains templates, only `addon.yaml` + values + rollout pins.
-5. Version precedence for worker addons: cluster pin > env pin. Values: fleet < env < cluster. Kargo only ever writes
-   `envs/<env>.yaml` (addons) or `envs/<env>/values.yaml` (apps).
+   Config repo never contains templates, only `addon.yaml` + values.
+5. **Kargo writes only `rendered/*` branches; `main` holds no versions for promoted things.** A worker addon's version
+   is the Freight (a `main` commit of its chart + config) rendered into `rendered/<stage>`; values: fleet < env, nothing
+   per cluster. Anything per-cluster is identity only (cluster name), stamped by the CAAPH birth kit. Rings replace
+   pins: run clusters ahead with `ring: canary` (stage `<env>-canary`). Exception until #16/#17: the `podinfo` app
+   pipeline still writes `repos/apps/podinfo/envs/<env>/values.yaml` on `main`.
 6. `repos/*` folders are future repositories: no relative references across them except via ApplicationSet
    `repoURL`/`$values`. Splitting = change repoURLs + drop the `repos/<x>/` path prefix.
 7. CA private keys never leave the hub. Worker credentials are issued on the hub (cert-manager), written to the hub's
@@ -42,7 +45,9 @@ builds k3s cluster → `openbao-fleet-sync` CronJob adds `auth/k8s-<name>` → C
 (controller/repo/redis), argocd-agent, ESO and `secret-bootstrap` (store `hub-openbao` + agent ExternalSecrets) →
 worker ESO pulls the cert via `mgmt-lb:30820` → agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) →
 ESO-rendered cluster secret makes the cluster selectable → `worker-addons` / `workloads` appsets generate labelled Applications → principal
-ships them → worker reconciles.
+ships them → worker reconciles. Worker addon content: a `main` commit touching the addon → Freight of Kargo project
+`addon-<name>` (`kargo-addon-pipelines` appset) → stages `dev-canary → dev → test → prod` render fleet < env values into
+`rendered/<stage>:addons/<name>/` → `worker-addons` syncs that folder by the cluster's env + ring.
 
 ## Hub access
 Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of container `mgmt-lb`>; bootstrap re-points it).
@@ -85,7 +90,8 @@ verification under `hack/lab-lock.sh`). Design/plan background: `docs/plans/`.
 
 ## Conventions
 Minimal readable YAML; comments explain *why*. Label prefix `platform.lab/`. Namespaces: `argocd`, `fleet`, `kargo`.
-New addon = umbrella chart + `addons/<scope>/<name>/{addon.yaml,values.yaml}` (+ `envs/*.yaml` for workers).
+New addon = umbrella chart + `addons/<scope>/<name>/{addon.yaml,values.yaml}` (+ optional `envs/<env>.values.yaml`
+for workers; nothing else in a worker addon folder, `make test` checks).
 New cluster = one file in `fleet/clusters/<env>/`.
 Worker addons sync plain YAML from Kargo's `rendered/<env>[-canary]:addons/<addon>/` (`worker-addons` appset, branch
 from cluster labels `platform.lab/env` + `platform.lab/ring`). Disable one = rename `addon.yaml` → `.disabled` on main:

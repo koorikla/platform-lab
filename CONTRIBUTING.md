@@ -85,7 +85,7 @@ with `repos/`.
    `repos/platform-charts/cluster/values.yaml`):
    - `name`: unique, DNS-safe. It becomes the CAPI Cluster, agent name, cert CN and Argo destination (invariant 1).
      Never rename a running cluster; create a new one.
-   - `env`: `dev` | `test` | `prod`. Selects env values and pins for addons and apps.
+   - `env`: `dev` | `test` | `prod`. Selects the `rendered/<env>` branch for addons and the env values for apps.
    - `provider`, `region`, `clusterClass`: `docker`, `local`, `k3s-docker` today.
    - `kubernetesVersion`: a k3s version. Keep the minor equal to the fleet's (`make lint` checks it against
      `kargo/shared/render-addon.yaml`).
@@ -137,19 +137,19 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
 2. **Config** `addons/workers/<name>/`:
    - `addon.yaml`: `addon.name` (== folder name, lint checks it), `chart`, `namespace`, `releaseName`
      (see `addons/workers/cert-manager/addon.yaml`).
-   - `values.yaml`: fleet-wide values. Optional `envs/<env>.values.yaml` (per env) and `clusters/<cluster>.values.yaml`
-     (one cluster). Precedence: fleet < env < cluster.
-   - `envs/{dev,test,prod}.yaml`: rollout pin per env (`rollout.chartRevision: main`, `rollout.clusters: {}`). **Every
-     env the addon should run in needs this file**; without it the `worker-addons` appset generates nothing there.
-     Pins and per-cluster values are removed once workers sync rendered branches (#3, #4).
+   - `values.yaml`: fleet-wide values. Optional `envs/<env>.values.yaml` (per env). Precedence: fleet < env.
+   - Nothing else: no version pins (the version is the Freight Kargo promotes) and no per-cluster values (a render is
+     per env, not per cluster). `make test` fails on any other file in the folder. Something that must differ per
+     cluster is cluster identity and belongs in the birth kit (step 5).
 3. **What appears automatically** on merge:
-   - Argo CD Application `<name>-<cluster>` for every worker (`worker-addons` appset, project `platform-workers`,
-     label `argocd-agent: "true"`), shipped to the cluster by the principal. Today it syncs the chart from `main` at
-     the env pin, so a merge reaches every cluster of that env.
    - Kargo project `addon-<name>` (`kargo-addon-pipelines` appset → `repos/platform-charts/kargo-pipeline`): a
      Warehouse on commits touching the chart or the addon's config, and stages `dev-canary → dev → test → prod` that
      `helm template` fleet + env values into `rendered/<stage>:addons/<name>/` (`kargo/shared/render-addon.yaml`).
-     Workers don't consume those branches yet; switching `worker-addons` to them is #3.
+     `dev-canary` and `dev` auto-promote the new Freight; `test` and `prod` wait for a manual promotion.
+   - Argo CD Application `<name>-<cluster>` for every worker (`worker-addons` appset, project `platform-workers`,
+     label `argocd-agent: "true"`), shipped to the cluster by the principal. It syncs `addons/<name>/` of
+     `rendered/<env>` (`rendered/<env>-canary` for `ring: canary` clusters) as plain YAML. Until the first promotion
+     to a stage has rendered the addon, the Applications of that env show a ComparisonError (path missing).
 4. Rendering happens on the hub for the fleet's Kubernetes version: no `lookup()`, and `.Capabilities` only knows the
    `apiVersions` listed in `render-addon.yaml`. Every resource needs a `metadata.name`.
 5. Anything bound to a cluster's identity (its name, its credentials) does not belong in a worker addon: it goes into
@@ -157,12 +157,10 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
 6. Hub and workers resolve a fixed list of registry/git domains through public resolvers (`coredns-custom`:
    `fleet/base/hub-coredns.yaml` for the hub, its copy in the birth kit for workers; a test keeps them equal), because
    the Docker Desktop resolver times out now and then. A new chart or image registry goes into both lists.
-7. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled`. **Today that deletes the addon from every
-   worker**: the generated Applications carry the resources finalizer, so their resources go with them, CRDs included,
-   and every custom resource of those CRDs with them. The Kargo pipeline goes away too. Safe procedure: remove the
-   addon's consumers first (anything using its CRDs), then disable it under the lab lock and watch the workers. Never
-   disable an addon whose CRDs other addons still use (e.g. `cert-manager`, `gateway-api-crds`). Keeping resources on
-   disable, plus cleaning stale `rendered/*` folders, comes with #3.
+7. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled`: its Applications and Kargo pipeline go, but
+   what it deployed stays on the workers (`worker-addons` sets `preserveResourcesOnDeletion`); delete that by hand if
+   it must go, consumers of its CRDs first. Once project `addon-<name>` is gone, `make rendered-prune` (dry run) /
+   `make rendered-prune APPLY=1` removes the stale `addons/<name>` from every `rendered/*` branch.
 
 ### Add a hub addon
 1. Umbrella chart as above.
@@ -207,11 +205,14 @@ Kargo UI: `make ui` → http://localhost:8081, user `admin`, password from `make
 - **podinfo** (project `podinfo`, `kargo/podinfo/`): Warehouse on `ghcr.io/stefanprodan/podinfo` (semver `^6`).
   `dev` auto-promotes, `test`/`prod` by hand. A promotion commits `podinfo.image.tag` into
   `repos/apps/podinfo/envs/<env>/values.yaml` on `main`.
-- **Canary ring**: a cluster with `ring: canary` in its fleet file gets label `platform.lab/ring=canary`; the
-  `dev-canary` stage renders to `rendered/dev-canary` first. Canary clusters following that branch lands with #3,
-  proven end to end in #5. Until then, run one cluster ahead with a pin: `rollout.clusters.<cluster>.chartRevision`
-  in `addons/workers/<addon>/envs/<env>.yaml`, or `repos/apps/<app>/clusters/<cluster>/values.yaml` for apps.
-- Never edit `rendered/*` by hand. Editing `envs/<env>.yaml` by hand is break-glass only: say so in the PR.
+- **Canary ring** (worker addons): rings replace per-cluster version pins. To run a cluster ahead of its env, set
+  `ring: canary` in its fleet file (label `platform.lab/ring=canary`): its Applications follow `rendered/<env>-canary`,
+  which the `<env>-canary` stage renders before `<env>`. Only `dev-canary` exists today (a canary cluster needs that
+  stage; `make lint` checks). To hold the rest of dev until the canary looks good, drop `dev` from `autoPromote` in
+  `repos/platform-charts/kargo-pipeline/values.yaml` and promote `dev` by hand. End to end proof with dev2: #5. For
+  apps (until #16/#17), one cluster can still run ahead with `repos/apps/<app>/clusters/<cluster>/values.yaml`.
+- Never edit `rendered/*` by hand (the one documented exception is `make rendered-prune`). There is no pin file on
+  `main` to edit for a break-glass: roll back by promoting older Freight to the stage (Kargo UI, stage → Freight).
 
 ### Add an app
 Today (the `workloads` appset; every folder in `repos/apps/` is an app):
@@ -295,11 +296,11 @@ It covers:
   OpenChoreo have to support first).
 
 PRs are grouped per area and labelled `dependencies` plus the `area:*` label. Nothing automerges. Everything under
-`addons/workers/*/envs/` and `repos/apps/*/envs/` is ignored (Kargo writes there; the hand-written
-`envs/<env>.values.yaml` next to the pins are skipped too). When Renovate changes a chart through a regex-managed pin
-(`capi-providers/values.yaml`, `cluster/values.yaml`), bump that chart's `version` in the PR (the PR body says so).
+`repos/apps/*/envs/` is ignored (Kargo writes the image tag there). When Renovate changes a chart through a
+regex-managed pin (`capi-providers/values.yaml`, `cluster/values.yaml`), bump that chart's `version` in the PR (the PR
+body says so).
 
-Where a merged bump goes: hub addons and the birth kit deploy at merge. Worker addons also reach every worker at
-merge today (pins at `main`); after #3 lands, a chart bump becomes Kargo Freight and goes dev-canary → dev → test →
-prod. App chart bumps always deploy at merge (see [Add an app](#add-an-app)). Review a Renovate PR like any other:
+Where a merged bump goes: hub addons and the birth kit deploy at merge. A worker addon chart bump becomes Kargo
+Freight and goes dev-canary → dev → test → prod. App chart bumps always deploy at merge (see
+[Add an app](#add-an-app)). Review a Renovate PR like any other:
 upstream changelog, `make lint && make test`, and live verification under the lab lock when it changes the lab.

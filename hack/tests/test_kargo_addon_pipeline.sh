@@ -10,6 +10,14 @@ assert_yq "$o" 'select(.kind=="Project") | .metadata.name' addon-cert-manager
 assert_yq "$o" 'select(.kind=="Warehouse") | .spec.subscriptions[0].git.includePaths | join(",")' \
   'repos/platform-charts/cert-manager/,repos/platform-config/addons/workers/cert-manager/'
 assert_yq "$o" 'select(.kind=="Warehouse") | .spec.subscriptions[0].git.repoURL' 'git@github.com:koorikla/platform-lab.git'
+# everything in the addon's config folder is rendered (fleet + env values), so all of it is Freight: no excludes
+assert_yq "$o" 'select(.kind=="Warehouse") | .spec.subscriptions[0].git | has("excludePaths")' false
+# ...and the folder holds nothing else: no rollout pins (envs/<env>.yaml), no per-cluster values (clusters/). Versions
+# travel as Freight into rendered/<stage>; per-cluster identity comes from the CAAPH birth kit (invariants 5, 7).
+for a in $config/addons/workers/*/; do
+  extra=$(cd "$a" && find . -type f ! -name 'addon.yaml*' ! -path ./values.yaml ! -path './envs/*.values.yaml' | sort)
+  [ -z "$extra" ] || fail "$a: only addon.yaml, values.yaml, envs/<env>.values.yaml belong here, found: $extra"
+done
 assert_yq "$o" 'select(.kind=="ProjectConfig") | .spec.promotionPolicies | map(.stageSelector.name) | join(",")' 'dev-canary,dev'
 # stage chain: first takes Freight from the Warehouse, each next one from its predecessor
 assert_yq "$o" '[select(.kind=="Stage")] | map(.metadata.name) | join(",")' 'dev-canary,dev,test,prod'

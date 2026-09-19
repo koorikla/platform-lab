@@ -22,7 +22,7 @@ the evidence on the issue: key lines only, never secret material. -->
 - [ ] Cluster facts only in `fleet/clusters/<env>/<name>.yaml`; no cluster names hardcoded in ApplicationSets
 - [ ] Anything for workers carries `argocd-agent: "true"` (Application and AppProject) and `destination.name`
 - [ ] Addons are umbrella charts; the config repo holds no templates
-- [ ] Kargo-owned files (`rendered/*`, `envs/<env>.yaml`, `envs/<env>/values.yaml`) not hand-edited (break-glass: say so)
+- [ ] Kargo-owned files (`rendered/*`, `repos/apps/*/envs/<env>/values.yaml`) not hand-edited (break-glass: say so)
 - [ ] No relative references across `repos/*`
 - [ ] CA keys stay on the hub; worker secrets are pulled from OpenBao; no secret material in git, logs or this PR
 - [ ] Enable/disable by `.yaml.disabled`, not by commenting out

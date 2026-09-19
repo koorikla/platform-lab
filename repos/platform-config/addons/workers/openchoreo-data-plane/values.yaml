@@ -1,2 +1,2 @@
-# clusterAgent.planeId must equal the DataPlane.spec.planeID rendered by the `cluster` chart (= cluster name).
-# TODO: planeId is per cluster -> set it in clusters/<cluster>.values.yaml or move to an appset helm parameter.
+# clusterAgent.planeID must equal the DataPlane.spec.planeID rendered by the `cluster` chart (= cluster name).
+# It is per-cluster identity, so it can't live here (rendered once per env): it moves to the CAAPH birth kit (#14).

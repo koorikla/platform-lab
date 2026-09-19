@@ -30,10 +30,6 @@ for env in dev test prod; do
   w=$(render gateway-api-crds $charts/gateway-api-crds -n kube-system --include-crds --skip-tests "${f[@]}")
   check "$w"
 done
-# the worker addon takes part in the rollout (worker-addons appset + Kargo pipeline need envs/<env>.yaml)
-for env in dev test prod; do
-  [ -f $config/addons/workers/gateway-api-crds/envs/$env.yaml ] || fail "missing envs/$env.yaml (rollout pin)"
-done
 for s in management workers; do
   assert_yq $config/addons/$s/gateway-api-crds/addon.yaml '.addon.namespace' kube-system
 done
