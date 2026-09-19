@@ -20,8 +20,12 @@ spec:
   topology:
     class: {{ .Values.clusterClass }}
     version: {{ .Values.kubernetesVersion }}
+    {{- if kindIs "invalid" .Values.controlPlaneReplicas }}
+    controlPlane: {}             # managed control plane (EKS): no replicas
+    {{- else }}
     controlPlane:
       replicas: {{ .Values.controlPlaneReplicas }}
+    {{- end }}
     {{- with .Values.variables }}
     variables:
       {{- toYaml . | nindent 6 }}

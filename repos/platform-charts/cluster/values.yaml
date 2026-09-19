@@ -12,9 +12,9 @@ argocdNamespace: argocd
 
 clusterClass: k3s-docker
 kubernetesVersion: v1.34.11+k3s1
-controlPlaneReplicas: 1
+controlPlaneReplicas: 1        # null for a managed control plane (EKS): the Cluster then sets no replicas
 workerReplicas: 1
-workerClass: k3s-default-worker
+workerClass: k3s-default-worker   # a machineDeployments class of the ClusterClass (eks: default-worker)
 variables:                     # ClusterClass variables, provider specific
   - name: kindImageVersion
     value: v1.34.0
