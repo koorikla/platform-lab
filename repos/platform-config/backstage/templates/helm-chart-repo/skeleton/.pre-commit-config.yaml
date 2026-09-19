@@ -1,0 +1,47 @@
+# `pre-commit install` sets up both hook types; CI runs `pre-commit run --all-files` (commit-msg hooks excluded).
+# helm hooks run the locally installed helm (language: system), the rest bring their own environments.
+default_install_hook_types: [pre-commit, commit-msg]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-yaml
+        exclude: ^templates/   # Go templates, not YAML: helm lint/template check them
+      - id: check-toml
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: [--strict]
+        exclude: ^templates/
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        # feat and fix are always allowed; `bump` is the release commit written by commitizen
+        args: [build, chore, ci, docs, perf, refactor, revert, style, test, bump]
+
+  - repo: local
+    hooks:
+      # `helm dependency build` falls back to `update` while Chart.lock does not exist yet: commit the lock it writes
+      - id: helm-lint
+        name: helm lint
+        entry: sh -c 'helm dependency build . >/dev/null && helm lint --strict .'
+        language: system
+        pass_filenames: false
+        files: ^(Chart\.(yaml|lock)|values\.yaml|templates/.*)$
+      - id: helm-template
+        name: helm template
+        entry: sh -c 'helm dependency build . >/dev/null && helm template ci . >/dev/null'
+        language: system
+        pass_filenames: false
+        files: ^(Chart\.(yaml|lock)|values\.yaml|templates/.*|ci/.*)$

@@ -1,0 +1,1 @@
+{{ .Chart.Name }} {{ .Chart.Version }} (app {{ .Chart.AppVersion }}) is installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.

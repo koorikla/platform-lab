@@ -1,0 +1,17 @@
+# Kept out of the packaged chart: repository tooling, CI and caches.
+.git/
+.gitignore
+.cache/
+dist/
+ci/
+.gitlab-ci.yml
+.pre-commit-config.yaml
+.yamllint
+.cz.toml
+.helmignore
+CODEOWNERS
+catalog-info.yaml
+*.swp
+.DS_Store
+.idea/
+.vscode/

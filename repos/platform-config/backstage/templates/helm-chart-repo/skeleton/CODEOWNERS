@@ -1,0 +1,2 @@
+# Reviews are required once "Code owner approval" is on for the protected branch main.
+* @${{ values.repoOwner }}

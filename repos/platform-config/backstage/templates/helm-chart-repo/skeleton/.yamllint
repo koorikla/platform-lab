@@ -1,0 +1,20 @@
+extends: default
+
+ignore: |
+  templates/
+  charts/
+  .cache/
+
+rules:
+  line-length:
+    max: 120
+  document-start: disable
+  # GitLab CI and flow-style lists read better with `{ a: b }` / `[ a ]`
+  braces:
+    max-spaces-inside: 1
+  brackets:
+    max-spaces-inside: 1
+  comments:
+    min-spaces-from-content: 1
+  truthy:
+    check-keys: false
