@@ -74,8 +74,15 @@ make kubeconfig CLUSTER=dev1 > dev1.kubeconfig
 Linux hosts running several CAPD clusters usually need
 `sysctl fs.inotify.max_user_watches=1048576 fs.inotify.max_user_instances=8192`.
 
-Kargo needs git push credentials: see `repos/platform-config/kargo/podinfo/git-credentials.yaml.example`.
+Kargo needs git push credentials: `hack/kargo-deploy-key.sh` (repo-scoped deploy key, straight into a hub Secret).
+
+## Working on this repo
+
+Backlog = [GitHub issues](https://github.com/koorikla/platform-lab/issues). How work flows (claim → worktree branch →
+tests → PR → review → live verification under `hack/lab-lock.sh`) and recipes for adding a cluster, addon, app or
+provider: [CONTRIBUTING.md](CONTRIBUTING.md). Agents use the skill in
+[`.claude/skills/platform-lab-issue`](.claude/skills/platform-lab-issue/SKILL.md). Invariants: [CLAUDE.md](CLAUDE.md).
 
 ## Status
 
-Boots end to end on Docker Desktop (CAPI pivot + agent path verified). Open items and remaining `# VERIFY` markers are tracked in [CLAUDE.md](CLAUDE.md). Needs ~8 GB RAM and ≥25 GB free Docker disk for hub + one worker.
+Boots end to end on Docker Desktop (CAPI pivot + agent path verified). Open items are GitHub issues; `grep -rn VERIFY repos/` lists values still inferred rather than confirmed. Needs ~8 GB RAM and ≥25 GB free Docker disk for hub + one worker.
