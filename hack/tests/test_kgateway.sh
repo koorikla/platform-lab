@@ -34,7 +34,7 @@ w=$config/addons/workers/kgateway
 assert_yq $w/addon.yaml '.addon.namespace' openchoreo-data-plane
 assert_yq $w/addon.yaml '.addon.namespace' "$(yq '.addon.namespace' $config/addons/workers/openchoreo-data-plane/addon.yaml*)"
 for env in dev test prod; do
-  f=(-f $w/values.yaml); [ ! -f $w/envs/$env.values.yaml ] || f+=(-f $w/envs/$env.values.yaml)
+  f=(-f "$w/values.yaml"); [ ! -f "$w/envs/$env.values.yaml" ] || f+=(-f "$w/envs/$env.values.yaml")
   r=$(render kgateway $charts/kgateway -n openchoreo-data-plane --include-crds --skip-tests "${f[@]}")
   check "$r" openchoreo-data-plane
   # Kargo commits the render to rendered/<env>: it must be reproducible (no chart-generated certs/secrets/randomness),
