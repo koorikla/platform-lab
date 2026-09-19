@@ -81,7 +81,9 @@ openbao:
 
 # ClusterSecretStore `openbao` (hub-writer): only these namespaces may push through it
 hubWriter:
-  namespaces: [argocd]            # cluster chart: PushSecret <name>-argocd-agent
+  namespaces:
+    - argocd                      # cluster chart: PushSecret <name>-argocd-agent
+    - openchoreo-control-plane    # cluster chart: PushSecrets <name>-openchoreo-agent, <name>-openchoreo-gateway-ca
 
 # OpenChoreo secrets (templates/openchoreo.yaml): each key generated once in-cluster, kept in Secret
 # openbao/openchoreo-<key> (key `value`) and pushed to secret/openchoreo/<key> (property `value`);

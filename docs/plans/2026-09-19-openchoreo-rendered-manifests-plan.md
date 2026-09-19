@@ -797,6 +797,22 @@ control-plane umbrella (Namespace object with SSA) or pick a dedicated namespace
 dev2; **Backstage catalog shows Dataplanes dev1/dev2 and Environments `dev / dev1`, `dev / dev2`** (connected=false
 until 2.8). Commit.
 
+**As built (#13), overrides the text above:** `templates/openchoreo.yaml`, test `hack/tests/test_cluster_openchoreo.sh`.
+- No `openchoreo.enabled`: rendered for `role: worker` when `.Capabilities.APIVersions.Has
+  "openchoreo.dev/v1alpha1/ClusterDataPlane"` (Argo passes the hub's API versions to helm and they are part of its
+  manifest cache key), so registration follows the `openchoreo-control-plane` addon file and cluster apps don't fail
+  while OpenChoreo isn't installed. Offline renders need `--api-versions openchoreo.dev/v1alpha1/ClusterDataPlane`.
+- CA chain in `openchoreo-control-plane` (next to the cluster-gateway, like the argocd-agent CA next to the principal):
+  per-cluster selfSigned `Issuer <name>-openchoreo-agent-selfsigned` (no shared ClusterIssuer) → CA
+  `<name>-openchoreo-agent-ca` → client cert `<name>-openchoreo-agent-tls` (CN = name).
+- Pull model instead of the worker ClusterSecretStore: PushSecrets through `ClusterSecretStore openbao` write
+  `secret/clusters/<name>/openchoreo-agent` (tls.crt, tls.key, ca.crt) and `secret/clusters/<name>/openchoreo-gateway-ca`
+  (ca.crt of upstream's `cluster-gateway-ca`, the CA of the gateway's server cert). openbao `hubWriter.namespaces` gains
+  `openchoreo-control-plane`. #14 pulls them into `openchoreo-data-plane/cluster-agent-tls` + ConfigMap `cluster-gateway-ca`.
+- `ClusterDataPlane <name>`: `clientCA.secretKeyRef {namespace: openchoreo-control-plane, name: <name>-openchoreo-agent-ca,
+  key: ca.crt}`, no `secretStoreRef`, ingress `openchoreo-data-plane/gateway-default` http :80 host `<name>.apps.lab.localhost`.
+  `Environment <name>` in `default`, display name `<env> / <name>`. Both carry the `platform.lab/*` labels.
+
 ### Task 2.8: Data plane on workers (via rendered addons)
 
 **Files:** Modify `repos/platform-charts/openchoreo-data-plane/values.yaml`,

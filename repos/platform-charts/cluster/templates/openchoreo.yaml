@@ -1,0 +1,133 @@
+{{- /*
+Registers a worker in OpenChoreo (control plane on the hub): Backstage lists the ClusterDataPlane and the Environment
+as soon as they exist, connected or not. The data plane itself (cluster-agent) is the worker's birth kit (#14).
+Only when the hub serves the OpenChoreo CRDs: Argo passes the cluster's API versions to helm, so this follows the
+openchoreo-control-plane addon (addon.yaml / .disabled) and cluster apps keep syncing while it isn't installed.
+*/}}
+{{- if and (eq .Values.role "worker") (.Capabilities.APIVersions.Has "openchoreo.dev/v1alpha1/ClusterDataPlane") }}
+{{- $n := .Values.name }}
+{{- $oc := .Values.openchoreo }}
+# 1. Per-cluster agent CA. The cluster-gateway takes planeID from the agent's URL and only checks that the client cert
+#    chains to a CA of a plane with that planeID (not the CN): one shared CA would let any agent claim any plane.
+#    Its key stays here; the gateway reads ca.crt through the ClusterDataPlane below.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $n }}-openchoreo-agent-selfsigned
+  namespace: {{ $oc.namespace }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $n }}-openchoreo-agent-ca
+  namespace: {{ $oc.namespace }}
+spec:
+  isCA: true
+  commonName: {{ $n }}-openchoreo-agent-ca
+  secretName: {{ $n }}-openchoreo-agent-ca
+  duration: 87600h              # 10y lab CA; rotating it = new client cert too (both re-pushed, worker re-pulls)
+  privateKey: { algorithm: ECDSA, size: 256 }
+  issuerRef: { name: {{ $n }}-openchoreo-agent-selfsigned, kind: Issuer }
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $n }}-openchoreo-agent-ca
+  namespace: {{ $oc.namespace }}
+spec:
+  ca: { secretName: {{ $n }}-openchoreo-agent-ca }
+---
+# 2. The agent's client cert (CN = planeID = cluster name, invariant 1)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $n }}-openchoreo-agent-tls
+  namespace: {{ $oc.namespace }}
+spec:
+  secretName: {{ $n }}-openchoreo-agent-tls
+  commonName: {{ $n }}
+  usages: [client auth]
+  privateKey: { algorithm: ECDSA, size: 256 }
+  issuerRef: { name: {{ $n }}-openchoreo-agent-ca, kind: Issuer }
+---
+# 3. Pull model (CLAUDE.md invariant 7): client cert -> secret/clusters/<name>/openchoreo-agent, the gateway's server CA
+#    (public, shared by all planes; copied per cluster so a worker reads only its own path) ->
+#    secret/clusters/<name>/openchoreo-gateway-ca. The worker's ESO pulls both (#14: Secret cluster-agent-tls and
+#    ConfigMap cluster-gateway-ca in openchoreo-data-plane). Only the listed keys leave: never the gateway CA's key.
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: {{ $n }}-openchoreo-agent
+  namespace: {{ $oc.namespace }}
+spec:
+  refreshInterval: 1m           # OpenBao dev mode (in-memory): refill quickly after a restart
+  updatePolicy: Replace
+  deletionPolicy: Delete        # PushSecret deleted -> its material leaves OpenBao
+  secretStoreRefs:
+    - { kind: ClusterSecretStore, name: {{ .Values.openbao.store }} }
+  selector:
+    secret:
+      name: {{ $n }}-openchoreo-agent-tls
+  data:
+    {{- range list "tls.crt" "tls.key" "ca.crt" }}
+    - match: { secretKey: {{ . }}, remoteRef: { remoteKey: clusters/{{ $n }}/openchoreo-agent, property: {{ . }} } }
+    {{- end }}
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: {{ $n }}-openchoreo-gateway-ca
+  namespace: {{ $oc.namespace }}
+spec:
+  refreshInterval: 1m
+  updatePolicy: Replace
+  deletionPolicy: Delete
+  secretStoreRefs:
+    - { kind: ClusterSecretStore, name: {{ .Values.openbao.store }} }
+  selector:
+    secret:
+      name: {{ $oc.gatewayCASecret }}
+  data:
+    - match: { secretKey: ca.crt, remoteRef: { remoteKey: clusters/{{ $n }}/openchoreo-gateway-ca, property: ca.crt } }
+---
+# 4. The data plane. planeID == name == cluster name (invariant 1): the worker's agent dials with --plane-id=<name>.
+#    No secretStoreRef: it names a ClusterSecretStore on the worker (optional; none there yet).
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterDataPlane
+metadata:
+  name: {{ $n }}
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+  annotations:
+    openchoreo.dev/display-name: {{ $n }}
+    openchoreo.dev/description: {{ printf "%s cluster %s (ring %s, %s/%s)" .Values.env $n .Values.ring .Values.provider .Values.region | quote }}
+spec:
+  planeID: {{ $n }}
+  clusterAgent:
+    clientCA:
+      # cluster-scoped CR: without a namespace the gateway would look in "" -> always set it
+      secretKeyRef: { name: {{ $n }}-openchoreo-agent-ca, namespace: {{ $oc.namespace }}, key: ca.crt }
+  gateway:
+    ingress:
+      external:
+        name: {{ $oc.dataPlaneGateway.name }}
+        namespace: {{ $oc.dataPlaneGateway.namespace }}
+        http: { host: {{ printf "%s.%s" $n $oc.appsDomain }}, listenerName: http, port: 80 }
+---
+# 5. One Environment per cluster (dataPlaneRef is immutable, so an Environment can't span clusters).
+apiVersion: openchoreo.dev/v1alpha1
+kind: Environment
+metadata:
+  name: {{ $n }}
+  namespace: {{ $oc.orgNamespace }}
+  labels:
+    {{- include "cluster.labels" . | nindent 4 }}
+  annotations:
+    openchoreo.dev/display-name: {{ printf "%s / %s" .Values.env $n | quote }}
+    openchoreo.dev/description: {{ printf "%s cluster %s (ring %s)" .Values.env $n .Values.ring | quote }}
+spec:
+  dataPlaneRef: { kind: ClusterDataPlane, name: {{ $n }} }
+  isProduction: {{ eq .Values.env "prod" }}
+{{- end }}
