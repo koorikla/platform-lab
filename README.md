@@ -12,7 +12,7 @@ flowchart LR
     kargo[Kargo]
     eso["cert-manager + ESO"]
     bao["OpenBao (secret/clusters/&lt;name&gt;)"]
-    oc["OpenChoreo control plane (phase 2)"]
+    oc["OpenChoreo control plane + Thunder"]
   end
   subgraph dev1["dev1 (k3s via CAPI)"]
     agent["argocd-agent (managed)"]
@@ -75,7 +75,8 @@ make up        # k3d bootstrap -> CAPI creates hub 'mgmt' -> clusterctl move (hu
                # -> rendered/* branches + Kargo deploy key. Re-run after a failure: resumes at the detected stage
 make status
 make ui        # Argo CD :8090 (admin / make argocd-password), Kargo :8091 (admin / make kargo-password),
-               # OpenChoreo http://openchoreo.localhost:8080 (once enabled)
+               # OpenChoreo http://openchoreo.localhost:8080 (Thunder login: upstream demo users,
+               # e.g. admin@openchoreo.dev, see repos/platform-charts/thunder/values.yaml)
 make kubeconfig CLUSTER=dev1 > dev1.kubeconfig
 make down      # workers via CAPI (waits for their containers), then the hub's containers; FORCE=1 if the hub is gone
 ```

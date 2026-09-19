@@ -1,0 +1,12 @@
+# OpenChoreo's org namespace: openchoreo-api (and so Backstage's catalog) and the event-forwarder only see namespaces
+# labelled openchoreo.dev/control-plane=true. Upstream labels `default` with kubectl after the install
+# (install/k3d/multi-cluster/README.md @ v1.2.5); here Argo applies just this label with server-side apply.
+# `default` belongs to Kubernetes: never delete it with the app, never prune it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.orgNamespace }}
+  labels:
+    openchoreo.dev/control-plane: "true"
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false,Prune=false,ServerSideApply=true

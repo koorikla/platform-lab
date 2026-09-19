@@ -39,7 +39,7 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
 ## Flow
 bootstrap.sh → k3d `bootstrap` + cert-manager/capi-operator/capi-providers (same charts+values as GitOps, applied with
 `helm template | kubectl apply`) → Cluster `mgmt` (`fleet/clusters/mgmt/mgmt.yaml`, role=management, ClusterClass
-variable `managementCluster=true`: docker.sock in nodes + LB frontends :30443, :30820) → same CAPI stack on mgmt →
+variable `managementCluster=true`: docker.sock in nodes + LB frontends :30443, :30820, :30843) → same CAPI stack on mgmt →
 `clusterctl move -n fleet` → delete k3d → helm install `repos/platform-charts/argo-cd` (release `argocd`) → `root` app
 (then `post`: `hack/init-rendered-branches.sh`, and `hack/kargo-deploy-key.sh` if gh is logged in and the secret is missing) →
 `platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, OpenBao, principal, capi-operator,
@@ -56,6 +56,7 @@ ships them → worker reconciles. Worker addon content: a `main` commit touching
 ## Hub access
 Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of container `mgmt-lb`>; bootstrap re-points it).
 UIs: `make ui` (port-forwards: OpenChoreo `*.openchoreo.localhost:8080`, Argo CD :8090, Kargo :8091). Hub `Cluster` carries `Delete=false,Prune=false`.
+Worker-facing hub ports on `mgmt-lb`: :30443 argocd-agent principal, :30820 OpenBao, :30843 OpenChoreo cluster gateway.
 `make up` is resumable: `bootstrap/bootstrap.sh stage` prints the detected stage (fresh / bootstrap / hub-requested /
 pivot-partial / pivoted / argo / orphan) and the steps left; a failed API read aborts rather than counting as absent.
 `make down` never runs `kind delete`: Argo scaled to 0, workers deleted via CAPI and awaited, then containers labelled
