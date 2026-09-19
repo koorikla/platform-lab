@@ -8,6 +8,9 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
+  # disabling a cluster file deletes only its Application, not Cluster/<name> (CAPI would tear the cluster down).
+  # Removing a cluster is a manual delete: CLAUDE.md "Disabling".
+  syncPolicy: { preserveResourcesOnDeletion: true }
   generators:
     - git:
         repoURL: https://github.com/koorikla/platform-lab.git

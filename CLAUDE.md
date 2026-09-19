@@ -85,6 +85,15 @@ verification under `hack/lab-lock.sh`). Design/plan background: `docs/plans/`.
 
 ## Conventions
 Minimal readable YAML; comments explain *why*. Label prefix `platform.lab/`. Namespaces: `argocd`, `fleet`, `kargo`.
+**Disabling** a hub addon (`addons/management/<x>/addon.yaml.disabled`) or a cluster file (`<name>.yaml.disabled`)
+deletes only the Argo CD Application: `mgmt-addons` and `fleet-clusters` set `preserveResourcesOnDeletion`, so what it
+installed keeps running unmanaged, and re-enabling adopts it again (same app name → same tracking id). Every appset is
+classified preserve/cascade in `hack/tests/test_appset_deletion.sh`. Real removal is manual, under the lab lock:
+list the app's resources first, disable, then delete them by hand — CRDs last and only when no CRs are left:
+`kubectl -n argocd get app <app> -o jsonpath='{range .status.resources[*]}{.kind} {.namespace}/{.name}{"\n"}{end}'`
+A cluster: disable, `kubectl -n fleet delete clusters.cluster.x-k8s.io <name>` (CAPI tears it down), then its other
+`cluster`-chart leftovers. Never `mgmt`. Don't `argocd app delete --cascade` a generated app: the appset controller
+strips the finalizer again and re-creates the app.
 New addon = umbrella chart + `addons/<scope>/<name>/{addon.yaml,values.yaml}` (+ `envs/*.yaml` for workers).
 New cluster = one file in `fleet/clusters/<env>/`.
 Worker addons sync plain YAML from Kargo's `rendered/<env>[-canary]:addons/<addon>/` (`worker-addons` appset, branch
