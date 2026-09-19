@@ -1,2 +1,3 @@
-# clusterAgent.planeID must equal the DataPlane.spec.planeID rendered by the `cluster` chart (= cluster name).
-# It is per-cluster identity, so it can't live here (rendered once per env): it moves to the CAAPH birth kit (#14).
+# Fleet-wide values for openchoreo-data-plane. Nothing per cluster here (Kargo renders once per env): the plane ID
+# (= cluster name = the hub ClusterDataPlane's planeID) and the agent's client cert come from the CAAPH birth kit
+# (worker-birth-kit, #14) through Secret cluster-agent-tls, which the agent reads.

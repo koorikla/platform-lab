@@ -845,6 +845,20 @@ until 2.8). Commit.
   cluster-agent logs "connected"; `kubectl --context mgmt get clusterdataplane dev1 -o jsonpath='{.status.agentConnection.connected}'`
   = true; Backstage shows both planes connected. Commit.
 
+**As built (#14), overrides the text above** (why: design doc addendum "data plane on workers as built"):
+- Birth kit `worker-birth-kit` 0.2.0 (`templates/openchoreo-agent-identity.yaml`): ClusterExternalSecrets
+  `openchoreo-agent-tls` → Secret `openchoreo-data-plane/cluster-agent-tls` (tls.crt, tls.key, plane-id) and
+  `openchoreo-gateway-ca` → ConfigMap `openchoreo-data-plane/cluster-gateway-ca` (ca.crt; ESO generic target). Store
+  `hub-openbao` admits `openchoreo-data-plane`; crds/ gains the ClusterExternalSecret CRD (first install).
+- Addon `openchoreo-data-plane` 0.2.0 enabled. No `hubGatewayCA` value (the CA is pulled from OpenBao), no
+  `$(CLUSTER_NAME)` appset patch: `planeID: $(PLANE_ID)` with `PLANE_ID` from `cluster-agent-tls#plane-id`. Reloader
+  2.2.17 in the umbrella restarts the agent on Secret/ConfigMap change. GatewayParameters `gateway-default` makes the
+  proxy Service ClusterIP (as on the hub) and sizes envoy.
+- Test `hack/tests/test_openchoreo_data_plane.sh` (contract between the two halves, per env render);
+  `test_birth_kit.sh` covers the kit side.
+- dev2 (the dev canary ring) is disabled (#76): `dev-canary` verification can't pass with an empty ring, so the first
+  Freight reaches `dev` (dev1) by approving it for `dev` in Kargo.
+
 ---
 
 ## Phase 3 — apps deployed by OpenChoreo, promoted by Kargo (rendered)

@@ -1,9 +1,19 @@
 apiVersion: v2
 name: openchoreo-data-plane
-description: Umbrella chart for openchoreo-data-plane
+description: OpenChoreo data plane on a worker (cluster-agent + Gateway), cluster-agnostic; identity from the birth kit
 type: application
-version: 0.1.0
+version: 0.2.0
+# Worker addon (Kargo renders it per env). The cluster's identity (client cert, plane ID, gateway CA) is not in here:
+# the birth kit pulls it from the hub's OpenBao (worker-birth-kit templates/openchoreo-agent-identity.yaml, #14).
+# Invariant 4 exception: Reloader lands with the agent because the agent is not correct without it: upstream
+# cluster-agent loads its client cert once at startup (internal/cluster-agent/agent.go:83), so a renewed cert
+# (1y, renewed 30d before expiry on the hub) must restart it, or the gateway rejects the expired one on reconnect.
+# Scoped to this namespace (a separate addon would be one more Kargo pipeline on the saturated hub, #76). When a second
+# namespace needs Reloader (e.g. Phase 3 apps with ESO-fed secrets), lift it into its own worker addon.
 dependencies:
   - name: openchoreo-data-plane
     version: 1.2.5
     repository: oci://ghcr.io/openchoreo/helm-charts
+  - name: reloader
+    version: 2.2.17                    # app v1.4.22
+    repository: oci://ghcr.io/stakater/charts

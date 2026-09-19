@@ -1,6 +1,7 @@
 {{- /*
 Registers a worker in OpenChoreo (control plane on the hub): Backstage lists the ClusterDataPlane and the Environment
-as soon as they exist, connected or not. The data plane itself (cluster-agent) is the worker's birth kit (#14).
+as soon as they exist, connected or not. The data plane (cluster-agent) is a worker addon; the worker's birth kit
+pulls its identity, pushed in 3. below (#14).
 Only when the hub serves the OpenChoreo CRDs: Argo passes the cluster's API versions to helm, so this follows the
 openchoreo-control-plane addon (addon.yaml / .disabled) and cluster apps keep syncing while it isn't installed.
 */}}

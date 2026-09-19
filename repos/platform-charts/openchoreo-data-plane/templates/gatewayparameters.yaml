@@ -1,0 +1,18 @@
+# kgateway settings for the proxy of Gateway gateway-default (referenced from gateway.infrastructure.parametersRef;
+# kgateway v2.3.1 deep-merges them over its defaults, same namespace as the Gateway). Same shape as the hub's
+# (platform-charts/openchoreo-control-plane templates/gatewayparameters.yaml).
+# ClusterIP: kgateway's default LoadBalancer makes k3s servicelb run a pod per worker node binding hostPort 80 (open on
+# every node IP of the kind network, and a second LoadBalancer on :80 would stay Pending) plus a random NodePort.
+# How worker apps get exposed is Phase 3's decision (#17/#18); until then the worker starts like the hub.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata:
+  name: {{ index .Values "openchoreo-data-plane" "gateway" "infrastructure" "parametersRef" "name" }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  kube:
+    service:
+      type: ClusterIP
+    envoyContainer:
+      resources:
+        {{- toYaml .Values.gatewayEnvoyResources | nindent 8 }}

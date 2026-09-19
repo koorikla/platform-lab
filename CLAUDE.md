@@ -34,7 +34,8 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
    worker's ESO (`ClusterSecretStore hub-openbao`, auth `k8s-<name>`: a worker can read only its own path). Nothing on
    the hub writes into a worker with the CAPI admin kubeconfig. Identity-bound worker components (agent, ESO, the
    OpenBao store + ExternalSecrets) are the CAAPH birth kit (chart `worker-birth-kit`, one HelmChartProxy in
-   `fleet/base/helmchartproxies.yaml`), not worker-addons.
+   `fleet/base/helmchartproxies.yaml`), not worker-addons. The OpenChoreo cluster-agent is a worker addon (its chart
+   needs addon-delivered CRDs); only its identity (client cert + `plane-id`, gateway CA) comes from the birth kit.
 8. Enable/disable by file extension (`.yaml.disabled`), never by commenting blocks.
 
 ## Flow

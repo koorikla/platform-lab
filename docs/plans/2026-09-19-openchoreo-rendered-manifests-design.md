@@ -249,3 +249,37 @@ Supersedes "Clusters → OpenChoreo" above; details in the plan, Task 2.7 "As bu
 
 ## Addendum: environments are dev, nit, sit, prod (maintainer decision 2026-09-19, #81)
 Every `dev/test/prod` above means dev → nit → sit → prod (stages `dev-canary → dev → nit → sit → prod`, `rendered/<stage>`; nit, sit, prod manual; OpenChoreo `isProduction` only for prod).
+
+## Addendum: data plane on workers as built (#14, 2026-09-19)
+Supersedes "data plane in the birth kit" above: the birth kit stamps the *identity*; the data plane itself is a worker
+addon. Details: plan Task 2.8 "As built (#14)".
+- **Why the chart can't be in the birth kit:** with TLS on, `openchoreo-data-plane` 1.2.5 always renders a cert-manager
+  `Certificate` + `Issuer` (no value turns them off), and its Gateway/HTTPListenerPolicy need Gateway API + kgateway
+  CRDs. All three arrive as worker addons through the birth kit's own argocd-agent. Helm maps every object before it
+  creates any, so a birth kit carrying them would fail its first install forever (no agent → no addons → no CRDs).
+- **Birth kit (per cluster):** two `ClusterExternalSecret`s for namespace `openchoreo-data-plane` (Argo creates it;
+  ESO fills it when it appears): Secret `cluster-agent-tls` = `tls.crt`/`tls.key` from
+  `secret/clusters/<name>/openchoreo-agent` + key `plane-id: <name>` (template, `mergePolicy: Merge`); ConfigMap
+  `cluster-gateway-ca` = `ca.crt` from `.../openchoreo-gateway-ca` (ESO generic target, `genericTargets.enabled`).
+  The `hub-openbao` store admits `openchoreo-data-plane`.
+- **Worker addon `openchoreo-data-plane` (Kargo, cluster-agnostic):** `planeID: $(PLANE_ID)`, env `PLANE_ID` from
+  `cluster-agent-tls#plane-id` (the chart's `extraEnvs` accept only `secretKeyRef`). The chart's throwaway Certificate
+  goes to `cluster-agent-selfsigned-unused`. `security.enabled: false` (a webhook cert for a webhook the data plane
+  doesn't run). Gateway `gateway-default` http :80.
+- **Restart on renewal:** Reloader (stakater, bundled in the umbrella, namespace-scoped, `reloadStrategy: annotations`)
+  rolls `cluster-agent-dataplane` when `cluster-agent-tls` or `cluster-gateway-ca` changes. The annotations sit on the
+  pod template, which Reloader v1.4.22 reads when the Deployment itself has none.
+- **Gateway proxy:** GatewayParameters `gateway-default` (ClusterIP, envoy requests only), the same shape as the hub's.
+  With kgateway's default LoadBalancer, k3s servicelb would bind :80 on every worker node. Exposing worker apps is
+  Phase 3's decision (#17/#18).
+- **ClusterExternalSecret side effects** (ESO v2.10.0 `ensureNamespaceFinalizer`):
+  - ESO puts a finalizer `externalsecrets.external-secrets.io/ces-<name>` on `openchoreo-data-plane`. Deleting that
+    namespace therefore needs the worker's ESO running, which it always is while the birth kit is installed.
+  - Rolling the birth kit back to a version without the CESs deletes them in the same Helm upgrade that restarts ESO.
+    Afterwards, check that the namespace keeps no stale `ces-*` finalizer:
+    `kubectl get ns openchoreo-data-plane -o jsonpath='{.metadata.finalizers}'`.
+  - `openchoreo-data-plane` also exists when only kgateway is enabled. On a hub without OpenChoreo nothing is pushed,
+    so both ExternalSecrets sit in `SecretSyncedError`. That is noise, not harm.
+- **Trust boundary: the OpenChoreo control plane is worker admin.** Upstream's agent ClusterRole grants `*` on secrets,
+  RBAC and core resources cluster-wide. Whoever controls the hub's OpenChoreo can do anything on every connected
+  worker, including reading the argocd-agent client key in `argocd`.

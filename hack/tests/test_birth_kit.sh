@@ -53,7 +53,7 @@ assert_yq "$o" "$css | .spec.provider.vault.auth.kubernetes.mountPath" k8s-dev1
 assert_yq "$o" "$css | .spec.provider.vault.auth.kubernetes.role" eso
 assert_yq "$o" "$css | .spec.provider.vault.auth.kubernetes.serviceAccountRef | .namespace + \"/\" + .name" \
   external-secrets/external-secrets
-assert_yq "$o" "$css | .spec.conditions[0].namespaces | join(\",\")" argocd
+assert_yq "$o" "$css | .spec.conditions[0].namespaces | join(\",\")" argocd,openchoreo-data-plane
 assert_yq "$o" 'select(.kind=="ClusterRoleBinding" and .metadata.name=="external-secrets-openbao-tokenreview") | .roleRef.name' \
   system:auth-delegator
 assert_yq "$o" 'select(.metadata.name=="external-secrets-openbao-tokenreview") | .subjects[0] | .namespace + "/" + .name' \
@@ -70,8 +70,43 @@ assert_yq "$o" "$es | [.spec.data[].remoteRef.key] | unique | join(\",\")" clust
 ca='select(.kind=="ExternalSecret" and .metadata.name=="argocd-agent-ca")'
 assert_yq "$o" "$ca | [.spec.data[].secretKey] | join(\",\")" ca.crt
 assert_yq "$o" "$ca | .spec.data[0].remoteRef.key" clusters/dev1/argocd-agent
-assert_yq "$o" '[select(.kind=="ExternalSecret") | .spec.secretStoreRef | .kind + "/" + .name] | unique | join(",")' \
-  ClusterSecretStore/hub-openbao
+assert_yq "$o" '[select(.kind=="ExternalSecret" or .kind=="ClusterExternalSecret") | (.spec.externalSecretSpec // .spec) |
+  .secretStoreRef | .kind + "/" + .name] | unique | join(",")' ClusterSecretStore/hub-openbao
+
+# --- OpenChoreo cluster-agent identity (#14): the agent is the worker addon openchoreo-data-plane (Kargo), its identity
+# comes from here. ClusterExternalSecrets, not ExternalSecrets: the namespace belongs to Argo (addon namespace,
+# CreateNamespace), and ESO creates the ExternalSecrets once it exists. Contract with the addon: test_openchoreo_data_plane.sh
+ces() { echo "select(.kind==\"ClusterExternalSecret\" and .metadata.name==\"$1\")"; }
+assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .metadata.name] | sort | join(",")' \
+  openchoreo-agent-tls,openchoreo-gateway-ca
+assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .apiVersion] | unique | join(",")' external-secrets.io/v1
+# namespaceSelectors on the name label (spec.namespaces is deprecated in ESO v2.10.0)
+assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .spec.namespaceSelectors[].matchLabels["kubernetes.io/metadata.name"]] | unique | join(";")' \
+  openchoreo-data-plane
+assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .spec | has("namespaces") or has("namespaceSelector") or (.namespaceSelectors | length != 1)] | unique | join(",")' false
+assert_yq "$o" '[select(.kind=="Namespace") | .metadata.name] | join(",")' external-secrets   # not openchoreo-data-plane
+# client cert (CN = dev1, issued on the hub) + the plane ID next to it: one identity, one Secret. The agent reads
+# plane-id through an env var (the chart's extraEnvs only take secretKeyRef).
+t=$(ces openchoreo-agent-tls)
+assert_yq "$o" "$t | .spec.externalSecretName + \"/\" + .spec.externalSecretSpec.target.name" cluster-agent-tls/cluster-agent-tls
+assert_yq "$o" "$t | .spec.externalSecretSpec.target.template | .type + \" \" + .mergePolicy" 'kubernetes.io/tls Merge'
+assert_yq "$o" "$t | .spec.externalSecretSpec.target.template.data | to_entries | map(.key + \"=\" + .value) | join(\",\")" \
+  plane-id=dev1
+assert_yq "$o" "$t | [.spec.externalSecretSpec.data[] | .secretKey + \"<-\" + .remoteRef.key + \"#\" + .remoteRef.property] | join(\",\")" \
+  'tls.crt<-clusters/dev1/openchoreo-agent#tls.crt,tls.key<-clusters/dev1/openchoreo-agent#tls.key'
+# the cluster-gateway's server CA as a ConfigMap (the chart mounts clusterAgent.tls.serverCAConfigMap): ESO generic
+# target, no template -> ConfigMap .data = the fetched keys
+g=$(ces openchoreo-gateway-ca)
+assert_yq "$o" "$g | .spec.externalSecretName + \"/\" + .spec.externalSecretSpec.target.name" cluster-gateway-ca/cluster-gateway-ca
+assert_yq "$o" "$g | .spec.externalSecretSpec.target.manifest | .apiVersion + \"/\" + .kind" v1/ConfigMap
+assert_yq "$o" "$g | .spec.externalSecretSpec.target.template" null
+assert_yq "$o" "$g | [.spec.externalSecretSpec.data[] | .secretKey + \"<-\" + .remoteRef.key + \"#\" + .remoteRef.property] | join(\",\")" \
+  'ca.crt<-clusters/dev1/openchoreo-gateway-ca#ca.crt'
+# generic targets are opt-in in ESO (flag + ConfigMap RBAC)
+assert_yq "$o" 'select(.kind=="Deployment" and .metadata.name=="external-secrets") | .spec.template.spec.containers[0].args[] | select(. == "--unsafe-allow-generic-targets=true")' \
+  --unsafe-allow-generic-targets=true
+assert_yq "$o" '[select(.kind=="ClusterRole" and .metadata.name=="external-secrets-controller") | .rules[] | select(.resources[] == "configmaps") | .verbs[]] | unique | sort | join(",")' \
+  create,delete,get,list,patch,update,watch
 # worker repo-servers clone from GitHub too: same CoreDNS override as the hub
 assert_yq "$o" 'select(.kind=="ConfigMap" and .metadata.name=="coredns-custom") | .metadata.namespace' kube-system
 [ "$(yq 'select(.kind=="ConfigMap" and .metadata.name=="coredns-custom") | .data["external.server"]' "$o")" = \
@@ -104,16 +139,16 @@ assert_yq "$o" "$np | .spec.ingress[0].from[0].podSelector.matchLabels[\"app.kub
 assert_yq "$o" 'select(.kind=="Namespace") | .metadata.name' external-secrets
 assert_yq "$o" '[select(.kind=="ValidatingWebhookConfiguration") | .webhooks[].failurePolicy] | unique | join(",")' Ignore
 
-# --- crds/: bootstrap copies of the two ESO CRDs this chart instantiates. Helm installs crds/ before it maps the
+# --- crds/: bootstrap copies of the three ESO CRDs this chart instantiates. Helm installs crds/ before it maps the
 # templates (else: "no matches for kind ClusterSecretStore"); the ownership metadata lets the same install adopt them
 # as the subchart's templated CRDs, which then own upgrades. Must equal the pinned ESO version's CRDs.
 crds=$(mktemp "$tmp/crds.XXXXXX"); cat $kit/crds/*.yaml > "$crds"
 assert_yq "$crds" '[select(.kind != null) | .metadata.name] | sort | join(",")' \
-  clustersecretstores.external-secrets.io,externalsecrets.external-secrets.io
+  clusterexternalsecrets.external-secrets.io,clustersecretstores.external-secrets.io,externalsecrets.external-secrets.io
 assert_yq "$crds" '[select(.kind != null) | .metadata.labels["app.kubernetes.io/managed-by"] + " " +
   .metadata.annotations["meta.helm.sh/release-name"] + " " + .metadata.annotations["meta.helm.sh/release-namespace"]] | unique | join(",")' \
   "Helm $release $ns"
-for n in clustersecretstores externalsecrets; do
+for n in clusterexternalsecrets clustersecretstores externalsecrets; do
   want=$(yq "select(.kind==\"CustomResourceDefinition\" and .metadata.name==\"$n.external-secrets.io\") | .spec" "$o")
   got=$(yq "select(.kind != null and .metadata.name==\"$n.external-secrets.io\") | .spec" "$crds")
   [ -n "$want" ] && [ "$want" = "$got" ] ||
@@ -122,7 +157,7 @@ done
 
 # --- Helm stores each release in one Secret (<1 MiB): base64(gzip(release JSON)) = chart templates + files (crds/),
 # values and the rendered manifest (subcharts aren't stored). Same encoding as Helm's storage driver; 0.1.0: 522 KB
-# (the release Secret on a k3d test cluster held the same).
+# (the release Secret on a k3d test cluster held the same), 0.2.0: 547 KB.
 helm install "$release" $kit -n "$ns" -f "$tmp/values.yaml" --dry-run=client -o json > "$tmp/release.json" ||
   fail "helm install --dry-run=client"
 sz=$(gzip -9 < "$tmp/release.json" | base64 | wc -c)
