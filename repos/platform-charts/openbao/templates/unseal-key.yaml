@@ -1,0 +1,26 @@
+# The unseal-key init container (values.yaml openbao.server.extraInitContainers) runs as the server's SA: it reads
+# exactly the key Secret and may create it once. `create` can't be limited by name in RBAC; the script never
+# overwrites (create fails on an existing name). The Secret itself is not rendered here on purpose: Argo CD doesn't
+# track it, so no prune, cascade delete or chart uninstall can take the only key to the PVC with it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-unseal-key
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [openbao-unseal-key]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-unseal-key
+  namespace: {{ .Release.Namespace }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: openbao-unseal-key }
+subjects:
+  - { kind: ServiceAccount, name: {{ .Release.Name }}, namespace: {{ .Release.Namespace }} }

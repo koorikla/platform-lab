@@ -33,6 +33,14 @@ set-repo:        ## make set-repo REPO=https://github.com/you/fork.git
 	  -e 's#github.com/$(call slug,$(OLD))\.git#github.com/$(call slug,$(REPO)).git#g' \
 	  -e 's#github.com:$(call slug,$(OLD))\.git#github.com:$(call slug,$(REPO)).git#g' \
 	  -e 's#REPO:-$(call slug,$(OLD))}#REPO:-$(call slug,$(REPO))}#g' && find bootstrap repos hack -name '*.bak' -delete
+# The JWT goes in through stdin into a 0600 file in the pod (never an argv) and is deleted right after the login.
+.PHONY: bao
+bao:             ## shell in openbao-0 logged in as role operator (30 min): hand-written hub secrets under secret/hub/*
+	@kubectl $(CTX) -n openbao create token openbao-operator --duration=10m | \
+	  kubectl $(CTX) -n openbao exec -i openbao-0 -c openbao -- sh -c 'umask 077; cat > /home/openbao/.operator-jwt'
+	@kubectl $(CTX) -n openbao exec -it openbao-0 -c openbao -- sh -c \
+	  'BAO_TOKEN=$$(bao write -field=token auth/kubernetes/login role=operator jwt=@/home/openbao/.operator-jwt); \
+	   rm -f /home/openbao/.operator-jwt; export BAO_TOKEN; echo "operator: secret/hub/* (bao kv put/get secret/hub/<item>)"; exec sh'
 kubeconfig:      ## make kubeconfig CLUSTER=dev1 > dev1.kubeconfig   (server = LB IP on the docker network)
 	@kubectl $(CTX) -n fleet get secret $(CLUSTER)-kubeconfig -o jsonpath='{.data.value}' | base64 -d
 lint:            ## helm lint every chart; render every addon and cluster file

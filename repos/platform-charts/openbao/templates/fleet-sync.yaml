@@ -1,6 +1,8 @@
 # fleet-sync: keeps one OpenBao kubernetes auth mount per worker cluster (auth/k8s-<name>) in line with the CAPI
 # Clusters in the fleet namespace. Pull model: the worker's ESO logs in there with its own ServiceAccount and may read
-# only secret/data/clusters/<name>/*. Script: files/fleet-sync.sh. Role/policy `fleet-sync`: server.postStart.
+# only secret/data/clusters/<name>/*. Script: files/fleet-sync.sh. Role/policy `fleet-sync`: files/configure.sh, templates/configure.yaml.
+# A CronJob rather than a watch loop (#30): the reconcile is level-based and idempotent, and <= 2 min is well inside a
+# worker's birth (its ESO retries); a controller would add a Deployment and watch code for no gain in correctness.
 # Hub RBAC: list CAPI Clusters in fleet, get Secrets in this namespace - nothing else.
 {{- $fs := .Values.fleetSync }}
 apiVersion: v1

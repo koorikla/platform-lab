@@ -4,11 +4,13 @@
 #   auth/k8s-<name>          kubernetes_host = CAPI Cluster .spec.controlPlaneEndpoint, CA = Secret <name>-ca-public in
 #                            $CA_NS (ca.crt only, projected by the cluster chart); disable_local_ca_jwt: the client's own
 #                            JWT is the TokenReview reviewer (the worker binds system:auth-delegator to its ESO SA)
-#   auth/k8s-<name>/role/eso bound to $ESO_NS/$ESO_SA, policy cluster-<name>
-#   policy cluster-<name>    read secret/data/clusters/<name>/*
-# Mounts and policies of clusters that no longer exist are removed. One failing cluster doesn't stop the others (exit 1
-# at the end). DRY_RUN=1 prints writes instead of doing them. Parameter shapes (plain strings, no lists) are what the
-# fleet-sync policy's allowed_parameters accept - see server.postStart in values.yaml.
+#   entity cluster-<name>    metadata cluster=<name>, with an alias <ESO_NS>/<ESO_SA> on auth/k8s-<name>: every ESO login
+#                            there is this entity
+#   auth/k8s-<name>/role/eso bound to $ESO_NS/$ESO_SA, alias_name_source serviceaccount_name, policy cluster-reader:
+#                            one fixed policy, templated on the entity's metadata (files/policies/cluster-reader.hcl)
+# fleet-sync writes no policy. Mounts and entities of clusters that no longer exist are removed. One failing cluster
+# doesn't stop the others (exit 1 at the end). DRY_RUN=1 prints writes instead of doing them. Parameter shapes (plain
+# strings, no lists) are what the fleet-sync policy's allowed_parameters accept (templates/configure.yaml).
 set -euo pipefail
 
 BAO_ADDR=${BAO_ADDR:-http://openbao.openbao.svc:8200}
@@ -67,10 +69,21 @@ sync_cluster() {
   # always rewritten: a reborn cluster has a new CA and possibly a new LB address
   bao POST "auth/$mount/config" "$(jq -nc --arg h "https://$host:$port" --arg ca "$ca" \
     '{kubernetes_host: $h, kubernetes_ca_cert: $ca, disable_local_ca_jwt: true}')" >/dev/null
-  bao PUT "sys/policies/acl/cluster-$name" "$(jq -nc --arg p "path \"secret/data/clusters/$name/*\" { capabilities = [\"read\"] }" \
-    '{policy: $p}')" >/dev/null
-  bao POST "auth/$mount/role/eso" "$(jq -nc --arg sa "$ESO_SA" --arg ns "$ESO_NS" --arg p "cluster-$name" --arg ttl "$TOKEN_TTL" \
-    '{bound_service_account_names: $sa, bound_service_account_namespaces: $ns, token_policies: $p, token_ttl: $ttl}')" >/dev/null
+
+  # identity before the role: no ESO login can happen yet, so none creates a stray entity (an alias upsert would move
+  # it anyway). Both calls are upserts; the entity id and mount accessor are read back.
+  local entity=cluster-$name id acc
+  bao POST "identity/entity/name/$entity" "$(jq -nc --arg c "$name" '{metadata: {cluster: $c}}')" >/dev/null
+  id=$(bao GET "identity/entity/name/$entity" | jq -er '.data.id') || id=
+  acc=$(bao GET sys/auth | jq -r --arg m "$mount/" '.data[$m].accessor // empty')
+  if [ "$DRY_RUN" = 1 ]; then id=${id:-<new entity>}; acc=${acc:-<new mount>}; fi
+  [ -n "$id" ] && [ -n "$acc" ] || { echo "no entity id or accessor for $mount" >&2; return 1; }
+  bao POST identity/entity-alias "$(jq -nc --arg n "$ESO_NS/$ESO_SA" --arg a "$acc" --arg i "$id" \
+    '{name: $n, mount_accessor: $a, canonical_id: $i}')" >/dev/null
+
+  bao POST "auth/$mount/role/eso" "$(jq -nc --arg sa "$ESO_SA" --arg ns "$ESO_NS" --arg ttl "$TOKEN_TTL" \
+    '{bound_service_account_names: $sa, bound_service_account_namespaces: $ns, token_policies: "cluster-reader",
+      token_ttl: $ttl, alias_name_source: "serviceaccount_name"}')" >/dev/null
   echo "ensured $mount server=https://$host:$port"
 }
 
@@ -82,19 +95,20 @@ while read -r name host port; do
   [ "$st" = 0 ] || { echo "failed $name"; rc=1; }
 done <<<"$clusters"
 
-# garbage: mounts/policies whose cluster is gone (CAPI Cluster deleted). A cluster being born is listed -> kept.
+# garbage: mounts/entities whose cluster is gone (CAPI Cluster deleted). A cluster being born is listed -> kept.
 # An empty list next to existing k8s-* mounts is more likely a broken lookup than a fleet that vanished: don't act.
 k8s_mounts=$(grep '^k8s-' <<<"$mounts" | sed 's#/$##' || true)
 if [ -z "$names" ] && [ -n "$k8s_mounts" ]; then
   echo "refusing cleanup: no worker clusters listed but $(wc -l <<<"$k8s_mounts" | tr -d ' ') k8s-* mounts exist (remove by hand if intended)"
   exit "$rc"
 fi
+# entity first (its aliases go with it): if that fails the mount stays, so the next run retries both
 for mount in $k8s_mounts; do
   grep -qx "${mount#k8s-}" <<<"$names" && continue
-  if bao DELETE "sys/auth/$mount" >/dev/null; then echo "removed $mount"; else echo "failed removing $mount"; rc=1; fi
-done
-for policy in $(bao GET 'sys/policies/acl?list=true' | jq -r '.data.keys[]' | grep '^cluster-' || true); do
-  grep -qx "${policy#cluster-}" <<<"$names" && continue
-  if bao DELETE "sys/policies/acl/$policy" >/dev/null; then echo "removed policy $policy"; else echo "failed removing policy $policy"; rc=1; fi
+  if bao DELETE "identity/entity/name/cluster-${mount#k8s-}" >/dev/null && bao DELETE "sys/auth/$mount" >/dev/null; then
+    echo "removed $mount"
+  else
+    echo "failed removing $mount"; rc=1
+  fi
 done
 exit "$rc"

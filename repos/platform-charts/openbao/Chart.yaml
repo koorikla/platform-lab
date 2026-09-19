@@ -1,10 +1,11 @@
 apiVersion: v2
 name: openbao
-description: Umbrella chart for OpenBao on the hub + the pull-model glue (hub-writer store, fleet-sync auth reconciler) + OpenChoreo secrets (store default)
+description: Umbrella chart for OpenBao on the hub (raft PVC, static-key auto-unseal, self-init + configure sidecar) + the pull-model glue (hub-writer store, fleet-sync auth reconciler) + OpenChoreo secrets (store default)
 type: application
-version: 0.2.1
+version: 0.3.0
 dependencies:
   - name: openbao
-    # upstream OpenChoreo 1.2.5 pins 0.25.6; 0.29.x keeps the same values (dev, postStart, service) -> server 2.6.x
+    # server 2.6.x: seal "static" and the `initialize` self-init stanza (both >= 2.4) are what values.yaml relies on.
+    # A bump must keep server.standalone.config (tpl'd), extraInitContainers/extraContainers (tpl'd), volumes.
     version: 0.29.5
     repository: oci://ghcr.io/openbao/charts

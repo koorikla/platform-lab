@@ -77,7 +77,7 @@ metadata:
   name: {{ $n }}-argocd-agent
   namespace: {{ .Values.argocdNamespace }}
 spec:
-  refreshInterval: 1m           # OpenBao runs in dev mode (in-memory): refills it quickly after a restart
+  refreshInterval: 1m           # re-issued cert (reborn cluster) or an emptied OpenBao (PVC reset) lands within a minute
   updatePolicy: Replace
   deletionPolicy: Delete        # PushSecret deleted -> its material leaves OpenBao (a .disabled file alone keeps it)
   secretStoreRefs:

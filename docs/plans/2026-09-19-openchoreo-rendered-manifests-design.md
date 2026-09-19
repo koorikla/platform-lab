@@ -126,7 +126,10 @@ Replaces "hub PushSecret writes into the worker with the CAPI admin kubeconfig".
   secrets. The CronJob can't read the `fleet` namespace: the `cluster` chart grants a projector SA `get` on exactly
   `<name>-ca` and an ExternalSecret copies only its public cert to `<name>-ca-public`. OpenBao's `fleet-sync` policy
   pins mount type, role shape and `cluster-*` policy names (`allowed_parameters`); the policy *body* can't be pinned
-  (residual risk, see platform-charts/openbao values.yaml).
+  (residual risk, see platform-charts/openbao values.yaml). **#30 removed it:** fleet-sync writes no policy; every
+  worker role carries one fixed templated policy `cluster-reader` (`secret/data/clusters/{{identity.entity.metadata.cluster}}/*`)
+  and fleet-sync binds the ESO login to entity `cluster-<name>`. Same issue: raft PVC, static-key auto-unseal (lab
+  stand-in for KMS), self-init bootstrap + `configure` sidecar instead of dev mode + postStart.
 - **Birth kit (CAAPH, per worker):** ESO + the `hub-openbao` ClusterSecretStore + the ExternalSecrets for the agent
   identity + a TokenReview ClusterRoleBinding, installed before argocd-agent. ESO therefore leaves `worker-addons`.
 - Lab simplifications (documented, prod path noted): OpenBao dev mode (in-memory, root token) and plain HTTP on the

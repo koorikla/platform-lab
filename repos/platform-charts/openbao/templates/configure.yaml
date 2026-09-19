@@ -1,0 +1,52 @@
+# What the `configure` sidecar applies (files/configure.sh) and self-init reads (openbao-config.hcl): the script plus
+# one policy per key. files/policies/*.hcl are static; fleet-sync.hcl below depends on values.
+{{- $fs := .Values.fleetSync }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-configure
+  namespace: {{ .Release.Namespace }}
+data:
+  configure.sh: |
+    {{- .Files.Get "files/configure.sh" | nindent 4 }}
+  {{- range $path, $_ := .Files.Glob "files/policies/*.hcl" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
+  # Role fleet-sync = CronJob openbao-fleet-sync (files/fleet-sync.sh). It writes no policy: every worker role gets the
+  # fixed, templated cluster-reader, and the worker is told apart by the entity its ESO login is bound to. Pinned by
+  # allowed_parameters: mount type, role shape (plain strings - OpenBao compares list values as a whole), entity
+  # metadata only (no policies on an entity), alias name = the worker ESO's <namespace>/<serviceaccount>.
+  # Residual risk, bounded: it can point a k8s-* mount at another API or bind a mount to another cluster-* entity, so a
+  # compromised fleet-sync could let one worker read another worker's secret/clusters/* - nothing beyond that.
+  fleet-sync.hcl: |
+    path "sys/auth"                   { capabilities = ["read", "sudo"] }
+    path "sys/auth/k8s-*" {
+      capabilities = ["create", "update", "delete", "sudo"]
+      allowed_parameters = { "type" = ["kubernetes"], "description" = [] }
+    }
+    path "auth/k8s-*" {
+      capabilities = ["create", "read", "update", "delete"]
+      allowed_parameters = {
+        "kubernetes_host" = [], "kubernetes_ca_cert" = [], "disable_local_ca_jwt" = [true],
+        "bound_service_account_names" = ["{{ $fs.esoServiceAccount }}"], "bound_service_account_namespaces" = ["{{ $fs.esoNamespace }}"],
+        "token_policies" = ["cluster-reader"], "token_ttl" = [], "alias_name_source" = ["serviceaccount_name"]
+      }
+    }
+    path "identity/entity/name/cluster-*" {
+      capabilities = ["create", "read", "update", "delete"]
+      allowed_parameters = { "metadata" = [] }
+    }
+    path "identity/entity-alias" {
+      capabilities = ["create", "update"]
+      allowed_parameters = {
+        "name" = ["{{ $fs.esoNamespace }}/{{ $fs.esoServiceAccount }}"], "mount_accessor" = [], "canonical_id" = []
+      }
+    }
+---
+# For humans (`make bao`, role operator): no pod runs as it; `kubectl create token` issues short-lived JWTs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-operator
+  namespace: {{ .Release.Namespace }}
