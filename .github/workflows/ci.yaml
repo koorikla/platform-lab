@@ -63,6 +63,11 @@ jobs:
         run: hack/check-chart-versions.sh "$BASE"
       - name: make lint
         run: make lint
+      # CRDs the schema tests download (CAPI provider release assets, OpenChoreo chart), keyed on the files pinning them
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/platform-lab
+          key: schema-crds-${{ hashFiles('repos/platform-charts/capi-providers/values.yaml', 'repos/platform-charts/openchoreo-control-plane/Chart.yaml') }}
       - name: make test
         run: make test
       - name: Package charts (dry run of charts.yaml)
