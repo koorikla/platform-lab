@@ -16,11 +16,13 @@ tests:
             - match: { secretKey: tls.key, remoteRef: { remoteKey: clusters/dev1/argocd-agent, property: tls.key } }
             - match: { secretKey: ca.crt, remoteRef: { remoteKey: clusters/dev1/argocd-agent, property: ca.crt } }
 
-  - it: renders exactly one PushSecret and never a ClusterSecretStore (nothing on the hub writes into a worker)
+  # counts are per template here; the release-wide PushSecret set: hack/tests/test_cluster_openchoreo.sh
+  - it: renders one PushSecret in argocd-identity.yaml and no ClusterSecretStore in any template (nothing on the hub writes into a worker)
     templates: [argocd-identity.yaml, cluster.yaml, openbao-ca.yaml, openchoreo.yaml]
     asserts:
       - hasDocuments: { count: 1, filterAware: true }
-        documentSelector: { path: kind, value: PushSecret, matchMany: true, skipEmptyTemplates: true }
+        template: argocd-identity.yaml
+        documentSelector: { path: kind, value: PushSecret, matchMany: true }
       - hasDocuments: { count: 0, filterAware: true }
         documentSelector: { path: kind, value: ClusterSecretStore, matchMany: true, skipEmptyTemplates: true }
 

@@ -77,8 +77,8 @@ CI (`.github/workflows/ci.yaml`) runs `make lint`, `make test` and the chart ver
   its own (kinds, fields, hooks and weights, RBAC rules, required values via `failedTemplate`, …) is a suite in
   `repos/platform-charts/<chart>/tests/<template-or-topic>_test.yaml`, fixtures in `tests/values/`. It travels with the
   chart when `repos/*` split (invariant 6), so it must not read `repos/platform-config` or another chart: copy the
-  shape of a fleet file or an app into `tests/values/` instead. The chart's `.helmignore` lists `tests/`, so suites are
-  not packaged, and changing only them needs no version bump (`hack/check-chart-versions.sh` knows).
+  shape of a fleet file or an app into `tests/values/` instead. The chart's `.helmignore` lists `/tests/` (root only: a `templates/tests/` with
+  helm test hooks must stay), so suites are not packaged, and changing only them needs no version bump (`hack/check-chart-versions.sh` knows).
 - **`hack/tests/test_*.sh` → integration and scripts only:** a chart rendered with `platform-config` values, contracts
   between charts or between a chart and config (appset labels vs the verification selector, issuer and redirects across
   thunder/argo-cd/kargo, NodePort ↔ hub LB ↔ data-plane URL), config-only checks, and script tests with fake tools
@@ -88,13 +88,15 @@ Writing a unittest: one suite per template or topic, `it:` says what the chart g
 `repos/platform-charts/cluster/tests/` for small examples, the
 [helm-unittest docs](https://github.com/helm-unittest/helm-unittest/blob/v1.1.2/DOCUMENT.md) for assertions). Things
 that bite: assertions run per document and per template (`hasDocuments` counts per template; use `documentSelector`
-with `matchMany`/`skipEmptyTemplates` for "none anywhere"); a path with `[*]` or a filter (`[?(@.name == "x")]`)
+with `matchMany`/`skipEmptyTemplates` for "none anywhere"). A count across the whole release ("exactly one PushSecret",
+"exactly these workloads") can't be a unittest: keep it as one `assert_yq` in the `hack/tests` test that already renders
+the chart; a path with `[*]` or a filter (`[?(@.name == "x")]`)
 asserts every match; `containsDocument` needs `any: true` in a multi-document template; umbrella suites list subchart
 templates as `charts/<dep>/templates/…` and must include what those `include` (e.g. the ConfigMaps a Deployment
 checksums); quote paths with `[` and values with `,` inside `{ }`. `hack/tests/unittest.sh [chart dir…]` runs one
-chart; it installs the pinned plugin (`HELM_UNITTEST_VERSION`, Renovate-tracked) on first use into
+chart (paths relative to the repo root: `hack/tests/unittest.sh repos/platform-charts/cluster`); it installs the pinned plugin (`HELM_UNITTEST_VERSION`, Renovate-tracked) on first use into
 `~/.cache/platform-lab/helm-plugins/`, with helm 3 or 4 (helm 4 needs `--verify=false` for a git plugin source, the
-script passes it), and builds chart dependencies first.
+script passes it; concurrent runs wait on a lock), and builds chart dependencies first.
 
 Writing a repo-level test: `source "$(dirname "$0")/lib.sh"`, then `o=$(render <release> <chart> [helm args])` and
 `assert_yq "$o" '<yq expression>' '<expected>'` or `assert_fails <cmd>`. Assign `render` output to a variable first

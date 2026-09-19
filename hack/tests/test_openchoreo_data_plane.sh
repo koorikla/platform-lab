@@ -6,7 +6,9 @@
 #   - birth kit: the identity (Secret cluster-agent-tls = client cert + plane-id, ConfigMap cluster-gateway-ca).
 # The upstream chart can't go into the birth kit: with TLS on it always renders a cert-manager Certificate + Issuer
 # (and the Gateway needs Gateway API + kgateway CRDs); all of them arrive as worker addons *through* the birth kit's
-# agent, so a birth kit carrying them could never install. This file checks the contract between the two halves.
+# agent, so a birth kit carrying them could never install. Each chart on its own: its unit tests
+# (openchoreo-data-plane/tests/data_plane_test.yaml, worker-birth-kit/tests/openchoreo_identity_test.yaml). This file
+# checks the contract between the two halves, the hub endpoint, and every env render as Kargo produces it.
 source "$(dirname "$0")/lib.sh"
 a=$config/addons/workers/openchoreo-data-plane
 kit=$charts/worker-birth-kit
@@ -36,58 +38,28 @@ for env in $(yq "[.stages[].env] | unique | .[]" $charts/kargo-pipeline/values.y
   # --- cluster-agent: identity only from the birth kit's objects; the render itself names no cluster
   d='select(.kind=="Deployment" and .metadata.name=="cluster-agent-dataplane")'
   c="$d | .spec.template.spec.containers[] | select(.name==\"agent\")"
-  assert_yq "$o" "$c | .args[] | select(test(\"^--plane-id=\"))" '--plane-id=$(PLANE_ID)'   # kubelet expands $(VAR)
   assert_yq "$o" "$c | .env[] | select(.name==\"PLANE_ID\") | .valueFrom.secretKeyRef | .name + \"#\" + .key" \
     "$tlsSecret#$(yq "$tlsES | .spec.externalSecretSpec.target.template.data | keys | .[0]" "$k")"
   ! grep -q dev1 "$o" || fail "rendered data plane ($env) names a cluster: identity belongs to the birth kit"
-  assert_yq "$o" "$c | .args[] | select(test(\"^--tls-enabled=\"))" --tls-enabled=true
   assert_yq "$o" "$d | .spec.template.spec.volumes[] | select(.name==\"client-certs\") | .secret.secretName" "$tlsSecret"
   assert_yq "$o" "$d | .spec.template.spec.volumes[] | select(.name==\"server-ca\") | .configMap.name" "$caConfigMap"
+  assert_yq "$o" "$d | .spec.template.metadata.annotations[\"secret.reloader.stakater.com/reload\"]" "$tlsSecret"
+  assert_yq "$o" "$d | .spec.template.metadata.annotations[\"configmap.reloader.stakater.com/reload\"]" "$caConfigMap"
   # ... and the hub endpoint the birth kit and the control plane agree on (hub LB frontend -> cluster-gateway NodePort)
   hub=$(yq '.hub.host' $kit/values.yaml)
   port=$(yq '.["openchoreo-control-plane"].clusterGateway.service.nodePort' $charts/openchoreo-control-plane/values.yaml)
   assert_yq "$o" "$c | .args[] | select(test(\"^--server-url=\"))" "--server-url=wss://$hub:$port/ws"
-  # the chart always renders a Certificate while TLS is on; it must not write into the Secret ESO owns (both
-  # controllers would overwrite each other and the agent would present a self-signed cert)
+  # no Certificate in the render may write into the Secret ESO owns (both controllers would overwrite each other)
   assert_yq "$o" "[select(.kind==\"Certificate\") | .spec.secretName | select(. == \"$tlsSecret\")] | length" 0
   assert_yq "$o" '[select(.kind=="Certificate") | .metadata.name] | join(",")' cluster-agent-dataplane-tls
-
-  # --- restart on identity change: upstream cluster-agent loads the cert once at startup (agent.go:83)
-  assert_yq "$o" "$d | .spec.template.metadata.annotations[\"secret.reloader.stakater.com/reload\"]" "$tlsSecret"
-  assert_yq "$o" "$d | .spec.template.metadata.annotations[\"configmap.reloader.stakater.com/reload\"]" "$caConfigMap"
-  r='select(.kind=="Deployment" and .metadata.name=="reloader")'
-  assert_yq "$o" "$r | .spec.template.spec.containers[0].args[] | select(test(\"^--reload-strategy=\"))" \
-    --reload-strategy=annotations       # a pod-template annotation, which Argo's diff ignores (not an env var)
-  # only this namespace: Roles, no ClusterRole, KUBERNETES_NAMESPACE set -> watches secrets/configmaps here only
-  assert_yq "$o" "[select(.kind==\"ClusterRole\" or .kind==\"ClusterRoleBinding\") | .metadata.name | select(test(\"reloader\"))] | length" 0
-  assert_yq "$o" "$r | .spec.template.spec.containers[0].env[] | select(.name==\"KUBERNETES_NAMESPACE\") | .valueFrom.fieldRef.fieldPath" \
-    metadata.namespace
-
-  # --- ingress: the Gateway the ClusterDataPlane names (cluster chart: gateway-default, listener http :80), no TLS
-  gw='select(.kind=="Gateway")'
-  assert_yq "$o" "$gw | .metadata.name" "$(yq '.openchoreo.dataPlaneGateway.name' $charts/cluster/values.yaml)"
-  assert_yq "$o" "$gw | [.spec.listeners[] | .name + \":\" + .port] | join(\",\")" http:80
-  # its proxy like the hub's (test_openchoreo_control_plane.sh): ClusterIP (no servicelb pod binding :80 on every
-  # worker node), sized envoy, requests only; the chart's own infrastructure label survives the merge
-  ref=$(yq "$gw | .spec.infrastructure.parametersRef | .group + \"/\" + .kind + \"/\" + .name" "$o")
-  [ "${ref%/*}" = gateway.kgateway.dev/GatewayParameters ] || fail "Gateway parametersRef = '$ref'"
-  assert_yq "$o" "$gw | .spec.infrastructure.labels[\"openchoreo.dev/system-component\"]" gateway
-  gwp="select(.kind==\"GatewayParameters\" and .metadata.name==\"${ref##*/}\")"
-  assert_yq "$o" "[$gwp] | length" 1
-  assert_yq "$o" "$gwp | .apiVersion + \" \" + .metadata.namespace" "gateway.kgateway.dev/v1alpha1 $ns"
-  assert_yq "$o" "$gwp | .spec.kube.service.type" ClusterIP
-  assert_yq "$o" "$gwp | .spec.kube.envoyContainer.resources.requests | keys | sort | join(\",\")" cpu,memory
-  assert_yq "$o" "$gwp | .spec.kube.envoyContainer.resources | has(\"limits\")" false
-
-  # --- nothing optional (#76: the Docker VM is CPU-bound): no webhook cert for a webhook the data plane doesn't run,
-  # agent + reloader only, both with small requests and bounded limits
   assert_yq "$o" '[select(.kind=="Certificate" and .spec.secretName=="webhook-server-cert")] | length' 0
+  # the Gateway the ClusterDataPlane names (cluster chart)
+  assert_yq "$o" 'select(.kind=="Gateway") | .metadata.name' "$(yq '.openchoreo.dataPlaneGateway.name' $charts/cluster/values.yaml)"
+  # whole render (#76, the Docker VM is CPU-bound): agent + reloader only, nothing cluster-wide for Reloader,
+  # everything namespaced in the addon namespace
   assert_yq "$o" '[select(.kind=="Deployment" or .kind=="StatefulSet" or .kind=="DaemonSet") | .metadata.name] | sort | join(",")' \
     cluster-agent-dataplane,reloader
-  for w in cluster-agent-dataplane reloader; do
-    res="select(.kind==\"Deployment\" and .metadata.name==\"$w\") | .spec.template.spec.containers[0].resources"
-    assert_yq "$o" "$res | [.requests.cpu, .requests.memory, .limits.cpu, .limits.memory] | map(select(. != null)) | length" 4
-  done
+  assert_yq "$o" "[select(.kind==\"ClusterRole\" or .kind==\"ClusterRoleBinding\") | .metadata.name | select(test(\"reloader\"))] | length" 0
   assert_yq "$o" "[select(.metadata.namespace != null) | .metadata.namespace] | unique | join(\",\")" "$ns"
 
   # --- Kargo commits this render: reproducible, or every promotion is a diff

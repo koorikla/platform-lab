@@ -11,7 +11,20 @@ plugins=${XDG_CACHE_HOME:-$HOME/.cache}/platform-lab/helm-plugins/unittest-$HELM
 export HELM_PLUGINS=$plugins
 installed() { helm plugin list 2>/dev/null | awk '$1 == "unittest" {print "v" $2}'; }
 if [ "$(installed)" != "$HELM_UNITTEST_VERSION" ]; then
-  rm -rf "$plugins"; mkdir -p "$(dirname "$plugins")"
+  # one installer at a time (mkdir is atomic); a run that waited finds the plugin installed and skips. A lock older than
+  # 10 min is an interrupted install: taken over.
+  mkdir -p "$(dirname "$plugins")"; lock=$plugins.lock
+  for _ in $(seq 600); do
+    mkdir "$lock" 2>/dev/null && break
+    [ -z "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] || { rm -rf "$lock"; continue; }
+    sleep 1
+  done
+  [ -d "$lock" ] || fail "could not take $lock"
+  trap 'rm -rf "$lock" "$tmp"' EXIT   # lib.sh's cleanup of $tmp, plus the lock
+fi
+if [ "$(installed)" != "$HELM_UNITTEST_VERSION" ]; then
+  # under the lock: a leftover dir is a broken install (wrong version or interrupted), and a stale temp copy is garbage
+  rm -rf "$plugins" "$plugins".??????
   new=$(mktemp -d "$plugins.XXXXXX")
   # helm 4 verifies plugin sources by default and can't verify a git source (the plugin README says --verify=false);
   # helm 3 has no --verify flag. Either way the tag is pinned and the plugin's install hook checks the downloaded
@@ -21,10 +34,11 @@ if [ "$(installed)" != "$HELM_UNITTEST_VERSION" ]; then
   HELM_PLUGINS=$new helm plugin install https://github.com/helm-unittest/helm-unittest.git \
     --version "$HELM_UNITTEST_VERSION" "${v[@]}" >"$tmp/install.log" 2>&1 ||
     { cat "$tmp/install.log" >&2; rm -rf "$new"; fail "helm plugin install helm-unittest $HELM_UNITTEST_VERSION"; }
-  # rename into place: a concurrent run sees either no plugin dir or a complete one (the loser drops its copy)
-  if [ -d "$plugins" ]; then rm -rf "$new"; else mv "$new" "$plugins"; fi
+  # rename into place: a run that doesn't wait for the lock sees either no plugin dir or a complete one
+  mv "$new" "$plugins"
   [ "$(installed)" = "$HELM_UNITTEST_VERSION" ] || fail "helm-unittest $HELM_UNITTEST_VERSION not installed in $plugins"
 fi
+[ -z "${lock:-}" ] || { rm -rf "$lock"; trap 'rm -rf "$tmp"' EXIT; }
 
 if [ $# -eq 0 ]; then
   set --

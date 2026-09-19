@@ -4,7 +4,7 @@
 # reach the registry (and CAAPH/Argo pinned to that version would keep the old content).
 # Compares the merge-base with the working tree: commits on the branch and uncommitted edits count, base-only commits
 # don't. New charts pass (nothing to bump against), deleted charts pass (nothing to publish), and so do changes only
-# to a chart's tests/ when its .helmignore keeps them out of the package.
+# to a chart's root tests/ when its .helmignore keeps them out of the package (`/tests/`).
 # usage: hack/check-chart-versions.sh origin/main
 set -euo pipefail
 base=${1:?usage: $0 <base-ref>}
@@ -16,7 +16,7 @@ rc=0
 # so changing only them publishes nothing new and needs no bump
 changed=$(git diff --name-only --no-renames "$mb" -- "$charts" | while read -r f; do
   c=$(cut -d/ -f1-3 <<<"$f")
-  if [[ $f == "$c"/tests/* ]] && grep -qx 'tests/' "$c/.helmignore" 2>/dev/null; then continue; fi
+  if [[ $f == "$c"/tests/* ]] && grep -qx '/tests/' "$c/.helmignore" 2>/dev/null; then continue; fi
   echo "$c"
 done | sort -u)
 for c in $changed; do

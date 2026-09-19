@@ -18,7 +18,7 @@ tests:
       - equal:
           path: spec.provider.vault.auth.kubernetes
           value: { mountPath: k8s-dev1, role: eso, serviceAccountRef: { name: external-secrets, namespace: external-secrets } }
-      - equal: { path: spec.conditions, value: [{ namespaces: [argocd] }] }
+      - equal: { path: spec.conditions, value: [{ namespaces: [argocd, openchoreo-data-plane] }] }   # agent identity + OpenChoreo identity (#14)
 
   - it: lets ESO's ServiceAccount review tokens (OpenBao's kubernetes auth calls TokenReview with it)
     template: templates/hub-openbao.yaml

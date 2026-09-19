@@ -14,6 +14,10 @@ np=$(yq 'select(.kind=="Service" and .spec.type=="NodePort") | .spec.ports[0].no
 lb=$(yq '.data.value' $config/fleet/base/hub-lb.yaml)
 grep -qE "^ *bind \*:$np\$" <<<"$lb" || fail "hub-lb.yaml: no frontend bound to :$np"
 grep -qF "JoinHostPort \$backend.Address \"$np\"" <<<"$lb" || fail "hub-lb.yaml: no backend on node port $np"
+# whole render (per-template unit tests can't see what another template adds): exactly one NodePort Service and exactly
+# the two ClusterSecretStores - openbao (hub writer) and default (OpenChoreo, read-only)
+assert_yq "$o" '[select(.kind=="Service" and .spec.type=="NodePort")] | length' 1
+assert_yq "$o" '[select(.kind=="ClusterSecretStore") | .metadata.name] | sort | join(",")' default,openbao
 
 cm=$tmp/configure; mkdir -p "$cm"
 for k in $(yq 'select(.kind=="ConfigMap" and .metadata.name=="openbao-configure") | .data | keys | .[]' "$o"); do

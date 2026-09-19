@@ -110,12 +110,18 @@ tests:
           value: { name: data, mountPath: /openbao/data, readOnly: true }
       - notMatchRegex: { path: 'spec.template.spec.initContainers[0].args[0]', pattern: 'kubectl (apply|replace|patch|delete|edit)' }
 
+  # the bao CLI of the running server: whatever image the server runs (a sentinel, so an openbao bump needs no test edit)
+  - it: runs the configure sidecar from the server's image
+    template: charts/openbao/templates/server-statefulset.yaml
+    set: { openbao.server.image.registry: registry.test, openbao.server.image.repository: bao/bao, openbao.server.image.tag: sentinel }
+    asserts:
+      - equal: { path: 'spec.template.spec.containers[?(@.name == "openbao")].image', value: registry.test/bao/bao:sentinel }
+      - equal: { path: 'spec.template.spec.containers[?(@.name == "configure")].image', value: registry.test/bao/bao:sentinel }
+
   # no readiness probe: a config error must not take the API out of the Service
-  - it: runs the configure sidecar from the server image, against the local API, as the server SA
+  - it: runs the configure sidecar against the local API, as the server SA
     template: charts/openbao/templates/server-statefulset.yaml
     asserts:
-      - equal: { path: 'spec.template.spec.containers[?(@.name == "configure")].image', value: quay.io/openbao/openbao:2.6.2 }
-      - equal: { path: 'spec.template.spec.containers[?(@.name == "openbao")].image', value: quay.io/openbao/openbao:2.6.2 }
       - notExists: { path: 'spec.template.spec.containers[?(@.name == "configure")].readinessProbe' }
       - matchRegex: { path: 'spec.template.spec.containers[?(@.name == "configure")].args[0]', pattern: 'sh /openbao/configure/configure\.sh' }
       - equal:

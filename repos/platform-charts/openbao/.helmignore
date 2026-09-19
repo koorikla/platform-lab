@@ -1,2 +1,3 @@
-# helm-unittest suites and their fixtures stay out of the published chart
-tests/
+# helm-unittest suites and their fixtures stay out of the published chart (root tests/ only: a templates/tests/ with
+# helm test hooks must stay in the chart)
+/tests/

@@ -37,21 +37,32 @@ tests:
             - { name: branch, value: dev }
             - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
         documentSelector: { path: metadata.name, value: dev }
-      - equal: { path: 'spec.verification.args[?(@.name == "env")].value', value: nit }
+      - equal:
+          path: spec.verification.args
+          value:
+            - { name: env, value: nit }
+            - { name: ring, value: stable }
+            - { name: requireApps, value: "false" }
+            - { name: branch, value: nit }
+            - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
         documentSelector: { path: metadata.name, value: nit }
-      - equal: { path: 'spec.verification.args[?(@.name == "branch")].value', value: nit }
-        documentSelector: { path: metadata.name, value: nit }
-      - equal: { path: 'spec.verification.args[?(@.name == "env")].value', value: sit }
+      - equal:
+          path: spec.verification.args
+          value:
+            - { name: env, value: sit }
+            - { name: ring, value: stable }
+            - { name: requireApps, value: "false" }
+            - { name: branch, value: sit }
+            - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
         documentSelector: { path: metadata.name, value: sit }
-      - equal: { path: 'spec.verification.args[?(@.name == "ring")].value', value: stable }
-        documentSelector: { path: metadata.name, value: sit }
-      - equal: { path: 'spec.verification.args[?(@.name == "requireApps")].value', value: "false" }
-        documentSelector: { path: metadata.name, value: sit }
-      - equal: { path: 'spec.verification.args[?(@.name == "ring")].value', value: stable }
-        documentSelector: { path: metadata.name, value: prod }
-      - equal: { path: 'spec.verification.args[?(@.name == "requireApps")].value', value: "false" }
-        documentSelector: { path: metadata.name, value: prod }
-      - equal: { path: 'spec.verification.args[?(@.name == "env")].value', value: prod }
+      - equal:
+          path: spec.verification.args
+          value:
+            - { name: env, value: prod }
+            - { name: ring, value: stable }
+            - { name: requireApps, value: "false" }
+            - { name: branch, value: prod }
+            - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
         documentSelector: { path: metadata.name, value: prod }
 
   # Kargo v1.11.4 silently drops a Stage arg the template doesn't declare, and fails the run for a declared arg without

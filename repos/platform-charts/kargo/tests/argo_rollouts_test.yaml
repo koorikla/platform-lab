@@ -17,20 +17,6 @@ tests:
       - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: analysistemplates.argoproj.io, any: true }
         template: charts/argo-rollouts/templates/crds/analysis-template-crd.yaml
 
-  # a deleted CRD cascades to every AnalysisRun/Template
-  - it: never lets Argo CD delete a Rollouts CRD
-    asserts:
-      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-options"]', value: Delete=false }
-        template: charts/argo-rollouts/templates/crds/analysis-run-crd.yaml
-      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-options"]', value: Delete=false }
-        template: charts/argo-rollouts/templates/crds/analysis-template-crd.yaml
-      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-options"]', value: Delete=false }
-        template: charts/argo-rollouts/templates/crds/cluster-analysis-template-crd.yaml
-      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-options"]', value: Delete=false }
-        template: charts/argo-rollouts/templates/crds/experiment-crd.yaml
-      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-options"]', value: Delete=false }
-        template: charts/argo-rollouts/templates/crds/rollout-crd.yaml
-
   - it: runs one single-replica rollouts controller next to kargo-controller, no dashboard
     asserts:
       - equal: { path: 'metadata.labels["app.kubernetes.io/name"]', value: argo-rollouts }

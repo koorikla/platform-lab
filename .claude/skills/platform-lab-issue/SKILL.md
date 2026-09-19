@@ -37,8 +37,8 @@ the live environment.
    agent co-wrote it.
 6. **Charts**: bump `version` in `Chart.yaml` of every chart whose packaged content you change. CI enforces it
    (`hack/check-chart-versions.sh origin/main`; a change only under a chart's `tests/` needs no bump when its
-   `.helmignore` lists `tests/`); `charts.yaml` publishes only versions GHCR doesn't have yet. A new chart with tests
-   gets a `.helmignore` with `tests/`.
+   `.helmignore` lists `/tests/`); `charts.yaml` publishes only versions GHCR doesn't have yet. A new chart with tests
+   gets a `.helmignore` with `/tests/`. A release-wide count stays an `assert_yq` in `hack/tests` (unittest counts per template).
 7. **PR**: `gh pr create --fill --body "Closes #<n> …"` with: what changed, how it was tested, what needs live
    verification, risks. Keep PRs to one issue. Rebase on `origin/main` if it moved; resolve conflicts yourself.
 8. **Report** to the coordinator (PR link, test output, open questions). Address review findings on the same branch.

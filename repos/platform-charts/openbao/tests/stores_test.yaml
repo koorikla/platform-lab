@@ -6,7 +6,8 @@ templates:
   - templates/hub-writer.yaml
   - templates/openchoreo.yaml
 tests:
-  - it: renders exactly the stores openbao and default
+  # counts are per template here; the release-wide store set (exactly openbao + default): hack/tests/test_openbao.sh
+  - it: renders store openbao in hub-writer.yaml and store default in openchoreo.yaml, one each
     asserts:
       - hasDocuments: { count: 1, filterAware: true }
         documentSelector: { path: kind, value: ClusterSecretStore, matchMany: true, skipEmptyTemplates: true }

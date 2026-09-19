@@ -33,9 +33,21 @@ for n in $(yq eval-all '[select(.kind=="PushSecret") | .metadata.namespace] | un
   assert_yq "$b" "select(.kind==\"ClusterSecretStore\" and .metadata.name==\"openbao\") | .spec.conditions[0].namespaces | contains([\"$n\"])" true
 done
 
-# --- the hub file registers nothing (it is the control plane)
+# --- whole render (per-template unit tests can't see what another template adds): invariant 7 on the hub side.
+# A worker pushes exactly its agent identity (+ the OpenChoreo identity when the hub serves OpenChoreo), through the
+# hub-local store only; nothing writes into a worker (no ClusterSecretStore).
+w=$(render dev1 $charts/cluster -f $config/fleet/clusters/dev/dev1.yaml)
+assert_yq "$w" '[select(.kind=="PushSecret") | .metadata.name] | join(",")' dev1-argocd-agent
+assert_yq "$o" '[select(.kind=="PushSecret") | .metadata.name] | sort | join(",")' \
+  dev1-argocd-agent,dev1-openchoreo-agent,dev1-openchoreo-gateway-ca
+for r in "$w" "$o"; do assert_yq "$r" '[select(.kind=="ClusterSecretStore")] | length' 0; done
+# the hub file (the control plane) gets no identity, grants nothing, registers nothing - with or without OpenChoreo
 h=$(render mgmt $charts/cluster -f $config/fleet/clusters/mgmt/mgmt.yaml "${oc[@]}")
-assert_yq "$h" '[select(.apiVersion | test("^openchoreo.dev/"))] | length' 0
+h0=$(render mgmt $charts/cluster -f $config/fleet/clusters/mgmt/mgmt.yaml)
+for r in "$h" "$h0"; do
+  assert_yq "$r" '[select(.kind=="PushSecret" or .kind=="Role" or .kind=="RoleBinding" or .kind=="ClusterSecretStore" or
+    .kind=="Certificate" or .kind=="Issuer" or .kind=="ExternalSecret" or (.apiVersion | test("^openchoreo.dev/")))] | length' 0
+done
 
 # --- invariant 1 for every cluster file: ClusterDataPlane name == planeID == Environment name == fleet name
 for f in $config/fleet/clusters/*/*.yaml*; do
