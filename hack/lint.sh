@@ -44,6 +44,14 @@ for f in $config/fleet/clusters/*/*.yaml*; do
   fv=$(awk '/^kubernetesVersion:/ {print $2}' "$f" | sed 's/^v//' | cut -d. -f1,2)
   [ "$fv" = "$kv" ] || { echo "FAIL: $f: kubernetesVersion $fv != render-addon kubeVersion $kv"; exit 1; }
 done
+# worker-addons points a canary cluster at rendered/<env>-canary: Kargo must render that branch (a stage of that name),
+# else the Applications only show a ComparisonError at runtime
+stages=" $(yq '.stages[].name' $charts/kargo-pipeline/values.yaml | paste -sd' ' -) "
+for f in $config/fleet/clusters/*/*.yaml*; do
+  [ "$(yq '.ring // "stable"' "$f")" = canary ] || continue
+  s="$(yq '.env' "$f")-canary"
+  [[ $stages == *" $s "* ]] || { echo "FAIL: $f: ring canary, but kargo-pipeline has no stage $s"; exit 1; }
+done
 # one render per cluster file, enabled or not
 for f in $config/fleet/clusters/*/*.yaml*; do render cluster $charts/cluster -f "$f"; done
 echo "lint: OK"

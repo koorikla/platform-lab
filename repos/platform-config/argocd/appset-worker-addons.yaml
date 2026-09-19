@@ -1,7 +1,8 @@
-# addon x worker-cluster x rollout(env). Version resolution per generated Application (file envs/<env>.yaml):
-#   clusters.<cluster>.chartRevision  (pin ONE cluster)   >   chartRevision  (whole env: dev1, dev2, ...)
-# Values layering: values.yaml < envs/<env>.values.yaml < clusters/<cluster>.values.yaml
-# Kargo promotes by writing envs/<env>.yaml. Apps carry argocd-agent=true so the principal ships them to the agent.
+# addon x worker cluster. Source = plain YAML that Kargo rendered (ClusterPromotionTask render-addon) into
+# rendered/<branch>:addons/<addon>/, branch = <env>, or <env>-canary for clusters with label platform.lab/ring=canary
+# (fleet file `ring:`). Chart version and values travel inside the rendered commit: promoting = Kargo moving the branch,
+# nothing is resolved here. addon.yaml on main stays the on/off switch (.disabled => no Application; the stale rendered
+# folder is removed with hack/rendered-prune.sh). Apps carry argocd-agent=true so the principal ships them to the agent.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -10,56 +11,50 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
+  # Disabling an addon (or a cluster losing role=worker) deletes the Application but leaves what it deployed running:
+  # removing an addon from workers is a deliberate step, not a side effect of a rename or a generator hiccup.
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   generators:
     - matrix:
         generators:
-          - matrix:
-              generators:
-                - git:
-                    repoURL: https://github.com/koorikla/platform-lab.git
-                    revision: main
-                    pathParamPrefix: addonfile
-                    files:
-                      - path: repos/platform-config/addons/workers/*/addon.yaml
-                - clusters:
-                    selector:
-                      matchLabels:
-                        platform.lab/role: worker
-                    values:
-                      env: '{{ index .metadata.labels "platform.lab/env" }}'
           - git:
-              repoURL: https://github.com/koorikla/platform-lab.git
+              repoURL: https://github.com/koorikla/platform-lab.git      # platform-config repo
               revision: main
-              pathParamPrefix: rolloutfile
+              pathParamPrefix: addonfile        # addon name = folder name (== addon.name, hack/lint.sh), like Kargo's
               files:
-                - path: '{{ .addonfile.path.path }}/envs/{{ .values.env }}.yaml'
+                - path: repos/platform-config/addons/workers/*/addon.yaml
+          - clusters:
+              selector:
+                matchLabels:
+                  platform.lab/role: worker
+              values:
+                env: '{{ index .metadata.labels "platform.lab/env" }}'
+                # `index` yields "" for a missing label (a field access would fail under missingkey=error):
+                # cluster secrets from before the ring label existed count as stable. A canary branch exists only
+                # where kargo-pipeline has a <env>-canary stage (dev today).
+                branch: '{{ index .metadata.labels "platform.lab/env" }}{{ if eq (index .metadata.labels "platform.lab/ring") "canary" }}-canary{{ end }}'
   template:
     metadata:
-      name: '{{ .addon.name }}-{{ .name }}'
+      name: '{{ .addonfile.path.basename }}-{{ .name }}'
       labels:
         argocd-agent: "true"
-        platform.lab/addon: '{{ .addon.name }}'
+        platform.lab/addon: '{{ .addonfile.path.basename }}'
         platform.lab/env: '{{ .values.env }}'
         platform.lab/cluster: '{{ .name }}'
     spec:
       project: platform-workers
-      sources:
-        - repoURL: https://github.com/koorikla/platform-lab.git          # platform-charts repo (git tag per chart release once split out)
-          targetRevision: '{{ dig "clusters" .name "chartRevision" .rollout.chartRevision .rollout }}'
-          path: 'repos/platform-charts/{{ .addon.chart }}'
-          helm:
-            releaseName: '{{ .addon.releaseName }}'
-            ignoreMissingValueFiles: true
-            valueFiles:
-              - '$values/{{ .addonfile.path.path }}/values.yaml'
-              - '$values/{{ .addonfile.path.path }}/envs/{{ .values.env }}.values.yaml'
-              - '$values/{{ .addonfile.path.path }}/clusters/{{ .name }}.values.yaml'
-        - repoURL: https://github.com/koorikla/platform-lab.git
-          targetRevision: main
-          ref: values
+      source:
+        repoURL: https://github.com/koorikla/platform-lab.git            # repo Kargo pushes rendered/* to
+        targetRevision: 'rendered/{{ .values.branch }}'
+        path: 'addons/{{ .addonfile.path.basename }}'
+        # plain manifests, no helm/kustomize on the worker. Kargo's flat layout has no subfolders today; recurse keeps
+        # a chart-per-folder layout working too.
+        directory:
+          recurse: true
       destination:
         name: '{{ .name }}'
-        namespace: '{{ .addon.namespace }}'
+        namespace: '{{ dig "namespace" .addonfile.path.basename .addon }}'   # same default as kargo-pipeline
       syncPolicy:
         automated: { prune: true, selfHeal: true }
         retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
