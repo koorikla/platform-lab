@@ -59,6 +59,13 @@ seed main $cfg/cert-manager/addon.yaml.disabled
 run --apply >/dev/null || fail "--apply (all disabled) failed"
 [ "$(files rendered/prod)" = "README.md,addons/.keep,apps/.keep" ] || fail "rendered/prod: $(files rendered/prod)"
 
+# MAIN without the workers folder (wrong branch, repo split) must not read as "every addon disabled"
+seed rendered/prod README.md addons/.keep addons/cert-manager/a.yaml
+seed old README.md
+prod0=$(tip rendered/prod)
+assert_fails env GIT_DIR="$tmp/scratch.git" REMOTE="$remote" MAIN=old "$prune" --apply
+[ "$(tip rendered/prod)" = "$prod0" ] || fail "missing workers folder on MAIN, yet rendered/prod changed"
+
 # unknown argument / unreachable remote fail loudly
 assert_fails run --aply
 assert_fails env GIT_DIR="$tmp/scratch.git" REMOTE="$tmp/nope.git" "$prune"

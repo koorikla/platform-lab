@@ -86,5 +86,7 @@ New cluster = one file in `fleet/clusters/<env>/`.
 Worker addons sync plain YAML from Kargo's `rendered/<env>[-canary]:addons/<addon>/` (`worker-addons` appset, branch
 from cluster labels `platform.lab/env` + `platform.lab/ring`). Disable one = rename `addon.yaml` → `.disabled` on main:
 its Application and Kargo pipeline go, the workload stays (`preserveResourcesOnDeletion`; delete it by hand if it must
-go). Then `hack/rendered-prune.sh` (dry run) / `--apply` removes the stale `addons/<addon>` from every `rendered/*`
-branch — the one documented cleanup besides Kargo that writes those branches.
+go). Once Kargo project `addon-<addon>` is gone (a running promotion could re-push the folder), `make rendered-prune`
+(dry run) / `make rendered-prune APPLY=1` removes the stale `addons/<addon>` from every `rendered/*` branch — the one
+documented cleanup besides Kargo that writes those branches (it pushes directly, so prod needs a PR once PR-gated).
+A `ring: canary` cluster needs a `<env>-canary` stage in kargo-pipeline (`hack/lint.sh` checks).

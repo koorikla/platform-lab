@@ -2,6 +2,9 @@
 # worker-addons: addon x worker cluster, synced as a plain directory from Kargo's rendered/<env>[-canary] branch.
 # ApplicationSets can't be rendered offline: assert the structure, then execute its Go templates with helm's `tpl`
 # (text/template + sprig, like the appset controller) against params shaped like the generators' output.
+# Not covered: missingkey behaviour. helm's tpl runs missingkey=zero with map[string]interface{} labels (a missing label
+# is nil), the controller missingkey=error with map[string]string labels (`index` gives ""). The "no ring label =>
+# stable" case holds in both, for different reasons; a typo'd field shows up here as a wrong value, not an error.
 source "$(dirname "$0")/lib.sh"
 a=$config/argocd/appset-worker-addons.yaml
 g='.spec.generators[0].matrix.generators'
