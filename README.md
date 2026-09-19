@@ -67,7 +67,7 @@ make set-repo REPO=https://github.com/<you>/<repo>.git && git commit -am "set re
 # 1. needs: docker, k3d, kubectl, helm, clusterctl
 make up        # k3d bootstrap -> CAPI creates hub 'mgmt' -> clusterctl move (hub manages itself) -> Argo CD
 make status
-make ui        # Argo CD :8080, Kargo :8081
+make ui        # Argo CD :8080 (admin / make argocd-password), Kargo :8081 (admin / make kargo-password)
 make kubeconfig CLUSTER=dev1 > dev1.kubeconfig
 ```
 

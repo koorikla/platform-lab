@@ -7,6 +7,10 @@ argocd-agent-principal:
   image:                       # chart appVersion still says v0.8.1; releases are published on quay only
     repository: quay.io/argoprojlabs/argocd-agent
     tag: v0.10.0
+  # The chart has no config checksum: changing the JWT key source must roll the pod (the key is read at startup only).
+  # RollingUpdate with 1 replica keeps the old pod serving until the new one has loaded the key.
+  podAnnotations:
+    platform.lab/jwt-key: secret/argocd-agent-jwt
   service:
     type: ClusterIP            # exposed via templates/nodeport.yaml (chart has no nodePort knob)
   principal:
@@ -20,4 +24,5 @@ argocd-agent-principal:
         require: true
         matchSubject: true
     jwt:
-      allowGenerate: true      # LAB ONLY: key regenerated on restart; agents simply re-auth via mTLS
+      allowGenerate: false     # key comes from templates/jwt-key.yaml (cert-manager RSA PKCS#8 -> ESO); stable across restarts
+      secretName: argocd-agent-jwt

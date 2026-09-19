@@ -86,5 +86,5 @@ kubectl --context $HUB apply -f bootstrap/root-app.yaml
 
 echo
 echo "Hub     : kubectl --context $HUB ...   (self-hosted: kubectl --context $HUB -n fleet get cluster $HUB)"
-echo "UIs     : make ui   -> Argo CD http://localhost:8080 (admin / \$(make argocd-password)), Kargo http://localhost:8081 (admin / admin)"
+echo "UIs     : make ui   -> Argo CD http://localhost:8080 (admin / \$(make argocd-password)), Kargo http://localhost:8081 (admin / \$(make kargo-password))"
 echo "Watch   : kubectl --context $HUB get applications -n argocd -w"

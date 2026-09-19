@@ -6,10 +6,10 @@ kargo:
     service:
       type: NodePort
       nodePort: 30081
-    adminAccount:
-      # LAB ONLY: password "admin". TODO: move to ESO-managed secret (api.secret.name).
-      passwordHash: "$2b$10$48SEYFyqMQ5DVXCuMiOFv.HAAiaroOvGVx5/Op8l.mtP8jDqqFq/O"
-      tokenSigningKey: "lab-only-change-me"
+    # Admin password hash + token signing key are generated in-cluster (templates/admin-secret.yaml), never in git.
+    # Setting this stops the chart from rendering its own kargo-api Secret (and requiring adminAccount.* values).
+    secret:
+      name: kargo-api-admin
   controller:
     argocd:
       namespace: argocd
