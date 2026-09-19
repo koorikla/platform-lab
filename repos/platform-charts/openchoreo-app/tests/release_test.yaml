@@ -76,12 +76,12 @@ tests:
       - matchRegex: { path: metadata.name, pattern: '^podinfo-dev-6-15-0-[0-9a-f]{8}$' }
       - notEqual: { path: metadata.name, value: podinfo-dev-6-15-0-ee034475 }
 
-  - it: test stage - its own release name, no Workload
-    values: [values/podinfo/app.yaml, values/podinfo/envs/test/values.yaml]
-    set: { env: test, stage: test }
+  - it: nit stage - its own release name, no Workload
+    values: [values/podinfo/app.yaml, values/podinfo/envs/nit/values.yaml]
+    set: { env: nit, stage: nit }
     asserts:
       - hasDocuments: { count: 1 }
-      - matchRegex: { path: metadata.name, pattern: '^podinfo-test-6-15-0-[0-9a-f]{8}$' }
+      - matchRegex: { path: metadata.name, pattern: '^podinfo-nit-6-15-0-[0-9a-f]{8}$' }
 
   # stage (Kargo branch), not env, names the release: dev-canary renders env=dev too and must not share dev's objects
   - it: dev-canary stage - named by the stage, no Workload

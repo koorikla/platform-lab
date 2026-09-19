@@ -10,11 +10,11 @@ tests:
   # a canary-ring cluster binds from rendered/dev-canary (#17), so apps need that branch too
   - it: has the same stages as an addon pipeline
     asserts:
-      - hasDocuments: { count: 4 }
+      - hasDocuments: { count: 5 }
       - equal: { path: metadata.name, value: dev-canary }
         documentIndex: 0
       - equal: { path: metadata.name, value: prod }
-        documentIndex: 3
+        documentIndex: 4
 
   # names and order are the contract with render-app's spec.vars (hack/tests/test_app_pipeline.sh)
   - it: passes repoURL, app, image, env, branch, pr to render-app
@@ -51,8 +51,10 @@ tests:
       - notExists: { path: 'spec.requestedFreight[0].sources.requiredSoakTime' }
         documentSelector: { path: metadata.name, value: dev-canary }
       - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [dev] } }
-        documentSelector: { path: metadata.name, value: test }
-      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [test] } }
+        documentSelector: { path: metadata.name, value: nit }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [nit] } }
+        documentSelector: { path: metadata.name, value: sit }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [sit] } }
         documentSelector: { path: metadata.name, value: prod }
 
   - it: an explicit stage soak wins over appSoak

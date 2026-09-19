@@ -6,15 +6,17 @@ set:
 tests:
   - it: renders one Stage per values stage, in promotion order
     asserts:
-      - hasDocuments: { count: 4 }
+      - hasDocuments: { count: 5 }
       - equal: { path: metadata.name, value: dev-canary }
         documentIndex: 0
       - equal: { path: metadata.name, value: dev }
         documentIndex: 1
-      - equal: { path: metadata.name, value: test }
+      - equal: { path: metadata.name, value: nit }
         documentIndex: 2
-      - equal: { path: metadata.name, value: prod }
+      - equal: { path: metadata.name, value: sit }
         documentIndex: 3
+      - equal: { path: metadata.name, value: prod }
+        documentIndex: 4
       - equal: { path: metadata.namespace, value: addon-cert-manager }
 
   - it: feeds the first stage from the Warehouse and every next one from its predecessor
@@ -24,8 +26,10 @@ tests:
       - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [dev-canary] } }
         documentSelector: { path: metadata.name, value: dev }
       - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [dev] } }
-        documentSelector: { path: metadata.name, value: test }
-      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [test] } }
+        documentSelector: { path: metadata.name, value: nit }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [nit] } }
+        documentSelector: { path: metadata.name, value: sit }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [sit] } }
         documentSelector: { path: metadata.name, value: prod }
 
   # a soak is a timer that ignores health: the canary gate is verification (verification_test.yaml)

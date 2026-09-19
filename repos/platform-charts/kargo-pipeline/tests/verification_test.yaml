@@ -37,10 +37,16 @@ tests:
             - { name: branch, value: dev }
             - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
         documentSelector: { path: metadata.name, value: dev }
-      - equal: { path: 'spec.verification.args[?(@.name == "env")].value', value: test }
-        documentSelector: { path: metadata.name, value: test }
-      - equal: { path: 'spec.verification.args[?(@.name == "branch")].value', value: test }
-        documentSelector: { path: metadata.name, value: test }
+      - equal: { path: 'spec.verification.args[?(@.name == "env")].value', value: nit }
+        documentSelector: { path: metadata.name, value: nit }
+      - equal: { path: 'spec.verification.args[?(@.name == "branch")].value', value: nit }
+        documentSelector: { path: metadata.name, value: nit }
+      - equal: { path: 'spec.verification.args[?(@.name == "env")].value', value: sit }
+        documentSelector: { path: metadata.name, value: sit }
+      - equal: { path: 'spec.verification.args[?(@.name == "ring")].value', value: stable }
+        documentSelector: { path: metadata.name, value: sit }
+      - equal: { path: 'spec.verification.args[?(@.name == "requireApps")].value', value: "false" }
+        documentSelector: { path: metadata.name, value: sit }
       - equal: { path: 'spec.verification.args[?(@.name == "ring")].value', value: stable }
         documentSelector: { path: metadata.name, value: prod }
       - equal: { path: 'spec.verification.args[?(@.name == "requireApps")].value', value: "false" }
