@@ -1,0 +1,85 @@
+suite: Per-project Kargo roles (#20) - promoters x stages[].promotedBy
+# Kargo 1.11.4: a user maps to ServiceAccounts in the project namespace by rbac.kargo.akuity.io/claims; kargo-api runs a
+# SubjectAccessReview per SA for verb `promote` on stages/<stage>, then creates the Promotion only if the SA may
+# `create` promotions. Stage names below come from the chart's own values (stages[].promotedBy), never a template.
+templates:
+  - rbac.yaml
+set:
+  kind: app
+  name: podinfo
+  image: ghcr.io/stefanprodan/podinfo
+tests:
+  - it: renders ServiceAccount, Role and RoleBinding "developer" in an app project
+    asserts:
+      - hasDocuments: { count: 3 }
+      - equal: { path: metadata.name, value: developer }
+      - equal: { path: metadata.namespace, value: app-podinfo }
+
+  - it: maps the developers group to the ServiceAccount
+    documentSelector: { path: kind, value: ServiceAccount }
+    asserts:
+      - equal: { path: 'metadata.annotations["rbac.kargo.akuity.io/claims"]', value: '{"groups":["developers"]}' }
+      - equal: { path: 'metadata.annotations["kargo.akuity.io/description"]', value: "Promote into dev-canary, dev, nit" }
+
+  # dev-canary, dev and nit carry promotedBy: [developer]; sit and prod stay with the global kargo-admin
+  - it: allows promote into the stages that name the role, and creating the Promotion - nothing else
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal:
+          path: rules
+          value:
+            - { apiGroups: [kargo.akuity.io], resources: [stages], verbs: [promote], resourceNames: [dev-canary, dev, nit] }
+            - { apiGroups: [kargo.akuity.io], resources: [promotions], verbs: [create] }
+
+  - it: binds the Role to the ServiceAccount of the same project
+    documentSelector: { path: kind, value: RoleBinding }
+    asserts:
+      - equal: { path: roleRef, value: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: developer } }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: developer, namespace: app-podinfo }] }
+
+  - it: gives addon pipelines no per-project role (platform-owned; developer is kinds [app])
+    set: { kind: addon, name: cert-manager, image: "" }
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: takes the stage list from stages, so renamed stages carry the role along
+    set:
+      stages:
+        - { name: a, env: dev, promotedBy: [developer] }
+        - { name: b, env: dev }
+        - { name: c, env: dev, promotedBy: [developer] }
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal: { path: 'rules[0].resourceNames', value: [a, c] }
+
+  # RBAC without resourceNames means every stage
+  - it: renders nothing for a role no stage names
+    set:
+      stages: [{ name: a, env: dev }]
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: rejects an unknown role in promotedBy
+    set:
+      stages: [{ name: a, env: dev, promotedBy: [devloper] }]
+    asserts:
+      - failedTemplate: { errorPattern: "stages\\[a\\].promotedBy: devloper is not in promoters" }
+
+  - it: rejects a role without groups
+    set:
+      promoters: [{ name: developer, groups: [], kinds: [app] }]
+    asserts:
+      - failedTemplate: { errorPattern: "groups is empty" }
+
+  - it: rejects a role without kinds
+    set:
+      promoters: [{ name: developer, groups: [developers] }]
+    asserts:
+      - failedTemplate: { errorPattern: "kinds is empty" }
+
+  - it: rejects the names Kargo's controller owns in every project namespace
+    set:
+      promoters: [{ name: kargo-promoter, groups: [developers], kinds: [app] }]
+      stages: [{ name: a, env: dev, promotedBy: [kargo-promoter] }]
+    asserts:
+      - failedTemplate: { errorPattern: "name taken by Kargo's controller" }

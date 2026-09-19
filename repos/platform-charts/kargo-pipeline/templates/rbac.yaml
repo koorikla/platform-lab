@@ -7,6 +7,7 @@
 {{- end }}
 {{- $first := true }}
 {{- range $r := .Values.promoters }}
+{{- if has $r.name (list "kargo-admin" "kargo-viewer" "kargo-promoter" "default") }}{{ fail (printf "promoters[%s]: name taken by Kargo's controller (it rewrites that Role in every project)" $r.name) }}{{ end }}
 {{- if not $r.groups }}{{ fail (printf "promoters[%s].groups is empty: the role would map to nobody" $r.name) }}{{ end }}
 {{- if not $r.kinds }}{{ fail (printf "promoters[%s].kinds is empty: name the pipeline kinds (addon, app) it applies to" $r.name) }}{{ end }}
 {{- $stages := list }}
