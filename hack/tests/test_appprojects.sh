@@ -66,8 +66,14 @@ for f in $config/addons/workers/*/addon.yaml; do
     add "$a-$1" platform-workers "$1" "$ns" "$r"
   done
 done
-for d in repos/apps/*/; do
+for f in repos/apps/*/app.yaml; do   # kargo-app-pipelines
+  a=$(basename "$(dirname "$f")")
+  r=$(render "k-$a" $charts/kargo-pipeline --set kind=app,name="$a",image="$(yq .image.repository "$f")")
+  add "kargo-app-$a" platform-mgmt in-cluster kargo "$r"
+done
+for d in repos/apps/*/; do   # workloads (legacy until #17): every folder with a chart/
   a=$(basename "$d")
+  [ -d "$d/chart" ] || continue
   for w in "${workers[@]}"; do
     set -- $w
     v=(); for x in "$d/envs/$2/values.yaml" "$d/clusters/$1/values.yaml"; do [ -f "$x" ] && v+=(-f "$x"); done
