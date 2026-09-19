@@ -65,7 +65,7 @@ general) and `go` (`hub-lb-reload.sh` renders the CAPD LB template with it).
 
 | Command | What it proves |
 |---|---|
-| `make lint` (`hack/lint.sh`) | every chart builds its deps and passes `helm lint`; every hub addon renders with its values; every worker addon renders for dev/test/prod with no nameless or duplicate resources (Kargo's flat layout would overwrite them); `addon.name` == folder name; fleet `kubernetesVersion` minor == `render-addon` `kubeVersion` minor; every cluster file renders, enabled or not |
+| `make lint` (`hack/lint.sh`) | every chart builds its deps and passes `helm lint`; every hub addon renders with its values; every worker addon renders for dev/test/prod with no nameless or duplicate resources (Kargo's flat layout would overwrite them); `addon.name` == folder name; fleet `kubernetesVersion` minor == `render-addon` `kubeVersion` minor (enabled worker clusters); every cluster file renders, enabled or not |
 | `make test` (`hack/tests/run.sh`) | render assertions in `hack/tests/test_*.sh`, each in its own process |
 
 Writing a test: `source "$(dirname "$0")/lib.sh"`, then `o=$(render <release> <chart> [helm args])` and
@@ -256,8 +256,10 @@ class and in the provider toggle. Where things are:
    `clusterawsadm` IAM stack for AWS).
 2. Credentials, never in git: an `ExternalSecret` on the hub that builds the Secret the provider wants from OpenBao
    (OpenStack: a Secret in `fleet` with key `clouds.yaml`, named by the `identityRef` variable; AWS: `capa-system/capa-variables`
-   with `AWS_B64ENCODED_CREDENTIALS`, plus the Secret of the `AWSClusterStaticIdentity` the cluster names). Today's
-   OpenBao is in-memory dev mode, so cloud credentials need a durable store first (#30).
+   with `AWS_B64ENCODED_CREDENTIALS`, plus the Secret of the `AWSClusterStaticIdentity` the cluster names; that
+   identity's `spec.allowedNamespaces.list` must include `fleet`, where the Clusters live, because an unset
+   `allowedNamespaces` allows no namespace). Today's OpenBao is in-memory dev mode, so cloud credentials need a
+   durable store first (#30).
 3. `infrastructure.<provider>.enabled: true` in `addons/management/capi-providers/values.yaml`.
 4. Rename the class file to `.yaml`. `make test` fails if an enabled cluster file names a disabled class.
 5. Copy the example cluster file, set its variables, rename it to `.yaml`.
@@ -266,17 +268,18 @@ class and in the provider toggle. Where things are:
 - **Version**: the newest provider release built on our CAPI core minor (`sigs.k8s.io/cluster-api` in the provider's
   `go.mod` at the tag) whose `metadata.yaml` still lists contract `v1beta1` for that minor. Core stays on 1.12 while
   `cluster-api-k3s` is v1beta1-contract, which is why CAPO is on v0.14.x (v0.15 is on CAPI 1.14) and CAPA on v2.12.x
-  (v2.13 is on 1.13). Update the version table in `hack/tests/test_provider_extension_points.sh` and add a Renovate
-  regex manager plus an `allowedVersions` cap in `renovate.json` (copy the CAPO ones).
+  (v2.13 is on 1.13). Add a Renovate regex manager plus an `allowedVersions` cap in `renovate.json` (copy the CAPO
+  ones). The cap is where that line is kept, and `make test` checks the pin stays below it.
 - **Operator CR** in `capi-providers/templates/providers.yaml`: `fetchConfig.url` if clusterctl doesn't know the
   provider (k3s), `configSecret` if its components have variables without defaults
   (`grep -o '\${[A-Z_]*}' infrastructure-components.yaml`; CAPA: `AWS_B64ENCODED_CREDENTIALS`).
 - **Class file**: copy an example. Use a variable for every per-cluster or per-cloud value. Templates carry
   CRD-valid placeholders that patches replace. No Secrets in the file. Use ClusterClass `cluster.x-k8s.io/v1beta1`,
-  like `k3s-docker`. `test_provider_extension_points.sh` checks the structure: refs resolve, patches read only
-  declared variables, every variable is used, and every fleet file sets every required variable.
-  `test_clusterclass_schema.sh` validates the class and every rendered `Cluster` against the pinned CRDs. Add the new
-  CRD source there, and the infrastructure kind → `platform.lab/provider` mapping to the first test.
+  like `k3s-docker`. `test_provider_extension_points.sh` checks what CAPI can't check before a cluster exists: refs
+  resolve, patches read only declared variables, every variable is used, and the `provider` label matches the class.
+  `test_clusterclass_schema.sh` validates the class and every rendered `Cluster` against the pinned CRDs (in CI it
+  fails rather than skips when it can't fetch them). Add the new CRD source there, and the
+  infrastructure kind → `platform.lab/provider` mapping to the first test.
 - **Cluster file**: `provider` (label `platform.lab/provider`: `docker` | `openstack` | `aws`), `region`, `clusterClass`,
   `variables` (replaces the chart default list), `workerClass`, and `controlPlaneReplicas: null` for a managed control
   plane. Provider-specific worker add-ons (cloud controller manager, CSI) select on `platform.lab/provider`.

@@ -4,10 +4,11 @@
 # patch semantics are not checked). Also: every jsonPatch path exists in the target template's schema, and a patch
 # fed straight from a variable has the type the schema expects there.
 # CRDs come from the providers' release assets, cached under ~/.cache/platform-lab; skipped when kubeconform is missing
-# or GitHub can't be reached, unless REQUIRE_SCHEMA=1 turns the skip into a failure (same contract as
-# test_openchoreo_app_schema.sh).
+# or GitHub can't be reached, unless REQUIRE_SCHEMA=1 turns the skip into a failure. REQUIRE_SCHEMA defaults to 1
+# under CI (GitHub Actions sets CI=true), so a network blip can't pass there as a SKIP; locally it skips.
 source "$(dirname "$0")/lib.sh"
 shopt -s nullglob
+REQUIRE_SCHEMA=${REQUIRE_SCHEMA:-${CI:+1}}
 skip() { [ "${REQUIRE_SCHEMA:-0}" = 1 ] && fail "$1 (REQUIRE_SCHEMA=1)"; echo "SKIP: $1"; exit 0; }
 command -v kubeconform >/dev/null || skip "kubeconform not on PATH"
 v=$charts/capi-providers/values.yaml

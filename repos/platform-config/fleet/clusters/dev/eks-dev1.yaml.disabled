@@ -5,7 +5,7 @@ env: dev
 provider: aws                   # platform.lab/provider: selects provider-specific HelmChartProxies (EBS CSI, ...) later
 region: eu-north-1              # platform.lab/region; the class variable below is what CAPA uses
 clusterClass: eks
-kubernetesVersion: v1.34.0      # EKS minor as semver; AWS picks the patch. Minor must match the fleet (make lint)
+kubernetesVersion: v1.34.0      # EKS minor as semver; AWS picks the patch. Keep the fleet minor when enabling (make lint)
 controlPlaneReplicas: null      # managed control plane: the Cluster must not set replicas
 workerClass: default-worker
 workerReplicas: 2

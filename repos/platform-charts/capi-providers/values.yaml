@@ -11,7 +11,7 @@ infrastructure:
     version: v1.12.11          # CAPD is released with core
   # Cloud providers: opt-in per hub (addons/management/capi-providers/values.yaml), each with a disabled ClusterClass in
   # platform-config fleet/base/clusterclasses/. Recipe: CONTRIBUTING.md "Add a CAPI provider or ClusterClass".
-  # Versions: the last line built on our CAPI core minor (go.mod sigs.k8s.io/cluster-api; hack/tests checks the pair).
+  # Versions: the last line built on our CAPI core minor (go.mod sigs.k8s.io/cluster-api), capped in renovate.json.
   # Both are in clusterctl's built-in provider list, so the operator needs no fetchConfig (unlike k3s).
   openstack:
     enabled: false

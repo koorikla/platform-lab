@@ -1,6 +1,9 @@
 # k3s (bootstrap + control plane, same provider as k3s-docker) on OpenStack (CAPO). Example, not booted yet: API
 # versions and fields checked against CAPO v0.14.8 / cluster-api-k3s v0.4.0 CRDs (hack/tests/test_clusterclass_schema.sh),
-# behaviour marked VERIFY is inferred.
+# behaviour marked VERIFY is inferred. Based on cluster-api-k3s's own OpenStack sample
+# (https://github.com/k3s-io/cluster-api-k3s/blob/v0.4.0/samples/openstack/k3s-template.yaml: a plain Cluster, not a
+# ClusterClass; same OpenStackCluster/MachineTemplate shape, identityRef + clouds.yaml Secret, image by name filter),
+# plus the kubelet provider-id pattern of its proxmox/nutanix samples.
 # Enable (CONTRIBUTING.md "Add a CAPI provider or ClusterClass"):
 #   1. hub reachable from the OpenStack network at a real address (workers can't reach the CAPD `mgmt-lb`);
 #   2. ORC (OpenStack Resource Controller) on the hub - CAPO >= v0.12 needs it and the operator doesn't install it;

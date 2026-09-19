@@ -13,7 +13,8 @@
 #   3. `infrastructure.aws.enabled: true` in addons/management/capi-providers/values.yaml, with Secret
 #      capa-system/capa-variables (key AWS_B64ENCODED_CREDENTIALS) created by ESO from OpenBao before the provider;
 #   4. the identity the cluster file names (identityRef), e.g. an AWSClusterStaticIdentity whose Secret in capa-system
-#      comes from OpenBao via ESO - never from git;
+#      comes from OpenBao via ESO - never from git - and whose spec.allowedNamespaces.list includes `fleet` (unset
+#      allowedNamespaces = no namespace may use it);
 #   5. rename this file to .yaml, then a cluster file with `clusterClass: eks`.
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: ClusterClass

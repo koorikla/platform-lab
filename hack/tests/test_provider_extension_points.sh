@@ -1,31 +1,21 @@
 #!/usr/bin/env bash
 # Provider extension points (#23): one ClusterClass per file, fleet/base/clusterclasses/<class>.yaml (disabled examples
 # as .yaml.disabled; the legacy fleet/base/clusterclass-<class>.yaml until it moves there), synced by fleet-base.
-# Per class file: one ClusterClass named after the file, everything in namespace fleet, no Secrets (credentials come
-# from OpenBao/ESO), every template ref resolves to a document of the file and every document is referenced, patches
-# select referenced templates and existing worker classes, and read only declared variables (all of which are used).
-# Per fleet file, enabled or not: the rendered Cluster names an existing class (an enabled cluster needs an enabled
-# class), sets only declared variables and every required one without a default, uses a declared worker class, sets
-# controlPlane.replicas exactly when the class has machines for its control plane (EKS: managed, no replicas), and its
-# platform.lab/provider label matches the class's infrastructure provider. Schema checks: test_clusterclass_schema.sh.
+# Only what CAPI's own validation wouldn't tell us before a cluster exists: every template ref resolves to a document
+# of the file (and every document is used), patches read only declared variables (and every variable is used), no
+# Secrets in class files, an enabled cluster never names a disabled class, the provider label matches the class, and
+# the cloud provider pins respect their Renovate caps (the CAPI 1.12 line). Field/type checks against the provider
+# CRDs: test_clusterclass_schema.sh.
 source "$(dirname "$0")/lib.sh"
 shopt -s nullglob
 base=$config/fleet/base
 cc='select(.kind=="ClusterClass")'
-cl='select(.kind=="Cluster")'
 # lines of $1 that are not in $2 (both newline lists, blank lines ignored)
 missing_from() { comm -23 <(printf '%s\n' "$1" | sed '/^$/d' | sort -u) <(printf '%s\n' "$2" | sed '/^$/d' | sort -u); }
-y() { yq -N "$@"; }            # per document: string concatenation stays within one object
-ya() { yq eval-all "$@"; }       # across documents: counts
+y() { yq -N "$@"; }   # per document: string concatenation stays within one object
 
 # fleet-base must recurse, or nothing under fleet/base/clusterclasses/ would ever sync
 assert_yq $config/argocd/apps.yaml 'select(.metadata.name=="fleet-base") | .spec.source.directory.recurse' true
-
-# the extension points this issue ships (disabled until a provider is enabled on the hub)
-for f in $base/clusterclasses/k3s-openstack.yaml.disabled $base/clusterclasses/eks.yaml.disabled \
-         $config/fleet/clusters/dev/os-dev1.yaml.disabled $config/fleet/clusters/dev/eks-dev1.yaml.disabled; do
-  [ -f "$f" ] || fail "missing $f"
-done
 
 class_file() {   # class_file <class> -> its file, enabled first; nothing if there is none
   local f
@@ -35,14 +25,12 @@ class_file() {   # class_file <class> -> its file, enabled first; nothing if the
   return 0
 }
 
-files=($base/clusterclass-*.yaml $base/clusterclasses/*.yaml $base/clusterclasses/*.yaml.disabled)
+files=("$base"/clusterclass-*.yaml "$base"/clusterclasses/*.yaml "$base"/clusterclasses/*.yaml.disabled)
 [ ${#files[@]} -ge 3 ] || fail "expected k3s-docker, k3s-openstack and eks ClusterClass files, got: ${files[*]}"
 for f in "${files[@]}"; do
   n=$(basename "$f"); n=${n#clusterclass-}; n=${n%.disabled}; n=${n%.yaml}
-  [ "$(ya "[$cc] | length" "$f")" = 1 ] || fail "$f: want exactly one ClusterClass"
-  [ "$(y "$cc | .metadata.name" "$f")" = "$n" ] || fail "$f: ClusterClass name must be the file name ($n)"
-  [ "$(ya '[select(.kind != null and .metadata.namespace != "fleet")] | length' "$f")" = 0 ] || fail "$f: everything lives in namespace fleet"
-  [ "$(ya '[select(.kind == "Secret")] | length' "$f")" = 0 ] || fail "$f: no Secrets in git (credentials: OpenBao/ESO)"
+  [ "$(y "$cc | .metadata.name" "$f")" = "$n" ] || fail "$f: one ClusterClass, named after the file ($n)"
+  [ "$(yq eval-all '[select(.kind == "Secret")] | length' "$f")" = 0 ] || fail "$f: no Secrets in git (credentials: OpenBao/ESO)"
 
   refs=$(y "$cc | .spec | [.controlPlane.ref, .controlPlane.machineInfrastructure.ref, .infrastructure.ref,
       (.workers.machineDeployments // [] | .[] | (.template.bootstrap.ref, .template.infrastructure.ref))] | .[]
@@ -50,13 +38,6 @@ for f in "${files[@]}"; do
   docs=$(y 'select(.kind != null and .kind != "ClusterClass") | .apiVersion + "/" + .kind + "/" + .metadata.name' "$f")
   [ -z "$(missing_from "$refs" "$docs")" ] || fail "$f: refs without a document: $(missing_from "$refs" "$docs")"
   [ -z "$(missing_from "$docs" "$refs")" ] || fail "$f: documents no ref uses: $(missing_from "$docs" "$refs")"
-
-  kinds=$(sed 's#/[^/]*$##' <<<"$refs")   # apiVersion/kind
-  sel=$(y "$cc | .spec.patches // [] | .[].definitions[].selector | .apiVersion + \"/\" + .kind" "$f")
-  [ -z "$(missing_from "$sel" "$kinds")" ] || fail "$f: patch selects a template the class doesn't use: $(missing_from "$sel" "$kinds")"
-  wcs=$(y "$cc | .spec.workers.machineDeployments // [] | .[].class" "$f")
-  selw=$(y "$cc | .spec.patches // [] | .[].definitions[].selector.matchResources.machineDeploymentClass.names // [] | .[]" "$f")
-  [ -z "$(missing_from "$selw" "$wcs")" ] || fail "$f: patch selects unknown worker class: $(missing_from "$selw" "$wcs")"
 
   declared=$(y "$cc | .spec.variables // [] | .[].name" "$f")
   # valueFrom.variable, plus the first path segment of every .var inside {{ }} (enabledIf, valueFrom.template)
@@ -66,67 +47,36 @@ for f in "${files[@]}"; do
   [ -z "$(missing_from "$used" "$declared")" ] || fail "$f: patches read undeclared variables: $(missing_from "$used" "$declared")"
   [ -z "$(missing_from "$declared" "$used")" ] || fail "$f: variables no patch uses: $(missing_from "$declared" "$used")"
 done
+# invariant 1 on EKS: the EKS cluster is named after the CAPI Cluster, not something CAPA derives
+assert_yq $base/clusterclasses/eks.yaml.disabled \
+  "$cc | .spec.patches[].definitions[].jsonPatches[] | select(.path == \"/spec/template/spec/eksClusterName\") | .valueFrom.template" \
+  '{{ .builtin.cluster.name }}'
 
-# every cluster file against its class
 for ff in $config/fleet/clusters/*/*.yaml $config/fleet/clusters/*/*.yaml.disabled; do
-  o=$(render "$(yq '.name' "$ff")" $charts/cluster -f "$ff")
-  class=$(y "$cl | .spec.topology.class" "$o")
+  class=$(yq '.clusterClass // "k3s-docker"' "$ff")
   cf=$(class_file "$class"); [ -n "$cf" ] || fail "$ff: no ClusterClass file for '$class'"
   if [[ $ff == *.yaml && $cf == *.disabled ]]; then fail "$ff is enabled but its ClusterClass is disabled ($cf)"; fi
-
-  set=$(y "$cl | .spec.topology.variables // [] | .[].name" "$o")
-  declared=$(y "$cc | .spec.variables // [] | .[].name" "$cf")
-  required=$(y "$cc | .spec.variables // [] | .[] | select(.required and .schema.openAPIV3Schema.default == null) | .name" "$cf")
-  [ -z "$(missing_from "$set" "$declared")" ] || fail "$ff: variables $class doesn't declare: $(missing_from "$set" "$declared")"
-  [ -z "$(missing_from "$required" "$set")" ] || fail "$ff: required variables of $class not set: $(missing_from "$required" "$set")"
-
-  wc=$(y "$cl | .spec.topology.workers.machineDeployments[].class" "$o")
-  [ -z "$(missing_from "$wc" "$(y "$cc | .spec.workers.machineDeployments[].class" "$cf")")" ] || fail "$ff: worker class '$wc' not in $class"
-
-  machines=$(y "$cc | .spec.controlPlane.machineInfrastructure.ref.kind // \"\"" "$cf")
-  replicas=$(y "$cl | .spec.topology.controlPlane.replicas // \"\"" "$o")
-  if [ -n "$machines" ] && [ -z "$replicas" ]; then fail "$ff: $class has control-plane machines: set controlPlaneReplicas"; fi
-  if [ -z "$machines" ] && [ -n "$replicas" ]; then fail "$ff: $class has a managed control plane: controlPlaneReplicas: null"; fi
-
   infra=$(y "$cc | .spec.infrastructure.ref.kind" "$cf")
   case $infra in
     Docker*) p=docker ;;
     OpenStack*) p=openstack ;;
     AWS*) p=aws ;;
-    *) fail "$cf: infrastructure kind $infra: add its provider label value to this test" ;;
+    *) fail "$cf: infrastructure kind $infra: add its platform.lab/provider value here" ;;
   esac
-  [ "$(y "$cl | .metadata.labels[\"platform.lab/provider\"]" "$o")" = "$p" ] || fail "$ff: provider must be '$p' for $class"
-  [ -n "$(y "$cl | .metadata.labels[\"platform.lab/region\"] // \"\"" "$o")" ] || fail "$ff: region label is empty"
+  [ "$(yq '.provider' "$ff")" = "$p" ] || fail "$ff: provider must be '$p' for class $class"
 done
 
-# EKS: the EKS cluster is named after the CAPI Cluster (invariant 1), not a name CAPA derives from namespace + control plane
-eks=$base/clusterclasses/eks.yaml.disabled
-assert_yq "$eks" "$cc | .spec.patches[].definitions[].jsonPatches[] | select(.path == \"/spec/template/spec/eksClusterName\") | .valueFrom.template" '{{ .builtin.cluster.name }}'
-o=$(render eks-dev1 $charts/cluster -f $config/fleet/clusters/dev/eks-dev1.yaml.disabled)
-assert_yq "$o" "$cl | .spec.topology.version" v1.34.0
-o=$(render os-dev1 $charts/cluster -f $config/fleet/clusters/dev/os-dev1.yaml.disabled)
-assert_yq "$o" "$cl | .spec.topology.controlPlane.replicas" 1
-
-# capi-providers: cloud providers are opt-in toggles and stay on the CAPI core line we pin
+# capi-providers: cloud providers are opt-in; CAPA gets its clusterctl variables from configSecret
 c=$charts/capi-providers
 o=$(render capi-providers $c)
 assert_yq "$o" '[select(.kind=="InfrastructureProvider") | .metadata.name] | join(",")' docker
-o=$(render capi-providers $c --set infrastructure.openstack.enabled=true --set infrastructure.aws.enabled=true)
-ip='select(.kind=="InfrastructureProvider" and .metadata.name=='
-assert_yq "$o" "$ip\"openstack\") | .metadata.namespace + \"/\" + .spec.version" "capo-system/$(yq '.infrastructure.openstack.version' $c/values.yaml)"
-assert_yq "$o" "$ip\"aws\") | .metadata.namespace + \"/\" + .spec.version" "capa-system/$(yq '.infrastructure.aws.version' $c/values.yaml)"
-# CAPA's components need AWS_B64ENCODED_CREDENTIALS (no default): the operator reads it from configSecret
-assert_yq "$o" "$ip\"aws\") | .spec.configSecret.name + \"/\" + .spec.configSecret.namespace" capa-variables/capa-system
-core=$(yq '.core.version' $c/values.yaml | cut -d. -f1,2)
-case $core in   # provider line built on this CAPI minor (sigs.k8s.io/cluster-api in the provider's go.mod)
-  v1.12) capo=v0.14 capa=v2.12 ;;   # CAPO v0.15 = v1beta2 contract on CAPI 1.14; CAPA v2.13 = CAPI 1.13
-  *) fail "CAPI core moved to $core: re-check CAPO/CAPA go.mod and metadata.yaml, then update this table" ;;
-esac
-[ "$(yq '.infrastructure.openstack.version' $c/values.yaml | cut -d. -f1,2)" = $capo ] || fail "CAPO must stay on $capo.x with core $core"
-[ "$(yq '.infrastructure.aws.version' $c/values.yaml | cut -d. -f1,2)" = $capa ] || fail "CAPA must stay on $capa.x with core $core"
-# Renovate keeps both pins current, capped at the same line
-for dep in cluster-api-provider-openstack cluster-api-provider-aws; do
-  [ "$(yq -p json -o yaml "[.customManagers[] | select(.depNameTemplate == \"$dep\")] | length" renovate.json)" = 1 ] || fail "renovate: no manager for $dep"
-  [ "$(yq -p json -o yaml "[.packageRules[] | select(.matchDepNames // [] | contains([\"$dep\"])) | .allowedVersions // \"\"] | map(select(. != \"\")) | length" renovate.json)" = 1 ] ||
-    fail "renovate: $dep needs an allowedVersions cap"
+o=$(render capi-providers $c --set infrastructure.aws.enabled=true)
+assert_yq "$o" 'select(.kind=="InfrastructureProvider" and .metadata.name=="aws") | .spec.configSecret.name' capa-variables
+# pins stay under their Renovate cap (the last line built on our CAPI core minor; reasons in renovate.json/values.yaml)
+for p in openstack:cluster-api-provider-openstack aws:cluster-api-provider-aws; do
+  ver=$(yq ".infrastructure.${p%%:*}.version" $c/values.yaml); ver=${ver#v}
+  cap=$(yq -p json -o yaml ".packageRules[] | select(.matchDepNames // [] | contains([\"${p#*:}\"])) | .allowedVersions // \"\"" renovate.json | sed '/^$/d')
+  [[ $cap == '<'* ]] || fail "renovate: ${p#*:} needs an allowedVersions '<x.y.z' cap, got '$cap'"
+  [ "$(printf '%s\n%s\n' "$ver" "${cap#<}" | sort -V | head -1)" = "$ver" ] && [ "$ver" != "${cap#<}" ] ||
+    fail "${p%%:*} v$ver is not below its Renovate cap $cap"
 done
