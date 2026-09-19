@@ -74,7 +74,12 @@ k3d)
     " version ") out k3d_version "k3d version v5.9.0"; echo "k3s version v1.35.5-k3s1 (default)" ;;
     *) echo "fake k3d: unhandled: $*" >&2; exit 1 ;;
   esac ;;
-helm)       [ "$a" = " version --short " ] && out helm_version "v4.3.0+gbec5b06" ;;
+helm)  # dependency build / upgrade succeed so a wrong decision shows up as a logged `helm upgrade`
+  case $a in
+    " version --short ") out helm_version "v4.3.0+gbec5b06" ;;
+    " dependency build "*|" upgrade "*) ;;
+    *) exit 1 ;;
+  esac ;;
 clusterctl) [ "$a" = " version -o short " ] && out clusterctl_version "v1.14.2" ;;
 gh)
   case $a in

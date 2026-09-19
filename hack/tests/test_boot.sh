@@ -48,7 +48,7 @@ grep -q 'Docker just restarted, wait' "$FAKE_STATE/out" || fail "orphan message:
 up_errs() {  # state files...
   new_fakes; state "$@"
   assert_fails fenv bootstrap/bootstrap.sh up
-  ! calls | grep -qE '^(helm (upgrade|install)|clusterctl move|k3d cluster (create|delete))' ||
+  ! calls | grep -qE '^(helm |clusterctl move|k3d cluster (create|delete))' ||
     fail "line ${BASH_LINENO[0]}: acted on a failed read: $(calls | grep -E '^(helm|clusterctl|k3d)')"
   [ ! -e "$FAKE_STATE/ran_kargo-deploy-key.sh" ] || fail "line ${BASH_LINENO[0]}: deploy key rotated on a failed read"
 }
