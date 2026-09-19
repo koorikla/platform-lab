@@ -1,0 +1,348 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Pins in this repo: umbrella chart deps (Chart.yaml, incl. OCI), images in values, CAAPH birth-kit charts, CAPI providers, the fleet's Kubernetes version. Never automerge: every bump is a PR reviewed per CONTRIBUTING.md. Kargo-owned files are ignored.",
+  "extends": [
+    "config:recommended"
+  ],
+  "ignorePresets": [
+    ":ignoreModulesAndTests"
+  ],
+  "dependencyDashboard": true,
+  "enabledManagers": [
+    "helmv3",
+    "helm-values",
+    "custom.regex",
+    "github-actions"
+  ],
+  "semanticCommits": "disabled",
+  "automerge": false,
+  "platformAutomerge": false,
+  "schedule": [
+    "* 0-5 * * 1"
+  ],
+  "prConcurrentLimit": 10,
+  "labels": [
+    "dependencies"
+  ],
+  "prBodyNotes": [
+    "Review per CONTRIBUTING.md: `make lint && make test`, read the upstream changelog, and verify on the lab under `hack/lab-lock.sh` after merge if it changes what runs there."
+  ],
+  "ignorePaths": [
+    "repos/apps/*/envs/**",
+    "repos/platform-config/addons/workers/*/envs/**",
+    "docs/**"
+  ],
+  "customManagers": [
+    {
+      "description": "Birth-kit HelmChartProxies (CAAPH) that install from OCI registries",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-config/fleet/base/helmchartproxies\\.yaml$/"
+      ],
+      "matchStrings": [
+        "repoURL: oci://(?<registry>\\S+)[^\\n]*\\n\\s*chartName: (?<depName>\\S+)[^\\n]*\\n\\s*version: (?<currentValue>[^\\s#]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "packageNameTemplate": "{{{registry}}}/{{{depName}}}"
+    },
+    {
+      "description": "Birth-kit HelmChartProxies (CAAPH) that install from https Helm repositories",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-config/fleet/base/helmchartproxies\\.yaml$/"
+      ],
+      "matchStrings": [
+        "repoURL: (?<registryUrl>https://\\S+)[^\\n]*\\n\\s*chartName: (?<depName>\\S+)[^\\n]*\\n\\s*version: (?<currentValue>[^\\s#]+)"
+      ],
+      "datasourceTemplate": "helm"
+    },
+    {
+      "description": "Images pinned inside HelmChartProxy valuesTemplate strings (helm-values can't see into them)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-config/fleet/base/helmchartproxies\\.yaml$/"
+      ],
+      "matchStrings": [
+        "repository: (?<depName>\\S+)[^\\n]*\\n\\s*tag: (?<currentValue>[^\\s#]+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "k3s version of every cluster (fleet files, also *.yaml.disabled) and the cluster chart default",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-config/fleet/clusters/.+\\.yaml(\\.disabled)?$/",
+        "/^repos/platform-charts/cluster/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "kubernetesVersion: (?<currentValue>v\\d+\\.\\d+\\.\\d+\\+k3s\\d+)"
+      ],
+      "depNameTemplate": "k3s",
+      "packageNameTemplate": "k3s-io/k3s",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\+k3s(?<build>\\d+)$"
+    },
+    {
+      "description": "Kubernetes version Kargo renders worker addons for (render-addon kubeVersion); hack/lint.sh checks its minor against the fleet",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-config/kargo/shared/render-addon\\.yaml$/"
+      ],
+      "matchStrings": [
+        "kubeVersion: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "render-addon kubeVersion",
+      "packageNameTemplate": "k3s-io/k3s",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)\\+k3s\\d+$",
+      "versioningTemplate": "semver"
+    },
+    {
+      "description": "k3d bootstrap cluster image (same minor as the hub)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^bootstrap/k3d-bootstrap\\.yaml$/"
+      ],
+      "matchStrings": [
+        "image: (?<depName>rancher/k3s):(?<currentValue>v[^\\s#]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-k3s(?<build>\\d+)$"
+    },
+    {
+      "description": "CAPD node image (kindImageVersion): fleet files, cluster chart default, ClusterClass variable default",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-config/fleet/clusters/.+\\.yaml(\\.disabled)?$/",
+        "/^repos/platform-charts/cluster/values\\.yaml$/",
+        "/^repos/platform-config/fleet/base/clusterclass-.+\\.yaml$/"
+      ],
+      "matchStrings": [
+        "name: kindImageVersion,?\\s*value: (?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "name: kindImageVersion[^\\n]*\\n(?:[^\\n]*\\n){0,4}?\\s*default: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "kindest/node",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "CAPI core + CAPD (released together) in capi-providers",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-charts/capi-providers/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "\\ncore:\\s*\\n\\s*version: (?<currentValue>v[^\\s#]+)",
+        "\\n\\s*docker:\\s*\\n\\s*enabled: \\w+\\s*\\n\\s*version: (?<currentValue>v[^\\s#]+)"
+      ],
+      "depNameTemplate": "cluster-api",
+      "packageNameTemplate": "kubernetes-sigs/cluster-api",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "CAPI k3s bootstrap + control-plane provider in capi-providers",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-charts/capi-providers/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "\\nk3s:\\s*\\n\\s*version: (?<currentValue>v[^\\s#]+)"
+      ],
+      "depNameTemplate": "cluster-api-k3s",
+      "packageNameTemplate": "k3s-io/cluster-api-k3s",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "CAPI add-on provider Helm (CAAPH) in capi-providers",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-charts/capi-providers/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "\\nhelm:\\s*\\n\\s*version: (?<currentValue>v[^\\s#]+)"
+      ],
+      "depNameTemplate": "cluster-api-addon-provider-helm",
+      "packageNameTemplate": "kubernetes-sigs/cluster-api-addon-provider-helm",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Umbrella charts: a dependency or values bump is a chart change, so bump the chart's own version (CI enforces it)",
+      "matchManagers": [
+        "helmv3",
+        "helm-values"
+      ],
+      "bumpVersion": "patch"
+    },
+    {
+      "description": "Changes the regex managers make inside a chart can't bump Chart.yaml themselves",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchFileNames": [
+        "repos/platform-charts/**"
+      ],
+      "prBodyNotes": [
+        "Bump `version` in the Chart.yaml of every chart this PR touches (Renovate can't for regex-managed pins)."
+      ]
+    },
+    {
+      "description": "Hub umbrella chart and the worker birth-kit HelmChartProxy move together",
+      "groupName": "argo-cd",
+      "matchDepNames": [
+        "argo-cd"
+      ],
+      "addLabels": [
+        "area:argocd"
+      ]
+    },
+    {
+      "description": "Principal chart, agent chart (birth kit) and the quay image pinned in both move together",
+      "groupName": "argocd-agent",
+      "matchDepNames": [
+        "argocd-agent-principal",
+        "argocd-agent-agent",
+        "quay.io/argoprojlabs/argocd-agent"
+      ],
+      "addLabels": [
+        "area:argocd"
+      ]
+    },
+    {
+      "description": "One umbrella: Kargo detects the Rollouts CRDs only at startup, so they ship as one release",
+      "groupName": "kargo",
+      "matchDepNames": [
+        "kargo",
+        "argo-rollouts"
+      ],
+      "addLabels": [
+        "area:kargo"
+      ]
+    },
+    {
+      "groupName": "cluster-api",
+      "matchDepNames": [
+        "cluster-api-operator",
+        "cluster-api",
+        "cluster-api-k3s",
+        "cluster-api-addon-provider-helm"
+      ],
+      "addLabels": [
+        "area:capi"
+      ]
+    },
+    {
+      "description": "cluster-api-k3s is a v1beta1-contract provider built on CAPI 1.11: core/CAPD stay on 1.12 until it moves",
+      "matchDepNames": [
+        "cluster-api"
+      ],
+      "allowedVersions": "<1.13.0"
+    },
+    {
+      "description": "Fleet k3s, bootstrap k3s, render-addon kubeVersion, kind node image, alpine/k8s: one Kubernetes minor everywhere",
+      "groupName": "kubernetes",
+      "matchDepNames": [
+        "k3s",
+        "render-addon kubeVersion",
+        "rancher/k3s",
+        "kindest/node",
+        "alpine/k8s"
+      ],
+      "addLabels": [
+        "area:capi"
+      ],
+      "prBodyNotes": [
+        "Keep every pin in this group on the same Kubernetes minor (`hack/lint.sh` fails otherwise). A fleet file change rolls every cluster it touches: verify under the lab lock. Bump `version` of the `cluster` chart if its values.yaml changed."
+      ],
+      "separateMinorPatch": true
+    },
+    {
+      "description": "Kubernetes minor/major upgrades are planned work, not drive-by bumps: open only on request from the dashboard",
+      "matchDepNames": [
+        "k3s",
+        "render-addon kubeVersion",
+        "rancher/k3s",
+        "kindest/node",
+        "alpine/k8s"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "groupName": "cert-manager",
+      "matchDepNames": [
+        "cert-manager"
+      ],
+      "addLabels": [
+        "area:security"
+      ]
+    },
+    {
+      "description": "Hub umbrella chart and the worker birth-kit HelmChartProxy stay equal (hack/tests/test_birth_kit.sh)",
+      "groupName": "external-secrets",
+      "matchDepNames": [
+        "external-secrets"
+      ],
+      "addLabels": [
+        "area:security"
+      ]
+    },
+    {
+      "groupName": "openbao",
+      "matchDepNames": [
+        "openbao"
+      ],
+      "addLabels": [
+        "area:openbao"
+      ]
+    },
+    {
+      "groupName": "openchoreo",
+      "matchDepNames": [
+        "/^openchoreo-/"
+      ],
+      "addLabels": [
+        "area:openchoreo"
+      ]
+    },
+    {
+      "groupName": "kgateway",
+      "matchDepNames": [
+        "/^kgateway/"
+      ],
+      "addLabels": [
+        "area:networking"
+      ]
+    },
+    {
+      "groupName": "istio",
+      "matchFileNames": [
+        "repos/platform-charts/istio-ambient/**"
+      ],
+      "addLabels": [
+        "area:networking"
+      ]
+    },
+    {
+      "description": "Birth-kit plain-manifest chart (bedag/raw) until #2 replaces it",
+      "matchDepNames": [
+        "raw"
+      ],
+      "addLabels": [
+        "area:capi"
+      ]
+    },
+    {
+      "groupName": "github-actions",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "addLabels": [
+        "area:ci"
+      ]
+    }
+  ]
+}

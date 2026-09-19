@@ -1,0 +1,37 @@
+# Who reviews what. GitHub requests review from the owners of every path a PR touches; the LAST matching pattern
+# wins, so specific paths come after the default. Enforced only with branch protection "Require review from Code
+# Owners" on main.
+#
+# Template: one owner today. When you take this repo as a team, create GitHub teams and swap each commented line in
+# (owners must have write access, or GitHub ignores the line). Suggested split below, by area label.
+
+*                                               @koorikla
+
+# --- platform-charts (future repo): umbrella charts, one per addon + local charts (cluster, capi-providers, ...)
+# /repos/platform-charts/                       @<org>/platform-charts
+# /repos/platform-charts/cluster/               @<org>/fleet            # cluster identity: invariants 1, 2, 7
+# /repos/platform-charts/capi-providers/        @<org>/fleet
+# /repos/platform-charts/kargo-pipeline/        @<org>/delivery
+# /repos/platform-charts/openbao/               @<org>/security
+# /repos/platform-charts/openchoreo-*/          @<org>/developer-platform
+
+# --- platform-config (future repo)
+# /repos/platform-config/argocd/                @<org>/delivery         # AppProjects + ApplicationSets
+# /repos/platform-config/kargo/                 @<org>/delivery
+# /repos/platform-config/fleet/                 @<org>/fleet            # ClusterClasses, birth kit, cluster files
+# /repos/platform-config/fleet/clusters/prod/   @<org>/fleet @<org>/sre # prod clusters: two teams sign off
+# /repos/platform-config/addons/management/     @<org>/platform-charts  # hub addons: merge = deploy to the hub
+# /repos/platform-config/addons/workers/        @<org>/platform-charts
+
+# --- apps (one future repo per app team)
+# /repos/apps/podinfo/                          @<org>/team-podinfo
+
+# --- imperative bits, tooling, docs
+# /bootstrap/                                   @<org>/fleet
+# /hack/                                        @<org>/platform-charts
+# /Makefile                                     @<org>/platform-charts
+# /docs/                                        @<org>/platform-leads
+# /CLAUDE.md                                    @<org>/platform-leads   # invariants
+# /.claude/                                     @<org>/platform-leads   # agent skill = team workflow
+# /.github/                                     @<org>/platform-leads
+# /renovate.json                                @<org>/platform-leads
