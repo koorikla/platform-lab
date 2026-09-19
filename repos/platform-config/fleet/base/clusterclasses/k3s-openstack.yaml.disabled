@@ -1,0 +1,223 @@
+# k3s (bootstrap + control plane, same provider as k3s-docker) on OpenStack (CAPO). Example, not booted yet: API
+# versions and fields checked against CAPO v0.14.8 / cluster-api-k3s v0.4.0 CRDs (hack/tests/test_clusterclass_schema.sh),
+# behaviour marked VERIFY is inferred. Based on cluster-api-k3s's own OpenStack sample
+# (https://github.com/k3s-io/cluster-api-k3s/blob/v0.4.0/samples/openstack/k3s-template.yaml: a plain Cluster, not a
+# ClusterClass; same OpenStackCluster/MachineTemplate shape, identityRef + clouds.yaml Secret, image by name filter),
+# plus the kubelet provider-id pattern of its proxmox/nutanix samples.
+# Enable (CONTRIBUTING.md "Add a CAPI provider or ClusterClass"):
+#   1. hub reachable from the OpenStack network at a real address (workers can't reach the CAPD `mgmt-lb`);
+#   2. ORC (OpenStack Resource Controller) on the hub - CAPO >= v0.12 needs it and the operator doesn't install it;
+#   3. `infrastructure.openstack.enabled: true` in addons/management/capi-providers/values.yaml;
+#   4. the identity Secret (key `clouds.yaml`, optional `cacert`) in namespace fleet, written by an ExternalSecret
+#      from OpenBao - never from git;
+#   5. rename this file to .yaml, then a cluster file with `clusterClass: k3s-openstack` (fleet/clusters/dev/os-dev1.yaml.disabled).
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: ClusterClass
+metadata:
+  name: k3s-openstack
+  namespace: fleet
+spec:
+  controlPlane:
+    ref:
+      apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+      kind: KThreesControlPlaneTemplate
+      name: k3s-openstack-control-plane
+    machineInfrastructure:
+      ref:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: OpenStackMachineTemplate
+        name: k3s-openstack-control-plane
+  infrastructure:
+    ref:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+      kind: OpenStackClusterTemplate
+      name: k3s-openstack
+  workers:
+    machineDeployments:
+      - class: k3s-default-worker          # same worker class name as k3s-docker: the cluster chart default fits both
+        template:
+          bootstrap:
+            ref:
+              apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+              kind: KThreesConfigTemplate
+              name: k3s-openstack-worker
+          infrastructure:
+            ref:
+              apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+              kind: OpenStackMachineTemplate
+              name: k3s-openstack-worker
+  variables:
+    - name: identityRef                # Secret in fleet with key clouds.yaml (ESO from OpenBao) + the entry to use
+      required: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [name, cloudName]
+          properties:
+            type: { type: string, enum: [Secret, ClusterIdentity], default: Secret }   # ClusterIdentity: OpenStackClusterIdentity
+            name: { type: string, minLength: 1 }
+            cloudName: { type: string, minLength: 1 }
+    - name: controlPlaneFlavor
+      required: true
+      schema:
+        openAPIV3Schema: { type: string, minLength: 1 }
+    - name: workerFlavor
+      required: true
+      schema:
+        openAPIV3Schema: { type: string, minLength: 1 }
+    - name: image                      # Glance image name; any cloud-init image with curl (k3s installs at boot)
+      required: true
+      schema:
+        openAPIV3Schema: { type: string, minLength: 1 }
+    - name: sshKeyName                 # Nova keypair; empty = none
+      required: false
+      schema:
+        openAPIV3Schema: { type: string, default: "" }
+    - name: network                    # existing network name; empty = CAPO creates one (managedSubnets below)
+      required: false
+      schema:
+        openAPIV3Schema: { type: string, default: "" }
+    - name: externalNetwork            # floating-IP network name; empty = CAPO picks the only external network
+      required: false
+      schema:
+        openAPIV3Schema: { type: string, default: "" }
+    - name: apiServerLoadBalancer      # needs Octavia; false = the API gets a floating IP on the first control plane
+      required: false
+      schema:
+        openAPIV3Schema: { type: boolean, default: true }
+  patches:
+    - name: identity
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: OpenStackClusterTemplate
+            matchResources: { infrastructureCluster: true }
+          jsonPatches:
+            - { op: replace, path: /spec/template/spec/identityRef, valueFrom: { variable: identityRef } }
+            - { op: replace, path: /spec/template/spec/apiServerLoadBalancer/enabled, valueFrom: { variable: apiServerLoadBalancer } }
+    - name: machines
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: OpenStackMachineTemplate
+            matchResources: { controlPlane: true }
+          jsonPatches:
+            - { op: replace, path: /spec/template/spec/flavor, valueFrom: { variable: controlPlaneFlavor } }
+            - { op: replace, path: /spec/template/spec/image/filter/name, valueFrom: { variable: image } }
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: OpenStackMachineTemplate
+            matchResources:
+              machineDeploymentClass: { names: [k3s-default-worker] }
+          jsonPatches:
+            - { op: replace, path: /spec/template/spec/flavor, valueFrom: { variable: workerFlavor } }
+            - { op: replace, path: /spec/template/spec/image/filter/name, valueFrom: { variable: image } }
+    - name: sshKeyName
+      enabledIf: '{{ if .sshKeyName }}true{{ end }}'
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: OpenStackMachineTemplate
+            matchResources:
+              controlPlane: true
+              machineDeploymentClass: { names: [k3s-default-worker] }
+          jsonPatches:
+            - { op: add, path: /spec/template/spec/sshKeyName, valueFrom: { variable: sshKeyName } }
+    - name: network
+      enabledIf: '{{ if .network }}true{{ end }}'
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: OpenStackClusterTemplate
+            matchResources: { infrastructureCluster: true }
+          jsonPatches:
+            - { op: remove, path: /spec/template/spec/managedSubnets }
+            - op: add
+              path: /spec/template/spec/network
+              valueFrom:
+                template: |
+                  filter: { name: {{ .network }} }
+    - name: externalNetwork
+      enabledIf: '{{ if .externalNetwork }}true{{ end }}'
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: OpenStackClusterTemplate
+            matchResources: { infrastructureCluster: true }
+          jsonPatches:
+            - op: add
+              path: /spec/template/spec/externalNetwork
+              valueFrom:
+                template: |
+                  filter: { name: {{ .externalNetwork }} }
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: OpenStackClusterTemplate
+metadata:
+  name: k3s-openstack
+  namespace: fleet
+spec:
+  template:
+    spec:
+      identityRef: { type: Secret, name: replaced-by-variable, cloudName: replaced-by-variable }   # required by the CRD
+      apiServerLoadBalancer: { enabled: true }
+      # k3s traffic between nodes (flannel VXLAN udp/8472, kubelet, embedded etcd between servers) - simpler and less
+      # brittle than listing each port. VERIFY on first boot that CAPO's default rules still open 6443 from the hub.
+      managedSecurityGroups: { allowAllInClusterTraffic: true }
+      managedSubnets:
+        - cidr: 10.6.0.0/24
+          dnsNameservers: [1.1.1.1, 8.8.8.8]
+---
+# k3s's own cloud controller stays on (no OpenStack CCM needed to become Ready); the kubelet gets CAPO's providerID so
+# CAPI can match Nodes to Machines (k3s would otherwise set k3s://<node>). Pattern from cluster-api-k3s samples
+# (proxmox); cloud-init jinja v1.instance_id is what CAPO's own kubeadm templates use. VERIFY on first boot.
+# LoadBalancer Services / Cinder volumes: OpenStack CCM + CSI later as HelmChartProxies selected by
+# platform.lab/provider=openstack (they need cloud credentials on the worker: pull them from OpenBao like the birth kit).
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: KThreesControlPlaneTemplate
+metadata:
+  name: k3s-openstack-control-plane
+  namespace: fleet
+spec:
+  template:
+    spec:
+      kthreesConfigSpec:
+        serverConfig:
+          disableComponents: [traefik]   # as k3s-docker: ingress comes from kgateway (OpenChoreo) where needed
+        agentConfig:
+          nodeName: '{{ v1.local_hostname }}'
+          kubeletArgs: ['provider-id=openstack:///{{ v1.instance_id }}']
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: OpenStackMachineTemplate
+metadata:
+  name: k3s-openstack-control-plane
+  namespace: fleet
+spec:
+  template:
+    spec:
+      flavor: replaced-by-variable
+      image: { filter: { name: replaced-by-variable } }
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KThreesConfigTemplate
+metadata:
+  name: k3s-openstack-worker
+  namespace: fleet
+spec:
+  template:
+    spec:
+      agentConfig:
+        nodeName: '{{ v1.local_hostname }}'
+        kubeletArgs: ['provider-id=openstack:///{{ v1.instance_id }}']
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: OpenStackMachineTemplate
+metadata:
+  name: k3s-openstack-worker
+  namespace: fleet
+spec:
+  template:
+    spec:
+      flavor: replaced-by-variable
+      image: { filter: { name: replaced-by-variable } }

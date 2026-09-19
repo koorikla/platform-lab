@@ -9,9 +9,20 @@ infrastructure:
   docker:
     enabled: true
     version: v1.12.11          # CAPD is released with core
+  # Cloud providers: opt-in per hub (addons/management/capi-providers/values.yaml), each with a disabled ClusterClass in
+  # platform-config fleet/base/clusterclasses/. Recipe: CONTRIBUTING.md "Add a CAPI provider or ClusterClass".
+  # Versions: the last line built on our CAPI core minor (go.mod sigs.k8s.io/cluster-api), capped in renovate.json.
+  # Both are in clusterctl's built-in provider list, so the operator needs no fetchConfig (unlike k3s).
   openstack:
     enabled: false
-    version: ""                # TODO
+    # v0.14.x: v1beta1 contract on CAPI 1.12 (v0.15 = v1beta2 contract on CAPI 1.14). Needs ORC (OpenStack Resource
+    # Controller, k-orc) on the hub, which the operator doesn't install: ORC >= the one in CAPO's go.mod (v2.4.0).
+    version: v0.14.8
   aws:
-    enabled: false             # EKS: uses its own bootstrap/control-plane (no k3s) -> separate ClusterClass
-    version: ""                # TODO
+    enabled: false
+    # v2.12.x: CAPI 1.12 (v2.13 is built on 1.13). EKS = CAPA's own control plane + bootstrap, no k3s: ClusterClass eks.
+    version: v2.12.1
+    # Secret with the clusterctl variables of CAPA's components, in the provider's namespace. AWS_B64ENCODED_CREDENTIALS
+    # has no default, so it must exist before the provider installs: an ExternalSecret from OpenBao, never committed.
+    # An empty value should do when every cluster names its own identity (identityRef). VERIFY
+    configSecret: capa-variables

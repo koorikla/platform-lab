@@ -40,7 +40,9 @@ for f in $config/addons/*/*/addon.yaml*; do
 done
 # render-addon renders for the fleet's Kubernetes minor (charts gate on .Capabilities.KubeVersion)
 kv=$(awk -F'"' '/kubeVersion:/ {print $2}' $config/kargo/shared/render-addon.yaml | cut -d. -f1,2)
-for f in $config/fleet/clusters/*/*.yaml*; do
+# Enabled clusters only: disabled examples (e.g. eks-dev1, whose EKS version Renovate's k3s manager doesn't bump) are
+# checked when they are enabled.
+for f in $config/fleet/clusters/*/*.yaml; do
   [[ $f == */clusters/mgmt/* ]] && continue   # only workers consume rendered manifests
   fv=$(awk '/^kubernetesVersion:/ {print $2}' "$f" | sed 's/^v//' | cut -d. -f1,2)
   [ "$fv" = "$kv" ] || { echo "FAIL: $f: kubernetesVersion $fv != render-addon kubeVersion $kv"; exit 1; }

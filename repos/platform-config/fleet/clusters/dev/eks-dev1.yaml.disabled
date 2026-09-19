@@ -1,0 +1,19 @@
+# Example: an EKS worker (no k3s). Enable the class first (fleet/base/clusterclasses/eks.yaml.disabled lists the hub
+# prerequisites), then rename this file to .yaml. Values for repos/platform-charts/cluster.
+name: eks-dev1                  # also the EKS cluster name (the class patches eksClusterName)
+env: dev
+provider: aws                   # platform.lab/provider: selects provider-specific HelmChartProxies (EBS CSI, ...) later
+region: eu-north-1              # platform.lab/region; the class variable below is what CAPA uses
+clusterClass: eks
+kubernetesVersion: v1.34.0      # EKS minor as semver; AWS picks the patch. Keep the fleet minor when enabling (make lint)
+controlPlaneReplicas: null      # managed control plane: the Cluster must not set replicas
+workerClass: default-worker
+workerReplicas: 2
+network:                        # Cluster clusterNetwork; pods get VPC IPs from the VPC CNI (pods CIDR unused)
+  pods: 10.42.0.0/16
+  services: 172.20.0.0/16       # EKS's alternative default range (CAPA reads it from here); must not overlap the VPC. VERIFY
+variables:                      # replaces the chart default (kindImageVersion is CAPD-only)
+  - { name: region, value: eu-north-1 }
+  - name: identityRef           # AWSClusterStaticIdentity; its Secret (capa-system) comes from OpenBao via ESO
+    value: { kind: AWSClusterStaticIdentity, name: aws-lab }
+  - { name: instanceType, value: t3.large }

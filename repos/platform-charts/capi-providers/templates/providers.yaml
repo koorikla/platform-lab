@@ -88,5 +88,7 @@ metadata:
   namespace: capa-system
 spec:
   version: {{ .Values.infrastructure.aws.version }}
-  # configSecret: { name: capa-credentials }   # TODO
+  configSecret:
+    name: {{ .Values.infrastructure.aws.configSecret }}
+    namespace: capa-system
 {{- end }}

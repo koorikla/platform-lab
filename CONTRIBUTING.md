@@ -65,7 +65,7 @@ general) and `go` (`hub-lb-reload.sh` renders the CAPD LB template with it).
 
 | Command | What it proves |
 |---|---|
-| `make lint` (`hack/lint.sh`) | every chart builds its deps and passes `helm lint`; every hub addon renders with its values; every worker addon renders for dev/test/prod with no nameless or duplicate resources (Kargo's flat layout would overwrite them); `addon.name` == folder name; fleet `kubernetesVersion` minor == `render-addon` `kubeVersion` minor; every cluster file renders, enabled or not |
+| `make lint` (`hack/lint.sh`) | every chart builds its deps and passes `helm lint`; every hub addon renders with its values; every worker addon renders for dev/test/prod with no nameless or duplicate resources (Kargo's flat layout would overwrite them); `addon.name` == folder name; fleet `kubernetesVersion` minor == `render-addon` `kubeVersion` minor (enabled worker clusters); every cluster file renders, enabled or not |
 | `make test` (`hack/tests/run.sh`) | render assertions in `hack/tests/test_*.sh`, each in its own process |
 
 Writing a test: `source "$(dirname "$0")/lib.sh"`, then `o=$(render <release> <chart> [helm args])` and
@@ -88,13 +88,15 @@ with `repos/`.
    - `name`: unique, DNS-safe. It becomes the CAPI Cluster, agent name, cert CN and Argo destination (invariant 1).
      Never rename a running cluster; create a new one.
    - `env`: `dev` | `test` | `prod`. Selects the `rendered/<env>` branch for addons and the env values for apps.
-   - `provider`, `region`, `clusterClass`: `docker`, `local`, `k3s-docker` today.
-   - `kubernetesVersion`: a k3s version. Keep the minor equal to the fleet's (`make lint` checks it against
-     `kargo/shared/render-addon.yaml`).
-   - `controlPlaneReplicas`, `workerReplicas`.
+   - `provider`, `region`, `clusterClass`: `docker`, `local`, `k3s-docker` on the lab. Other providers:
+     [Add a CAPI provider or ClusterClass](#add-a-capi-provider-or-clusterclass).
+   - `kubernetesVersion`: a k3s version (EKS: the minor as semver, `v1.34.0`). Keep the minor equal to the fleet's
+     (`make lint` checks it against `kargo/shared/render-addon.yaml`).
+   - `controlPlaneReplicas` (`null` for a managed control plane), `workerReplicas`, `workerClass` if the class's
+     worker class isn't `k3s-default-worker`.
    - optional `ring: canary` (label `platform.lab/ring`, default `stable`). See [canary](#promote-and-canary-with-kargo).
    - optional `extraLabels`, and `variables` (ClusterClass variables; this **replaces** the chart default list, so
-     keep `kindImageVersion` in it).
+     keep `kindImageVersion` in it for `k3s-docker`).
 2. `make lint && make test`. Merge; this is `needs-lab`: hold the lab lock when it merges.
 3. What happens: the `fleet-clusters` ApplicationSet renders the `cluster` chart into `fleet` on the hub: CAPI
    `Cluster`, agent client cert, labelled Argo CD cluster secret, and a PushSecret of the cert to OpenBao. CAPI builds
@@ -234,16 +236,73 @@ Today (the `workloads` appset; every folder in `repos/apps/` is an app):
 Planned: apps become OpenChoreo Components with `repos/apps/<app>/app.yaml`, rendered by an `openchoreo-app` chart
 and promoted by a `render-app` Kargo task, visible in Backstage; the `workloads` appset is retired (#15–#18).
 
-### Add a CAPI provider or ClusterClass (planned: #23)
-Today there is one ClusterClass, `fleet/base/clusterclass-k3s-docker.yaml`, and provider toggles in
-`repos/platform-charts/capi-providers/values.yaml` (`infrastructure.openstack` / `infrastructure.aws`, disabled,
-versions TODO). A cluster file chooses `clusterClass`, `provider` and `variables`, so a new provider should not need
-more than that in the cluster file. #23 defines the layout (`fleet/base/clusterclasses/<class>.yaml`), disabled
-example cluster files for `k3s-openstack` and `eks`, and how the birth kit differs per provider (EKS has no k3s).
-Constraints meanwhile: invariants 1, 2 and 7 hold for every provider; CAPI core stays on 1.12.x while
-`cluster-api-k3s` is a v1beta1-contract provider; cloud credentials never go into git. When you give a provider a
-version (e.g. `infrastructure.openstack.version`), also add a Renovate regex manager for it in `renovate.json`
-(copy the `cluster-api-k3s` one). Today only core/CAPD, k3s and CAAPH are covered.
+### Add a CAPI provider or ClusterClass
+A cluster file picks `clusterClass`, `provider`, `region` and `variables`; everything provider-specific lives in the
+class and in the provider toggle. Where things are:
+- **ClusterClasses**: `fleet/base/clusterclasses/<class>.yaml`, one file per class with all its templates, namespace
+  `fleet`, file name = class name. `fleet-base` syncs `fleet/base` recursively; `*.yaml.disabled` never syncs.
+  (`k3s-docker` still sits at `fleet/base/clusterclass-k3s-docker.yaml`; it moves into `clusterclasses/` in a
+  separate PR, because one push must not change `fleet-base`'s spec and its content.)
+- **Examples, disabled**: `clusterclasses/k3s-openstack.yaml.disabled` (CAPO + k3s) and `clusterclasses/eks.yaml.disabled`
+  (CAPA, managed EKS, no k3s), with cluster files `fleet/clusters/dev/os-dev1.yaml.disabled` and
+  `eks-dev1.yaml.disabled`. Each class file's header lists its hub prerequisites. Fields are checked against the
+  provider CRDs; what couldn't be checked without a cloud is marked `VERIFY`.
+- **Provider toggles**: `repos/platform-charts/capi-providers/values.yaml` → `infrastructure.<provider>.enabled` /
+  `version` (+ `configSecret` for AWS). Turn one on for the hub in `addons/management/capi-providers/values.yaml`;
+  `bootstrap.sh` uses the same values.
+
+**Enable a shipped example** (`needs-lab`; each step is its own PR):
+1. Meet the hub prerequisites below and in the class file's header (hub reachable from the cloud, ORC for OpenStack,
+   `clusterawsadm` IAM stack for AWS).
+2. Credentials, never in git: an `ExternalSecret` on the hub that builds the Secret the provider wants from OpenBao
+   (OpenStack: a Secret in `fleet` with key `clouds.yaml`, named by the `identityRef` variable; AWS: `capa-system/capa-variables`
+   with `AWS_B64ENCODED_CREDENTIALS`, plus the Secret of the `AWSClusterStaticIdentity` the cluster names; that
+   identity's `spec.allowedNamespaces.list` must include `fleet`, where the Clusters live, because an unset
+   `allowedNamespaces` allows no namespace). Today's OpenBao is in-memory dev mode, so cloud credentials need a
+   durable store first (#30).
+3. `infrastructure.<provider>.enabled: true` in `addons/management/capi-providers/values.yaml`.
+4. Rename the class file to `.yaml`. `make test` fails if an enabled cluster file names a disabled class.
+5. Copy the example cluster file, set its variables, rename it to `.yaml`.
+
+**Add a new provider or class:**
+- **Version**: the newest provider release built on our CAPI core minor (`sigs.k8s.io/cluster-api` in the provider's
+  `go.mod` at the tag) whose `metadata.yaml` still lists contract `v1beta1` for that minor. Core stays on 1.12 while
+  `cluster-api-k3s` is v1beta1-contract, which is why CAPO is on v0.14.x (v0.15 is on CAPI 1.14) and CAPA on v2.12.x
+  (v2.13 is on 1.13). Add a Renovate regex manager plus an `allowedVersions` cap in `renovate.json` (copy the CAPO
+  ones). The cap is where that line is kept, and `make test` checks the pin stays below it.
+- **Operator CR** in `capi-providers/templates/providers.yaml`: `fetchConfig.url` if clusterctl doesn't know the
+  provider (k3s), `configSecret` if its components have variables without defaults
+  (`grep -o '\${[A-Z_]*}' infrastructure-components.yaml`; CAPA: `AWS_B64ENCODED_CREDENTIALS`).
+- **Class file**: copy an example. Use a variable for every per-cluster or per-cloud value. Templates carry
+  CRD-valid placeholders that patches replace. No Secrets in the file. Use ClusterClass `cluster.x-k8s.io/v1beta1`,
+  like `k3s-docker`. `test_provider_extension_points.sh` checks what CAPI can't check before a cluster exists: refs
+  resolve, patches read only declared variables, every variable is used, and the `provider` label matches the class.
+  `test_clusterclass_schema.sh` validates the class and every rendered `Cluster` against the pinned CRDs (in CI it
+  fails rather than skips when it can't fetch them). Add the new CRD source there, and the
+  infrastructure kind → `platform.lab/provider` mapping to the first test.
+- **Cluster file**: `provider` (label `platform.lab/provider`: `docker` | `openstack` | `aws`), `region`, `clusterClass`,
+  `variables` (replaces the chart default list), `workerClass`, and `controlPlaneReplicas: null` for a managed control
+  plane. Provider-specific worker add-ons (cloud controller manager, CSI) select on `platform.lab/provider`.
+
+**What differs per provider** (invariants 1, 2 and 7 hold for all):
+
+| | `k3s-docker` (lab) | `k3s-openstack` | `eks` |
+|---|---|---|---|
+| Control plane | k3s in CAPD containers | k3s on Nova VMs; API behind Octavia or a floating IP | AWS-managed; no replicas |
+| Worker bootstrap | `KThreesConfig` | `KThreesConfig` + kubelet `provider-id=openstack:///…` (CAPI matches Nodes by providerID) | `NodeadmConfig` on Amazon Linux 2023 (no AL2 AMIs for ≥ 1.33) |
+| `kubernetesVersion` | k3s (`v1.34.11+k3s1`) | k3s | EKS minor as semver (`v1.34.0`) |
+| `<name>-kubeconfig` (CAAPH, `make kubeconfig`) | CAPI, client cert | CAPI, client cert | CAPA: key `value` holds a 15-minute STS token refreshed on reconcile (VERIFY CAAPH copes); `<name>-user-kubeconfig` uses the AWS exec plugin |
+| `<name>-ca` → OpenBao `auth/k8s-<name>` | yes | yes | CAPA writes no `<name>-ca` (the CA is only inside the kubeconfig), so fleet-sync skips the cluster and its ESO can't log in. **Blocker, needs its own CA projection** |
+| Birth-kit `coredns-custom` | k3s CoreDNS imports it | same | EKS CoreDNS ignores it (harmless) |
+| Cloud credentials | none | `clouds.yaml` Secret in `fleet` | `capa-variables` + identity Secret in `capa-system` |
+
+**The hub must be reachable at a real address.** Workers dial the principal (`:30443`) and OpenBao (`:30820`) at
+`mgmt-lb`, which is a container on the local Docker network. That name is set in the birth kit's `server: mgmt-lb`
+and `http://mgmt-lb:30820`, and in the principal's `hub.host`. Before the first cloud worker, the hub needs a routable
+DNS name (public load balancer or VPN) that is in the principal's certificate SANs, and OpenBao needs TLS (it is
+plain HTTP today). The other direction must also work: the hub's CAPI, CAAPH and OpenBao TokenReview call the
+worker's API. EKS's public endpoint and CAPO's API floating IP provide that. k3s nodes download k3s at boot, so they
+need internet egress.
 
 ## Secrets
 - No secret material in git, PRs, issues or logs. Evidence comments show key names or HTTP status, not values.

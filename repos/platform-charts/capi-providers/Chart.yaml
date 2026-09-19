@@ -1,5 +1,5 @@
 apiVersion: v2
 name: capi-providers
-description: Cluster API providers as cluster-api-operator CRs. Add OpenStack / AWS(EKS) here later.
+description: Cluster API providers as cluster-api-operator CRs (core, k3s, CAAPH, CAPD; opt-in OpenStack and AWS/EKS)
 type: application
-version: 0.1.0
+version: 0.2.0

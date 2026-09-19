@@ -160,6 +160,32 @@
       "depNameTemplate": "cluster-api-addon-provider-helm",
       "packageNameTemplate": "kubernetes-sigs/cluster-api-addon-provider-helm",
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "CAPI OpenStack provider (CAPO) in capi-providers (opt-in)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-charts/capi-providers/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "\\n\\s*openstack:\\s*\\n\\s*enabled: \\w+[^\\n]*\\n(?:\\s*#[^\\n]*\\n)*\\s*version: (?<currentValue>v[^\\s#]+)"
+      ],
+      "depNameTemplate": "cluster-api-provider-openstack",
+      "packageNameTemplate": "kubernetes-sigs/cluster-api-provider-openstack",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "CAPI AWS provider (CAPA, EKS) in capi-providers (opt-in)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^repos/platform-charts/capi-providers/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "\\n\\s*aws:\\s*\\n\\s*enabled: \\w+[^\\n]*\\n(?:\\s*#[^\\n]*\\n)*\\s*version: (?<currentValue>v[^\\s#]+)"
+      ],
+      "depNameTemplate": "cluster-api-provider-aws",
+      "packageNameTemplate": "kubernetes-sigs/cluster-api-provider-aws",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "packageRules": [
@@ -222,11 +248,27 @@
         "cluster-api-operator",
         "cluster-api",
         "cluster-api-k3s",
-        "cluster-api-addon-provider-helm"
+        "cluster-api-addon-provider-helm",
+        "cluster-api-provider-openstack",
+        "cluster-api-provider-aws"
       ],
       "addLabels": [
         "area:capi"
       ]
+    },
+    {
+      "description": "Last CAPO line on CAPI 1.12 (v0.15 = v1beta2 contract on CAPI 1.14); lift together with core",
+      "matchDepNames": [
+        "cluster-api-provider-openstack"
+      ],
+      "allowedVersions": "<0.15.0"
+    },
+    {
+      "description": "Last CAPA line on CAPI 1.12 (v2.13 is built on CAPI 1.13); lift together with core",
+      "matchDepNames": [
+        "cluster-api-provider-aws"
+      ],
+      "allowedVersions": "<2.13.0"
     },
     {
       "description": "cluster-api-k3s is a v1beta1-contract provider built on CAPI 1.11: core/CAPD stay on 1.12 until it moves",
