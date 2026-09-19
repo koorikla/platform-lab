@@ -1,0 +1,55 @@
+suite: kgateway v2.3.1 (OpenChoreo prerequisite) - its own CRDs, one controller, everything in the release namespace
+release:
+  name: kgateway
+  namespace: openchoreo-data-plane
+templates:
+  - charts/kgateway-crds/templates/*.yaml
+  - charts/kgateway/templates/*.yaml
+tests:
+  # Gateway API CRDs belong to the gateway-api-crds addon (and its safe-upgrades policy)
+  - it: renders only gateway.kgateway.dev CRDs, as templates
+    documentSelector: { path: kind, value: CustomResourceDefinition, matchMany: true, skipEmptyTemplates: true }
+    asserts:
+      - equal: { path: spec.group, value: gateway.kgateway.dev }
+
+  - it: renders the eight kgateway CRDs
+    asserts:
+      - hasDocuments: { count: 1 }
+        template: charts/kgateway-crds/templates/gateway.kgateway.dev_backendconfigpolicies.yaml
+      - hasDocuments: { count: 1 }
+        template: charts/kgateway-crds/templates/gateway.kgateway.dev_backends.yaml
+      - hasDocuments: { count: 1 }
+        template: charts/kgateway-crds/templates/gateway.kgateway.dev_directresponses.yaml
+      - hasDocuments: { count: 1 }
+        template: charts/kgateway-crds/templates/gateway.kgateway.dev_gatewayextensions.yaml
+      - hasDocuments: { count: 1 }
+        template: charts/kgateway-crds/templates/gateway.kgateway.dev_gatewayparameters.yaml
+      - hasDocuments: { count: 1 }
+        template: charts/kgateway-crds/templates/gateway.kgateway.dev_httplistenerpolicies.yaml
+      - hasDocuments: { count: 1 }
+        template: charts/kgateway-crds/templates/gateway.kgateway.dev_listenerpolicies.yaml
+      - hasDocuments: { count: 1 }
+        template: charts/kgateway-crds/templates/gateway.kgateway.dev_trafficpolicies.yaml
+
+  - it: runs one controller, upstream image at the pinned tag
+    template: charts/kgateway/templates/deployment.yaml
+    asserts:
+      - hasDocuments: { count: 1 }
+      - equal: { path: metadata.name, value: kgateway }
+      - equal: { path: 'spec.template.spec.containers[0].image', value: cr.kgateway.dev/kgateway-dev/kgateway:v2.3.1 }
+
+  - it: puts everything namespaced into the release namespace
+    asserts:
+      - equal: { path: metadata.namespace, value: openchoreo-data-plane }
+        template: charts/kgateway/templates/deployment.yaml
+      - equal: { path: metadata.namespace, value: openchoreo-data-plane }
+        template: charts/kgateway/templates/service.yaml
+      - equal: { path: metadata.namespace, value: openchoreo-data-plane }
+        template: charts/kgateway/templates/serviceaccount.yaml
+        documentSelector: { path: kind, value: ServiceAccount }
+
+  # GatewayClass kgateway is created by the controller at startup: nothing for Argo to fight over
+  - it: renders no GatewayClass
+    asserts:
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: GatewayClass, matchMany: true, skipEmptyTemplates: true }
