@@ -96,8 +96,9 @@ Kargo needs git push credentials: `hack/kargo-deploy-key.sh` (repo-scoped deploy
 Kargo: log out of `gh` or skip it if that isn't yours to rotate.
 
 SSO: Argo CD and Kargo log in via Thunder (OIDC, public clients with PKCE, no client secret). Thunder groups map to
-roles: `admins` → admin in both; `platform-engineers` → Argo CD `role:platform-engineer` (operate every
-Application/ApplicationSet, read the rest) and Kargo admin; `developers`, `sres` → read-only in both. SSO needs
+roles: `admins` → admin in both; `platform-engineers` → Argo CD `role:platform-engineer` (full
+Application/ApplicationSet rights in `platform-workers` and `workloads`; in the hub's own `platform-mgmt` only sync
+and resource actions; read-only elsewhere) and Kargo admin; `developers`, `sres` → read-only in both. SSO needs
 the OpenChoreo gateway, because the issuer `http://thunder.openchoreo.localhost:8080` must resolve in the browser
 (through `make ui`'s 8080 forward) and in the hub pods (through the CoreDNS rewrite). The local `admin` accounts stay
 as break-glass, with the passwords above, and keep working when Thunder is down.

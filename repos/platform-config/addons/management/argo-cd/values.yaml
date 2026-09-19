@@ -17,17 +17,23 @@ argo-cd:
         issuer: http://thunder.openchoreo.localhost:8080
         clientID: argocd
         enablePKCEAuthentication: true
-        # groups: Thunder puts the groups claim in the ID token only for this scope (app scope_claims). VERIFY: live
-        # discovery lists scopes_supported without "groups"; the first login proves Thunder accepts it.
+        # groups: Thunder 0.28.0 accepts it (though discovery's scopes_supported omits it) and only then puts the groups
+        # claim in the ID token (app scope_claims)
         requestedScopes: [openid, profile, email, groups]
     rbac:
       # Thunder groups (the names OpenChoreo's authz already binds). No policy.default: a Thunder user in none of these
       # groups sees nothing. Per-project least privilege is #20.
       policy.csv: |
         g, admins, role:admin
-        # operate Applications/ApplicationSets everywhere; clusters, repos, projects, accounts, certs stay in git/admin
-        p, role:platform-engineer, applications, *, */*, allow
-        p, role:platform-engineer, applicationsets, *, */*, allow
+        # platform-mgmt (the hub itself: root, addons, fleet) only sync + resource actions: create/update/delete/override
+        # there would reshape the hub, i.e. admin. Full Application/ApplicationSet rights only in the worker and app
+        # projects. Everything else (clusters, repos, projects, accounts, certs) read-only: declared in git or admin's.
+        p, role:platform-engineer, applications, sync, platform-mgmt/*, allow
+        p, role:platform-engineer, applications, action/*, platform-mgmt/*, allow
+        p, role:platform-engineer, applications, *, platform-workers/*, allow
+        p, role:platform-engineer, applications, *, workloads/*, allow
+        p, role:platform-engineer, applicationsets, *, platform-workers/*, allow
+        p, role:platform-engineer, applicationsets, *, workloads/*, allow
         g, role:platform-engineer, role:readonly
         g, platform-engineers, role:platform-engineer
         g, developers, role:readonly

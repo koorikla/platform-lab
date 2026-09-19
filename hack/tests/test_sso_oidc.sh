@@ -6,6 +6,9 @@ t=$(render thunder $charts/thunder -n thunder -f $config/addons/management/thund
 thunder_cfg=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="thunder-config-map") | .data["deployment.yaml"]' "$t")
 issuer=$(yq '.server.public_url' <<<"$thunder_cfg")   # Thunder's iss = publicUrl (jwt.issuer empty)
 [ "$issuer" = http://thunder.openchoreo.localhost:8080 ] || fail "Thunder issuer = '$issuer'"
+# Client JSON is cut out of the bootstrap scripts by layout (from APP_PAYLOAD=' to a line holding only }'), the same
+# extraction test_thunder.sh uses. A layout change breaks it loudly: jq rejects the fragment, or client() finds no
+# client and the redirect/claim comparisons below fail. It can't pass silently.
 payloads=$tmp/payloads.json
 yq 'select(.kind=="ConfigMap" and .metadata.name=="thunder-bootstrap") | .data | to_entries | .[] | .value' "$t" |
   awk "/APP_PAYLOAD='/ {f=1; sub(/.*APP_PAYLOAD='/, \"\")} f && /^ *}'\$/ {print \"}\"; f=0; next} f" |
@@ -48,9 +51,20 @@ if command -v argocd >/dev/null; then
 Yes admin update clusters x
 Yes admins update clusters x
 Yes admins create exec p/a
-Yes platform-engineers sync applications p/a
-Yes platform-engineers delete applications p/a
-Yes platform-engineers create applicationsets p/a
+Yes platform-engineers sync applications platform-mgmt/root
+Yes platform-engineers action/apps/Deployment/restart applications platform-mgmt/x
+Yes platform-engineers get applications platform-mgmt/x
+No platform-engineers create applications platform-mgmt/x
+No platform-engineers update applications platform-mgmt/x
+No platform-engineers delete applications platform-mgmt/x
+No platform-engineers override applications platform-mgmt/root
+No platform-engineers create applicationsets platform-mgmt/x
+No platform-engineers update applicationsets platform-mgmt/mgmt-addons
+Yes platform-engineers create applications workloads/x
+Yes platform-engineers delete applications platform-workers/x
+Yes platform-engineers override applications workloads/x
+Yes platform-engineers create applicationsets platform-workers/x
+Yes platform-engineers update applicationsets workloads/x
 Yes platform-engineers get clusters x
 No platform-engineers update clusters x
 No platform-engineers update projects x
