@@ -20,8 +20,8 @@ assignees: []
 -
 
 ## Acceptance
-<!-- Offline: which render assertions (hack/tests) prove it. needs-lab: which live checks, and their expected output. -->
-- [ ] `make lint && make test` green, with a new/extended `hack/tests/test_*.sh`
+<!-- Offline: which tests prove it (chart helm-unittest suites, hack/tests). needs-lab: which live checks, and their expected output. -->
+- [ ] `make lint && make test` green, with a new/extended helm-unittest suite (chart behaviour) or `hack/tests/test_*.sh` (integration, scripts)
 - [ ]
 
 ## Out of scope

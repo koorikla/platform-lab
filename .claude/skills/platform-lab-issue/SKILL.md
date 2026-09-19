@@ -1,6 +1,6 @@
 ---
 name: platform-lab-issue
-description: Use when picking up, implementing, reviewing or merging a GitHub issue of koorikla/platform-lab (the backlog lives in issues, not CLAUDE.md). Covers claiming an issue, working in a git worktree branch, TDD with hack/tests, PR + CI, and verifying on the shared live lab under the lab lock. Use it for every change in this repo when several people or agents work in parallel.
+description: Use when picking up, implementing, reviewing or merging a GitHub issue of koorikla/platform-lab (the backlog lives in issues, not CLAUDE.md). Covers claiming an issue, working in a git worktree branch, TDD (helm-unittest in the chart, hack/tests for integration), PR + CI, and verifying on the shared live lab under the lab lock. Use it for every change in this repo when several people or agents work in parallel.
 ---
 
 # Working a platform-lab issue (parallel-safe)
@@ -27,11 +27,18 @@ the live environment.
    pinned tag) — never guessed.
 4. **Branch in a worktree** (never share a working tree with another worker):
    `git worktree add ../lab-issue-<n> -b issue-<n>-<slug> origin/main`.
-5. **TDD**: add/extend `hack/tests/test_*.sh` first (see `hack/tests/lib.sh`: `render`, `assert_yq`, `assert_fails`),
-   watch it fail, implement, watch it pass. `make lint && make test` must be green. Commit small; message ends with a
-   `Co-Authored-By:` trailer when an agent co-wrote it.
-6. **Charts**: bump `version` in `Chart.yaml` of every chart you change. CI enforces it
-   (`hack/check-chart-versions.sh origin/main`); `charts.yaml` publishes only versions GHCR doesn't have yet.
+5. **TDD**: write the test first, watch it fail, implement, watch it pass. **New chart behaviour → a helm-unittest
+   suite inside the chart** (`repos/platform-charts/<chart>/tests/*_test.yaml`, fixtures in `tests/values/`, chart-local
+   values only: never `repos/platform-config` or another chart, invariant 6). **`hack/tests/test_*.sh` is only for
+   integration and scripts**: a chart with `platform-config` values, cross-chart or chart ↔ config contracts, config-only
+   checks, scripts against fakes (see `hack/tests/lib.sh`: `render`, `assert_yq`, `assert_fails`). CONTRIBUTING.md
+   "Where a test goes" has the rules and the helm-unittest pitfalls; `hack/tests/unittest.sh <chart dir>` runs one
+   chart. `make lint && make test` must be green. Commit small; message ends with a `Co-Authored-By:` trailer when an
+   agent co-wrote it.
+6. **Charts**: bump `version` in `Chart.yaml` of every chart whose packaged content you change. CI enforces it
+   (`hack/check-chart-versions.sh origin/main`; a change only under a chart's `tests/` needs no bump when its
+   `.helmignore` lists `tests/`); `charts.yaml` publishes only versions GHCR doesn't have yet. A new chart with tests
+   gets a `.helmignore` with `tests/`.
 7. **PR**: `gh pr create --fill --body "Closes #<n> …"` with: what changed, how it was tested, what needs live
    verification, risks. Keep PRs to one issue. Rebase on `origin/main` if it moved; resolve conflicts yourself.
 8. **Report** to the coordinator (PR link, test output, open questions). Address review findings on the same branch.
