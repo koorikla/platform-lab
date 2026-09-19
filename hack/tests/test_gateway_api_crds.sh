@@ -25,8 +25,8 @@ done
 assert_yq "$m" '[select(.kind=="CustomResourceDefinition")] | length' 8
 # workers: every env overlay, rendered like Kargo's render-addon (includeCRDs, skipTests)
 for env in dev test prod; do
-  a=$config/addons/workers/gateway-api-crds; f=(-f $a/values.yaml)
-  [ ! -f $a/envs/$env.values.yaml ] || f+=(-f $a/envs/$env.values.yaml)
+  a=$config/addons/workers/gateway-api-crds; f=(-f "$a/values.yaml")
+  [ ! -f "$a/envs/$env.values.yaml" ] || f+=(-f "$a/envs/$env.values.yaml")
   w=$(render gateway-api-crds $charts/gateway-api-crds -n kube-system --include-crds --skip-tests "${f[@]}")
   check "$w"
 done

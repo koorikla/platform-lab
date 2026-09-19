@@ -1,4 +1,5 @@
 # hack/tests/lib.sh — sourced by every test_*.sh. Render with helm, assert with yq.
+# shellcheck shell=bash disable=SC2034  # charts/config/tmp are for the sourcing tests
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 charts=repos/platform-charts
