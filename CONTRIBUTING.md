@@ -242,11 +242,12 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
     at a later commit of `rendered/<stage>` that contains it (other addons push to the same branch; checked with a
     commit-only fetch of the branch). The commit reaches the verification through the Stage's
     `status.metadata.renderedCommit` (step `set-metadata` after the render; verification can't read promotion
-    outputs). `verification:` in the chart's values: every 30s, success after 4 passing measurements in a row (a
-    healthy streak of ~2 min), failure after 20 (~12 min; the worker only notices the commit with Argo's ~3 min poll).
+    outputs). `verification:` in the chart's values: every 60s (one Job each, on the hub: #76), success after 3 passing
+    measurements in a row (a healthy streak of >= 2 min), failure after 10 (~11-12 min; the worker only notices the
+    commit with its Argo CD poll, <= 4 min: `timeout.reconciliation` in `worker-birth-kit`).
     The hub copies of the Applications carry the workers' status (argocd-agent), and the revision check keeps a stale
     copy (agent disconnected) from passing.
-  - **Stages without clusters pass**: no matching Applications = nothing to verify (test and prod today, after 4
+  - **Stages without clusters pass**: no matching Applications = nothing to verify (test and prod today, after 3
     measurements, ~2 min). A label typo would look the same, which is why `test_kargo_verification.sh` ties the
     selector to the appset's labels. **Except `<env>-canary` stages** (arg `requireApps: "true"`): a canary ring
     without clusters fails verification, so `<env>` never follows an unproven Freight; give the ring a cluster

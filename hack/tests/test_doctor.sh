@@ -33,6 +33,24 @@ doctor; rc_is 1; has '^FAIL +disk .*10 GB free'
 new_fakes; echo "28.1.1 4294967296 4 /var/lib/docker" > "$FAKE_STATE/docker_info"
 doctor; rc_is 1; has '^FAIL +memory'
 
+# Docker Desktop minimums for the full lab (hub + dev1 + dev2 + OpenChoreo, #76): 12 CPUs / 16 GB; below = WARN only.
+# Docker Desktop's "16 GB" shows ~15.6 GiB (the real VM of #76): counts as 16, no warning
+new_fakes; echo "28.1.1 16745562112 12 /var/lib/docker" > "$FAKE_STATE/docker_info"
+doctor; rc_is 0; has '^OK +memory .*16 GB'; has '^OK +cpus +12 '
+# 8 GB + 8 CPUs: enough for hub + 1 worker, not the full lab
+new_fakes; echo "28.1.1 8321499136 8 /var/lib/docker" > "$FAKE_STATE/docker_info"
+doctor; rc_is 0; has '^WARN +memory .*8 GB.*full lab.*>= 16'; has '^WARN +cpus +8 .*full lab.*>= 12'
+# 4 CPUs: below even hub + 1 worker (still a warning: it boots, slowly)
+new_fakes; echo "28.1.1 17179869184 4 /var/lib/docker" > "$FAKE_STATE/docker_info"
+doctor; rc_is 0; has '^WARN +cpus +4 .*hub \+ 1 worker.*>= 8'
+
+# CPU saturation of the Docker VM, measured in a lab node: load above 2x CPUs = the hub control plane starves (#76)
+new_fakes; state containers/mgmt hub_up
+echo "80.12 75.40 60.00 110/2734 125935" > "$FAKE_STATE/loadavg"
+doctor; rc_is 0; has '^WARN +load +80\.12 .*12 CPUs'
+new_fakes; state containers/mgmt hub_up
+doctor; rc_is 0; has '^OK +load +3\.10 '
+
 # docker daemon down: fail fast, no lab checks
 new_fakes; state docker_down
 doctor; rc_is 1; has '^FAIL +docker'

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # make doctor: can this machine run the lab, and how is the lab doing? Read-only.
 # FAIL (exit 1) = a boot would break; WARN = degraded or needed later; INFO = state.
-# Knobs: MIN_DISK_GB (25), MIN_MEM_GB (8), PROC_ROOT (/proc, for tests).
+# Docker Desktop minimums: hub + 1 worker = 8 CPUs / 8 GB (below 8 GB: FAIL); the full lab (hub + dev1 + dev2 +
+# OpenChoreo) = 12 CPUs / 16 GB (below: WARN) — measured in #76, where 12 CPUs were saturated during bursts.
+# Knobs: MIN_DISK_GB (25), MIN_MEM_GB (8), FULL_MEM_GB (16), MIN_CPUS (8), FULL_CPUS (12), PROC_ROOT (/proc, for tests).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 HUB=mgmt MIN_DISK_GB=${MIN_DISK_GB:-25} MIN_MEM_GB=${MIN_MEM_GB:-8} PROC_ROOT=${PROC_ROOT:-/proc}
+FULL_MEM_GB=${FULL_MEM_GB:-16} MIN_CPUS=${MIN_CPUS:-8} FULL_CPUS=${FULL_CPUS:-12}
 fails=0
 say() { printf '%-5s %-11s %s\n' "$1" "$2" "$3"; [ "$1" != FAIL ] || fails=$((fails + 1)); }
 ver() { grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1; }   # first x.y[.z] on stdin
@@ -29,7 +32,7 @@ check_tool() {
   say OK "$name" "${v:-?}"
 }
 
-# --- docker: daemon, memory, disk, inotify ------------------------------------------------------------------------
+# --- docker: daemon, memory, cpus, disk, inotify, load -------------------------------------------------------------
 docker_ok=0 node=''
 if ! command -v docker >/dev/null; then
   say FAIL docker "missing"
@@ -39,10 +42,16 @@ else
   docker_ok=1
   read -r dver mem cpus root <<<"$info"
   say OK docker "daemon $dver, $cpus CPUs"
-  memgb=$(( mem / 1024 / 1024 / 1024 ))
+  # rounded, not truncated: Docker Desktop set to 16 GB reports ~15.6 GiB (the VM kernel keeps some)
+  memgb=$(( (mem + 512 * 1024 * 1024) / 1024 / 1024 / 1024 ))
   if [ "$memgb" -lt "$MIN_MEM_GB" ]; then say FAIL memory "$memgb GB available to Docker (need >= $MIN_MEM_GB for hub + 1 worker)"
-  elif [ "$memgb" -lt 12 ]; then say WARN memory "$memgb GB available to Docker: hub + 1 worker; more workers need more"
+  elif [ "$memgb" -lt "$FULL_MEM_GB" ]; then say WARN memory "$memgb GB available to Docker: hub + 1 worker; the full lab needs >= $FULL_MEM_GB"
   else say OK memory "$memgb GB available to Docker"; fi
+  # CPU is what the full lab runs out of first: at 12 CPUs a burst (worker rebirth + promotion wave) drove the load to
+  # ~80 and the hub's k3s restarted (#76). Warn only: fewer CPUs boot, just slower and with fewer clusters.
+  if [ "$cpus" -lt "$MIN_CPUS" ]; then say WARN cpus "$cpus for Docker: hub + 1 worker wants >= $MIN_CPUS, the full lab >= $FULL_CPUS"
+  elif [ "$cpus" -lt "$FULL_CPUS" ]; then say WARN cpus "$cpus for Docker: hub + 1 worker; the full lab wants >= $FULL_CPUS"
+  else say OK cpus "$cpus for Docker (full lab: >= $FULL_CPUS)"; fi
 
   # every CAPD node shares the Docker VM's disk; measure it from inside a lab node when one exists
   node=$(docker ps -q --filter "label=io.x-k8s.kind.cluster=$HUB" --filter label=io.x-k8s.kind.role=control-plane 2>/dev/null | head -1)
@@ -69,6 +78,18 @@ else
     say WARN inotify "max_user_watches=$w max_user_instances=$i: sudo sysctl fs.inotify.max_user_watches=1048576 fs.inotify.max_user_instances=8192"
   else
     say OK inotify "max_user_watches=$w max_user_instances=$i"
+  fi
+
+  # CPU saturation right now (1-min load of the Docker VM; /proc/loadavg isn't namespaced, so a lab node sees it).
+  # Above 2x the CPUs the hub's etcd/apiserver answer in seconds, not milliseconds (#76).
+  if [ -n "$node" ]; then load=$(docker exec "$node" cat /proc/loadavg 2>/dev/null | awk '{print $1}')
+  elif [ "$os" = Linux ]; then load=$(awk '{print $1}' "$PROC_ROOT/loadavg" 2>/dev/null)
+  else load=''; fi
+  if [ -z "$load" ]; then :
+  elif awk -v l="$load" -v c="$cpus" 'BEGIN { exit !(l > 2 * c) }'; then
+    say WARN load "$load on $cpus CPUs: CPU-starved, the hub control plane may restart (#76); pause promotions / rebirths"
+  else
+    say OK load "$load on $cpus CPUs"
   fi
 fi
 
