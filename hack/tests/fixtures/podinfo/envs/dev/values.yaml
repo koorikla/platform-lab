@@ -1,0 +1,4 @@
+# env config only (frozen into the ComponentRelease); per-cluster knobs go on the ReleaseBinding
+container:
+  env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ dev" }]
+environmentConfigs: { replicas: 1 }

@@ -1,0 +1,30 @@
+{{- if eq .Values.mode "component" }}
+{{- include "oc.required" (list . "name" "project") }}
+{{- $_ := include "oc.componentTypeSpec" . }}{{/* fail early on a type the hub doesn't serve */}}
+{{- if .Values.createProject }}
+apiVersion: openchoreo.dev/v1alpha1
+kind: Project
+metadata:
+  name: {{ .Values.project }}
+  namespace: {{ .Values.namespace }}
+  labels: { openchoreo.dev/name: {{ .Values.project }} }
+spec:
+  deploymentPipelineRef: { name: {{ .Values.deploymentPipeline }} }
+  type: { kind: ClusterProjectType, name: {{ .Values.projectType }} }
+---
+{{- end }}
+apiVersion: openchoreo.dev/v1alpha1
+kind: Component
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "oc.labels" . | nindent 4 }}
+spec:
+  owner: { projectName: {{ .Values.project }} }
+  componentType: { kind: ClusterComponentType, name: {{ .Values.componentType }} }
+  # Releases are cut by Kargo (mode=release) and bound per cluster, never by the controller
+  autoDeploy: false
+  {{- with .Values.parameters }}
+  parameters: {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

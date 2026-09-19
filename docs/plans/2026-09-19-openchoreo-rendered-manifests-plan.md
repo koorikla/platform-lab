@@ -872,6 +872,13 @@ assert_yq "$t" '[select(.kind=="ClusterComponentType")] | length' 4
 
 **Step 4:** PASS; `make lint`. Commit.
 
+**As built (#15):** `env` is the values env (Kargo `vars.env`), so the Workload container fields live under
+`container:` (`container.env: [{key, value}]`, `command`, `args`, `files`); `stage` (default `env`) names the release
+and must be the Kargo branch (`dev-canary` renders `env=dev` too); only `workloadStage` (dev) renders the Workload.
+Binding: `ReleaseBinding <app>-<environment>`, `environment` default `__CLUSTER__` (unappliable on purpose),
+`releaseName` override for the per-cluster stamper, `environmentConfigs` → `componentTypeEnvironmentConfigs`.
+`traits` fail (not supported yet). Schema check: `hack/tests/test_openchoreo_app_schema.sh` (kubeconform, real CRDs).
+
 ### Task 3.2: App definition for podinfo
 
 **Files:** Create `repos/apps/podinfo/app.yaml`; Modify `repos/apps/podinfo/envs/*/values.yaml` (drop `image.tag`,
@@ -885,8 +892,8 @@ image: { repository: ghcr.io/stefanprodan/podinfo }
 endpoints:
   http: { type: HTTP, port: 9898, visibility: [external] }
 ```
-envs/dev/values.yaml: `env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ dev" }]` (map to the Workload env schema
-at v1.2.5). Run Task 3.1 tests. Commit.
+envs/dev/values.yaml: `container: { env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ dev" }] }` (Workload env schema
+at v1.2.5; `env` itself is the stage's values env). Run Task 3.1 tests. Commit.
 
 ### Task 3.3: `render-app` ClusterPromotionTask + app pipelines
 

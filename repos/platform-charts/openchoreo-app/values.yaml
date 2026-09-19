@@ -1,0 +1,36 @@
+# One chart, four renders (OpenChoreo v1.2.5 CRDs, namespace `default` = the labelled OpenChoreo org namespace):
+#   types     hub addon: ClusterComponentTypes + ClusterProjectType from files/types (vendored upstream samples)
+#   component hub, from main: Component (autoDeploy off: Kargo cuts releases) [+ Project if createProject]
+#   release   Kargo, per stage: ComponentRelease <name>-<stage>-<tag>-<hash8> [+ Workload on the workload stage]
+#   binding   Kargo / per-cluster stamper: ReleaseBinding <name>-<environment> -> that release
+mode: component
+namespace: default
+
+# --- app (repos/apps/<app>/app.yaml)
+name: ""                          # Component name
+project: lab
+componentType: deployment/service # <workloadType>/<ClusterComponentType name> from files/types
+parameters: {}                    # Component.spec.parameters (schema: the type's parameters); frozen into releases
+traits: []                        # not supported yet (would need vendored ClusterTrait specs to freeze)
+image: { repository: "", tag: "" }  # tag comes from Kargo (the Freight's image)
+container: {}                     # Workload container fields besides image: command, args, env [{key, value}], files
+endpoints: {}                     # Workload endpoints: {<name>: {type, port, visibility: [...]}}
+dependencies: {}                  # Workload dependencies: {endpoints: [...], resources: [...]}
+
+# --- component mode
+createProject: false              # the shared `lab` Project comes from the openchoreo-types addon, not per app
+deploymentPipeline: default
+projectType: default              # ClusterProjectType
+
+# --- release / binding modes
+env: ""                           # values env (dev|test|prod), set by Kargo
+stage: ""                         # Kargo stage/branch (defaults to env): names the release, so dev-canary and dev
+                                  # branches never own the same object
+workloadStage: dev                # the one stage that also renders the Workload (a Component may have exactly one)
+
+# --- binding mode
+environment: __CLUSTER__          # OpenChoreo Environment (= worker cluster name); the placeholder is deliberately
+                                  # not a valid object name, so an unstamped binding can never be applied
+releaseName: ""                   # bind this release instead of computing it (stamper already knows it)
+environmentConfigs: {}            # -> spec.componentTypeEnvironmentConfigs (schema: the type's environmentConfigs)
+workloadOverrides: {}             # -> spec.workloadOverrides ({container: {env, files}})
