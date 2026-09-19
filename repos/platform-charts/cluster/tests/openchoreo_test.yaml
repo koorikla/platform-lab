@@ -118,3 +118,17 @@ tests:
           value: [{ match: { secretKey: ca.crt, remoteRef: { remoteKey: clusters/dev1/openchoreo-gateway-ca, property: ca.crt } } }]
         documentSelector: { path: metadata.name, value: dev1-openchoreo-gateway-ca }
       - hasDocuments: { count: 2, filterAware: true }
+
+  # ProjectReleaseBinding creates the data plane's cell namespace (#78/#17). spec.projectRelease is unmanaged.
+  - it: creates ProjectReleaseBinding lab-<cluster> with empty projectRelease pin
+    documentSelector: { path: kind, value: ProjectReleaseBinding }
+    asserts:
+      - isAPIVersion: { of: openchoreo.dev/v1alpha1 }
+      - equal: { path: metadata.namespace, value: default }
+      - equal: { path: metadata.name, value: lab-dev1 }
+      - equal: { path: 'metadata.labels["openchoreo.dev/project"]', value: lab }
+      - equal: { path: 'metadata.labels["openchoreo.dev/environment"]', value: dev1 }
+      - equal: { path: 'metadata.labels["platform.lab/cluster"]', value: dev1 }
+      - equal: { path: spec.owner, value: { projectName: lab } }
+      - equal: { path: spec.environment, value: dev1 }
+      - notExists: { path: spec.projectRelease }

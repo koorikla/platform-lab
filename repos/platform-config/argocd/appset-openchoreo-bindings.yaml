@@ -1,0 +1,53 @@
+# One ReleaseBinding per app x worker cluster: stamped on the hub by rendering openchoreo-app (mode=binding).
+# Matrix: worker clusters (deriving the branch) x ComponentReleases on rendered/<branch>.
+# Release name and owner come from the Kargo-rendered release; environment is the cluster name.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: openchoreo-bindings
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - clusters:
+              selector:
+                matchLabels:
+                  platform.lab/role: worker
+              values:
+                branch: '{{ index .metadata.labels "platform.lab/env" }}{{ if eq (index .metadata.labels "platform.lab/ring") "canary" }}-canary{{ end }}'
+          - git:
+              repoURL: https://github.com/koorikla/platform-lab.git
+              revision: 'rendered/{{ .values.branch }}'
+              pathParamPrefix: releasefile
+              files:
+                - path: 'apps/*/release/*componentrelease*.yaml'
+  template:
+    metadata:
+      name: 'oc-binding-{{ .spec.owner.componentName }}-{{ .name }}'
+      labels:
+        platform.lab/app: '{{ .spec.owner.componentName }}'
+        platform.lab/cluster: '{{ .name }}'
+        openchoreo.dev/project: '{{ .spec.owner.projectName }}'
+    spec:
+      project: platform-mgmt
+      sources:
+        - repoURL: https://github.com/koorikla/platform-lab.git          # platform-charts repo
+          targetRevision: main
+          path: repos/platform-charts/openchoreo-app
+          helm:
+            valuesObject:
+              mode: binding
+              name: '{{ .spec.owner.componentName }}'
+              project: '{{ .spec.owner.projectName }}'
+              releaseName: '{{ .metadata.name }}'
+              environment: '{{ .name }}'
+      destination:
+        name: in-cluster
+        namespace: default
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+        syncOptions: [ServerSideApply=true]

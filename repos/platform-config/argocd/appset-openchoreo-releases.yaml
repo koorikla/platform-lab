@@ -1,0 +1,38 @@
+# Releases per env branch (rendered by Kargo): rendered/<branch>:apps/ -> hub (namespace default).
+# ComponentReleases are immutable history; prune is false so historical releases stay.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: openchoreo-releases
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - branch: dev-canary
+          - branch: dev
+          - branch: nit
+          - branch: sit
+          - branch: prod
+  template:
+    metadata:
+      name: 'oc-releases-{{ .branch }}'
+      labels:
+        platform.lab/stage: '{{ .branch }}'
+    spec:
+      project: platform-mgmt
+      source:
+        repoURL: https://github.com/koorikla/platform-lab.git
+        targetRevision: 'rendered/{{ .branch }}'
+        path: apps
+        directory:
+          recurse: true
+      destination:
+        name: in-cluster
+        namespace: default
+      syncPolicy:
+        automated: { prune: false, selfHeal: true }
+        retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+        syncOptions: [ServerSideApply=true]

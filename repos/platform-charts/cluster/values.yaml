@@ -37,6 +37,7 @@ openbao:                       # platform-charts/openbao on the hub
 # OpenChoreo registration (templates/openchoreo.yaml): rendered for workers whenever the hub serves the OpenChoreo CRDs,
 # i.e. while addons/management/openchoreo-control-plane is enabled. Names must match that umbrella chart.
 openchoreo:
+  project: lab                 # OpenChoreo Project name (from openchoreo-types)
   orgNamespace: default        # Environments: the namespace the umbrella labels openchoreo.dev/control-plane=true
   namespace: openchoreo-control-plane   # agent CA + client cert, next to the cluster-gateway that trusts them
   gatewayCASecret: cluster-gateway-ca   # the cluster-gateway's server CA (upstream chart); only ca.crt is pushed

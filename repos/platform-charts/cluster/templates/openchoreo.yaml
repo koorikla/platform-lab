@@ -136,4 +136,19 @@ metadata:
 spec:
   dataPlaneRef: { kind: ClusterDataPlane, name: {{ $n }} }
   isProduction: {{ eq .Values.env "prod" }}
+---
+# 6. One ProjectReleaseBinding per worker cluster for Project lab: creates the cell namespace on the data plane (#78/#17).
+#    spec.projectRelease is left empty so the Project controller seeds it once; Argo CD SSA leaves it unmanaged.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ProjectReleaseBinding
+metadata:
+  name: {{ printf "%s-%s" ($oc.project | default "lab") $n }}
+  namespace: {{ $oc.orgNamespace }}
+  labels:
+    openchoreo.dev/project: {{ $oc.project | default "lab" }}
+    openchoreo.dev/environment: {{ $n }}
+    platform.lab/cluster: {{ $n }}
+spec:
+  owner: { projectName: {{ $oc.project | default "lab" }} }
+  environment: {{ $n }}
 {{- end }}

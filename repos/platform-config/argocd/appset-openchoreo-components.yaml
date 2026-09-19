@@ -1,0 +1,43 @@
+# One Component per app: repos/apps/<app>/app.yaml -> chart openchoreo-app (mode=component).
+# Declares the app intent on the hub (OpenChoreo control plane in namespace default).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: openchoreo-components
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/koorikla/platform-lab.git            # apps repo
+        revision: main
+        files:
+          - path: repos/apps/*/app.yaml
+  template:
+    metadata:
+      name: 'oc-component-{{ .path.basename }}'
+      labels:
+        platform.lab/app: '{{ .path.basename }}'
+        openchoreo.dev/project: '{{ .project }}'
+    spec:
+      project: platform-mgmt
+      sources:
+        - repoURL: https://github.com/koorikla/platform-lab.git          # platform-charts repo
+          targetRevision: main
+          path: repos/platform-charts/openchoreo-app
+          helm:
+            valuesObject:
+              mode: component
+            valueFiles:
+              - '$values/{{ .path.path }}/app.yaml'
+        - repoURL: https://github.com/koorikla/platform-lab.git          # apps repo for valueFiles
+          targetRevision: main
+          ref: values
+      destination:
+        name: in-cluster
+        namespace: default
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+        syncOptions: [ServerSideApply=true]
