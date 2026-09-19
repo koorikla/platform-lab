@@ -1,0 +1,13 @@
+# Source: kgateway/charts/kgateway/templates/serviceaccount.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kgateway-role-openchoreo-data-plane
+subjects:
+- kind: ServiceAccount
+  name: kgateway
+  namespace: openchoreo-data-plane
+roleRef:
+  kind: ClusterRole
+  name: kgateway-openchoreo-data-plane
+  apiGroup: rbac.authorization.k8s.io
