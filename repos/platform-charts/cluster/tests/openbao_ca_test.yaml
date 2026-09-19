@@ -1,0 +1,40 @@
+suite: worker API CA projection for fleet-sync (openbao chart's auth/k8s-<name>)
+templates:
+  - openbao-ca.yaml
+values:
+  - values/dev1.yaml
+tests:
+  - it: lets the CA projector get exactly CAPI's <name>-ca in the fleet namespace
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal: { path: metadata.namespace, value: fleet }
+      - equal:
+          path: rules
+          value: [{ apiGroups: [""], resources: [secrets], resourceNames: [dev1-ca], verbs: [get] }]
+
+  - it: binds the projector ServiceAccount of the openbao namespace
+    documentSelector: { path: kind, value: RoleBinding }
+    asserts:
+      - equal: { path: metadata.namespace, value: fleet }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: fleet-ca-projector, namespace: openbao }] }
+
+  - it: copies only the public cert (tls.crt) into openbao/<name>-ca-public
+    documentSelector: { path: kind, value: ExternalSecret }
+    asserts:
+      - equal: { path: metadata.name, value: dev1-ca-public }
+      - equal: { path: metadata.namespace, value: openbao }
+      - equal: { path: spec.secretStoreRef, value: { kind: SecretStore, name: fleet-ca } }
+      - equal: { path: spec.data, value: [{ secretKey: ca.crt, remoteRef: { key: dev1-ca, property: tls.crt } }] }
+
+  # rebirth (#68): CAPI mints a new <name>-ca and fleet-sync (every 2m) copies whatever this projection holds, so it must
+  # follow the source within a minute. Periodic (the default when unset) is the only ESO v2.10 policy that re-reads it.
+  - it: re-reads the source every minute (Periodic), so a reborn cluster's new CA arrives
+    documentSelector: { path: kind, value: ExternalSecret }
+    asserts:
+      - equal: { path: spec.refreshInterval, value: 1m }
+      - notExists: { path: spec.refreshPolicy }
+
+  - it: renders nothing for the hub
+    values: [values/mgmt.yaml]
+    asserts:
+      - hasDocuments: { count: 0 }
