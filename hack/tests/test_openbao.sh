@@ -12,9 +12,10 @@ assert_yq "$o" 'select(.kind=="Service" and .spec.type=="NodePort") | .spec.sele
 lb=$(yq '.data.value' $config/fleet/base/hub-lb.yaml)
 grep -qE '^ *bind \*:30820$' <<<"$lb" || fail "hub-lb.yaml: no frontend bound to :30820"
 grep -qF 'JoinHostPort $backend.Address "30820"' <<<"$lb" || fail "hub-lb.yaml: no backend on node port 30820"
-assert_yq "$o" 'select(.kind=="ClusterSecretStore") | .metadata.name' openbao
-assert_yq "$o" 'select(.kind=="ClusterSecretStore") | .spec.provider.vault.server' http://openbao.openbao.svc:8200
-assert_yq "$o" 'select(.kind=="ClusterSecretStore") | .spec.provider.vault.auth.kubernetes.role' hub-writer
+# openbao = hub-writer (argocd only); default = OpenChoreo's read-only store (test_openchoreo_secrets.sh)
+assert_yq "$o" '[select(.kind=="ClusterSecretStore") | .metadata.name] | sort | join(",")' default,openbao
+assert_yq "$o" 'select(.kind=="ClusterSecretStore" and .metadata.name=="openbao") | .spec.provider.vault.server' http://openbao.openbao.svc:8200
+assert_yq "$o" 'select(.kind=="ClusterSecretStore" and .metadata.name=="openbao") | .spec.provider.vault.auth.kubernetes.role' hub-writer
 # no root token literal in git: dev mode generates one per start (kept in the pod's ~/.vault-token for postStart)
 assert_yq "$o" 'select(.kind=="StatefulSet") | .spec.template.spec.containers[0].env[] | select(.name=="VAULT_DEV_ROOT_TOKEN_ID") | (.value // "") | length' 0
 assert_yq "$o" 'select(.kind=="StatefulSet") | .spec.updateStrategy.type' RollingUpdate   # postStart edits must roll the pod

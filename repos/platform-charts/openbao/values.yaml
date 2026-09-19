@@ -62,10 +62,36 @@ openbao:
           bound_service_account_names=openbao-hub-writer bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
         bao write auth/kubernetes/role/fleet-sync token_policies=fleet-sync token_ttl=10m \
           bound_service_account_names=openbao-fleet-sync bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
+        # OpenChoreo (templates/openchoreo.yaml): the seeder PushSecret writes secret/openchoreo/*, ClusterSecretStore
+        # `default` only reads it. No KV values here: they are generated in-cluster and re-pushed after every restart.
+        bao policy write openchoreo-seeder - >/dev/null <<'EOP'
+        path "secret/data/openchoreo/*"     { capabilities = ["create", "read", "update", "delete"] }
+        path "secret/metadata/openchoreo/*" { capabilities = ["create", "read", "update", "delete"] }
+        EOP
+        bao policy write openchoreo-reader - >/dev/null <<'EOP'
+        path "secret/data/openchoreo/*"     { capabilities = ["read"] }
+        EOP
+        bao write auth/kubernetes/role/openchoreo-seeder token_policies=openchoreo-seeder token_ttl=10m \
+          bound_service_account_names=openbao-openchoreo-seeder bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
+        bao write auth/kubernetes/role/openchoreo-reader token_policies=openchoreo-reader token_ttl=1h \
+          bound_service_account_names=openbao-openchoreo-reader bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
 
 # ClusterSecretStore `openbao` (hub-writer): only these namespaces may push through it
 hubWriter:
   namespaces: [argocd]            # cluster chart: PushSecret <name>-argocd-agent
+
+# OpenChoreo secrets (templates/openchoreo.yaml): generated once in-cluster, kept in Secret openbao/openchoreo-generated
+# and pushed to secret/openchoreo/<key> (property `value`); ClusterSecretStore `default` serves them read-only.
+openchoreo:
+  # upstream key names (install/k3d/common/values-openbao.yaml @ v1.2.5) minus the optional github-* placeholders
+  generated: [backstage-backend-secret, backstage-client-secret, backstage-jenkins-api-key]
+  # namespaces allowed to use ClusterSecretStore `default`:
+  # - openchoreo-control-plane: ExternalSecret backstage-secrets (openchoreo-control-plane umbrella chart)
+  # - thunder (#10 contract): Backstage's OAuth client secret is ONE value, owned here. Thunder reads
+  #   secret/openchoreo/backstage-client-secret (property value) through this store and registers its Backstage app
+  #   with it; Backstage gets the same value as backstage-secrets/client-secret. The store is per-namespace, not
+  #   per-key, so thunder can read the other openchoreo/* keys too (lab-acceptable: the IdP holds every client secret).
+  namespaces: [openchoreo-control-plane, thunder]
 
 # API for workers: http://mgmt-lb:30820 (fleet/base/hub-lb.yaml frontend -> this NodePort)
 nodePort: 30820
