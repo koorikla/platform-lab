@@ -1,5 +1,5 @@
 # platform-mgmt : hub-local, reconciled by the hub's own application-controller (never shipped to agents)
-# platform-workers / workloads : labelled argocd-agent=true -> principal syncs them to agents (managed mode)
+# platform-workers : labelled argocd-agent=true -> principal syncs them to agents (managed mode)
 # Least privilege (#20). hack/tests/test_appprojects.sh renders everything the ApplicationSets deploy and fails when a
 # project would reject it (new kind, new namespace, new repo): extend the lists here in the same PR. Before merging a
 # change to this file, `hack/appproject-check.sh --live` checks it read-only against the hub's live Applications.
@@ -83,8 +83,7 @@ metadata:
   name: workloads
   namespace: argocd
   annotations: { argocd.argoproj.io/sync-wave: "-1" }   # before the appsets that reference it
-  labels:
-    argocd-agent: "true"
+  # Legacy project (workloads ApplicationSet retired by #17). argocd-agent label dropped.
 spec:
   sourceRepos: [https://github.com/koorikla/platform-lab.git]   # SPLIT: the apps repo
   # Any worker, one namespace per app (namespace = repos/apps/<app> folder name): a new app is onboarded here.

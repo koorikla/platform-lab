@@ -8,9 +8,10 @@
 # What the cluster chart renders: its unit tests (repos/platform-charts/cluster/tests/openchoreo*_test.yaml). Here:
 # the contracts with the control-plane and openbao charts, and invariant 1 for every real cluster file.
 source "$(dirname "$0")/lib.sh"
-oc=(--api-versions openchoreo.dev/v1alpha1/ClusterDataPlane --api-versions openchoreo.dev/v1alpha1/Environment)
+oc=(--api-versions openchoreo.dev/v1alpha1/ClusterDataPlane --api-versions openchoreo.dev/v1alpha1/Environment --api-versions openchoreo.dev/v1alpha1/ProjectReleaseBinding)
 cdp='select(.kind=="ClusterDataPlane")'
 env='select(.kind=="Environment")'
+prb='select(.kind=="ProjectReleaseBinding")'
 ns=openchoreo-control-plane
 o=$(render dev1 $charts/cluster -f $config/fleet/clusters/dev/dev1.yaml "${oc[@]}")
 c=$(render openchoreo-control-plane $charts/openchoreo-control-plane -n $ns \
@@ -57,4 +58,10 @@ for f in $config/fleet/clusters/*/*.yaml*; do
   assert_yq "$r" "[$cdp | .metadata.name, .spec.planeID] + [$env | .metadata.name, .spec.dataPlaneRef.name] | unique | join(\",\")" "$n"
   # prod files make production Environments
   assert_yq "$r" "$env | .spec.isProduction" "$([ "$(yq .env "$f")" = prod ] && echo true || echo false)"
+  # ProjectReleaseBinding lab-<cluster> creates the data plane cell namespace (#78/#17)
+  assert_yq "$r" "$prb | .metadata.name" "lab-$n"
+  assert_yq "$r" "$prb | .metadata.namespace" default
+  assert_yq "$r" "$prb | .spec.owner.projectName" lab
+  assert_yq "$r" "$prb | .spec.environment" "$n"
+  assert_yq "$r" "$prb | has(\"spec.projectRelease\")" false
 done

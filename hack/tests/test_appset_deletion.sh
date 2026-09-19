@@ -7,8 +7,8 @@ source "$(dirname "$0")/lib.sh"
 # infrastructure: disabling must orphan, never delete (removal is a manual step: CONTRIBUTING.md "Disabling")
 preserve=" mgmt-addons fleet-clusters worker-addons "
 # deletion is the point: a disabled worker addon's or removed app's Kargo pipeline must stop promoting; a removed
-# app goes away (workloads)
-cascade=" kargo-addon-pipelines kargo-app-pipelines workloads "
+# app, release, or binding goes away
+cascade=" kargo-addon-pipelines kargo-app-pipelines openchoreo-components openchoreo-releases openchoreo-bindings "
 
 for f in $config/argocd/appset-*.yaml; do
   name=$(yq '.metadata.name' "$f")

@@ -84,15 +84,18 @@ for f in repos/apps/*/app.yaml; do   # kargo-app-pipelines
   a=$(basename "$(dirname "$f")")
   r=$(render "k-$a" $charts/kargo-pipeline --set kind=app,name="$a",image="$(yq .image.repository "$f")")
   add "kargo-app-$a" platform-mgmt in-cluster kargo "$r"
-done
-for d in repos/apps/*/; do   # workloads (legacy until #17): every folder with a chart/
-  a=$(basename "$d")
-  [ -d "$d/chart" ] || continue
+
+  # openchoreo-components, openchoreo-releases, openchoreo-bindings (#17)
+  rc=$(render "oc-component-$a" $charts/openchoreo-app -f "$f" --set mode=component)
+  add "oc-component-$a" platform-mgmt in-cluster default "$rc"
+  for s in $(yq '.stages[].name' $charts/kargo-pipeline/values.yaml); do
+    rr=$(render "oc-release-$a-$s" $charts/openchoreo-app -f "$f" --set mode=release,stage="$s",image.tag=6.15.0)
+    add "oc-releases-$s" platform-mgmt in-cluster default "$rr"
+  done
   for w in "${workers[@]}"; do
     set -- $w
-    v=(); for x in "$d/envs/$2/values.yaml" "$d/clusters/$1/values.yaml"; do [ -f "$x" ] && v+=(-f "$x"); done
-    r=$(render "$a-$1" "$d/chart" -n "$a" "${v[@]}")
-    add "$a-$1" workloads "$1" "$a" "$r"
+    rb=$(render "oc-binding-$a-$1" $charts/openchoreo-app --set mode=binding,name="$a",project=lab,releaseName=dummy,environment="$1")
+    add "oc-binding-$a-$1" platform-mgmt in-cluster default "$rb"
   done
 done
 
