@@ -34,6 +34,8 @@ spec:
                 # cluster secrets from before the ring label existed count as stable. A canary branch exists only
                 # where kargo-pipeline has a <env>-canary stage (dev today).
                 branch: '{{ index .metadata.labels "platform.lab/env" }}{{ if eq (index .metadata.labels "platform.lab/ring") "canary" }}-canary{{ end }}'
+                ring: '{{ if eq (index .metadata.labels "platform.lab/ring") "canary" }}canary{{ else }}stable{{ end }}'
+  # No progressive sync (RollingSync) on purpose: decision + how to enable it in the design doc addendum (#27).
   template:
     metadata:
       name: '{{ .addonfile.path.basename }}-{{ .name }}'
@@ -41,6 +43,7 @@ spec:
         argocd-agent: "true"
         platform.lab/addon: '{{ .addonfile.path.basename }}'
         platform.lab/env: '{{ .values.env }}'
+        platform.lab/ring: '{{ .values.ring }}'      # same rule as the branch; UI filters, Kargo verification, RollingSync
         platform.lab/cluster: '{{ .name }}'
     spec:
       project: platform-workers
