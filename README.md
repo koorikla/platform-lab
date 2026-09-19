@@ -58,7 +58,7 @@ in the canary ring. Rings replace per-cluster pins: nothing is rendered per clus
 |---|---|
 | whole fleet | `addons/workers/<addon>/values.yaml`, or the chart itself; reaches each env by promotion |
 | whole env (dev1, dev2, …) | values in `addons/workers/<addon>/envs/<env>.values.yaml`; version = the Freight promoted to that env's stage |
-| clusters ahead of their env | `ring: canary` in their fleet file → they follow stage `<env>-canary`, promoted before `<env>` (dev2 in the lab; `dev` follows after a 15 min soak) |
+| clusters ahead of their env | `ring: canary` in their fleet file → they follow stage `<env>-canary`, promoted before `<env>` (dev2 in the lab; `dev` follows once Kargo verified the canary Synced + Healthy at the new commit) |
 | one cluster's identity | CAAPH birth kit (`fleet/base/helmchartproxies.yaml`, cluster name via `valuesTemplate`) |
 | apps | `repos/apps/<app>/envs/<env>/values.yaml` (Kargo writes, until apps move to OpenChoreo), `clusters/<cluster>/values.yaml` for one cluster |
 

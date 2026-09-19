@@ -150,8 +150,8 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
    - Kargo project `addon-<name>` (`kargo-addon-pipelines` appset → `repos/platform-charts/kargo-pipeline`): a
      Warehouse on commits touching the chart or the addon's config, and stages `dev-canary → dev → test → prod` that
      `helm template` fleet + env values into `rendered/<stage>:addons/<name>/` (`kargo/shared/render-addon.yaml`).
-     `dev-canary` auto-promotes the new Freight, `dev` too once it has soaked 15 min in `dev-canary`; `test` and
-     `prod` wait for a manual promotion.
+     `dev-canary` auto-promotes the new Freight, `dev` too once it passed verification in `dev-canary` (canary
+     Applications Synced + Healthy at the promoted commit); `test` and `prod` wait for a manual promotion.
    - Argo CD Application `<name>-<cluster>` for every worker (`worker-addons` appset, project `platform-workers`,
      label `argocd-agent: "true"`), shipped to the cluster by the principal. It syncs `addons/<name>/` of
      `rendered/<env>` (`rendered/<env>-canary` for `ring: canary` clusters) as plain YAML. Until the first promotion
@@ -205,7 +205,7 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
 `hack/kargo-deploy-key.sh` after a fresh hub. Promotions change the lab: hold the lab lock.
 
 - **Worker addons** (project `addon-<name>`): Freight = a `main` commit touching the addon. `dev-canary`
-  auto-promotes, `dev` after a soak in `dev-canary` (see canary ring); `test` and `prod` are promoted by hand
+  auto-promotes, `dev` after verification in `dev-canary` (see canary ring); `test` and `prod` are promoted by hand
   (UI: pick the Freight on the stage → Promote). Each promotion
   commits plain YAML to `rendered/<stage>`; the diff of that commit is the change. Prod through a PR (`pr: true`)
   needs a token that can open PRs (#6).
@@ -216,21 +216,39 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
   `ring: canary` in its fleet file (label `platform.lab/ring=canary`): its Applications follow `rendered/<env>-canary`,
   which the `<env>-canary` stage renders before `<env>`. Only `dev-canary` exists today (a canary cluster needs that
   stage; `make lint` checks). In the lab `dev2` is dev's canary ring and `dev1` the rest of dev.
-  - **dev is automatic, after a soak**: the `dev` stage takes only Freight that has been in `dev-canary` for its
-    `soak` (15 min, Kargo `requiredSoakTime`, `stages[].soak` in `repos/platform-charts/kargo-pipeline/values.yaml`),
-    then auto-promotes. Without the soak dev followed the canary within seconds (no verification is configured, so
-    Freight counts as verified as soon as its promotion succeeds) and the ring showed nothing. Soak start:
-    `kubectl --context mgmt -n addon-<name> get freight <id> -o jsonpath='{.status.currentlyIn.dev-canary.since}'`;
-    `dev` picks it up within ~5 min after the soak ends (the Stage controller's resync).
-  - **Stop a bad canary** within the soak: promote the previous Freight to `dev-canary` (UI: stage `dev-canary` →
-    Freight → Promote). The bad Freight leaves the stage before it soaked, so `dev` never becomes eligible for it, and
-    promoting non-latest Freight puts an auto-promotion hold on `dev-canary` (newer Freight no longer lands there by
-    itself) until you promote the latest Freight to it again.
-  - **Skip the wait**: approve the Freight for `dev` (UI: Freight → Approve, or `kargo approve --project
-    addon-<name> --freight <id> --stage dev`); a manual approval supersedes the soak. Commits to one addon less than
-    15 min apart restart the soak (each new Freight replaces the last in `dev-canary` before it soaked), so dev
-    follows 15 min after the last of them unless you approve.
-  - **Hold dev longer** (a canary that needs a day): drop `dev` from `autoPromote` and promote it by hand.
+  - **dev follows a healthy canary**: every stage verifies its Freight after each promotion (#26), and `dev` takes
+    only Freight verified in `dev-canary`. Verification = AnalysisTemplate `argocd-apps` in project `addon-<name>`
+    (`repos/platform-charts/kargo-pipeline/templates/verification.yaml`); Argo Rollouts runs one Job per measurement
+    (`files/verify-apps.sh`, SA `verify-apps`, may only get/list Applications in `argocd`). A measurement passes when
+    every hub Application of the addon on the stage's clusters (labels `platform.lab/addon`, `platform.lab/env`,
+    `platform.lab/ring`, as `worker-addons` sets them) is Synced + Healthy at the rendered commit of the promotion, or
+    at a later commit of `rendered/<stage>` that contains it (other addons push to the same branch; checked with a
+    commit-only fetch of the branch). The commit reaches the verification through the Stage's
+    `status.metadata.renderedCommit` (step `set-metadata` after the render; verification can't read promotion
+    outputs). `verification:` in the chart's values: every 30s, success after 4 passing measurements in a row (a
+    healthy streak of ~2 min), failure after 20 (~12 min; the worker only notices the commit with Argo's ~3 min poll).
+    The hub copies of the Applications carry the workers' status (argocd-agent), and the revision check keeps a stale
+    copy (agent disconnected) from passing.
+  - **Stages without clusters pass**: no matching Applications = nothing to verify (test and prod today, after 4
+    measurements, ~2 min). A label typo would look the same, which is why `test_kargo_verification.sh` ties the
+    selector to the appset's labels. **Except `<env>-canary` stages** (arg `requireApps: "true"`): a canary ring
+    without clusters fails verification, so `<env>` never follows an unproven Freight; give the ring a cluster
+    (`ring: canary`), or approve the Freight for `<env>` by hand.
+  - **Watch it**: Kargo UI → stage → Verifications (per measurement); the Job logs say which Application it waits for
+    (`kubectl --context mgmt -n addon-<name> logs -l analysisrun.argoproj.io/uid --tail=20`, `WAIT <app>: <sync>/<health>
+    at <revision>`). A failed verification leaves the Freight unverified in `dev-canary`: `dev` never takes it, and
+    the next Freight (a fix on `main`) auto-promotes to `dev-canary` as usual. Re-run it (UI: Reverify, or `kargo
+    verify stage dev-canary --project addon-<name>`) once the cause is fixed outside the Freight.
+  - **Stop a bad canary** early: while a stage verifies, Kargo runs no other promotion to it; abort the verification
+    (UI, or `kargo verify stage dev-canary --project addon-<name> --abort`), then promote the previous Freight to `dev-canary` (stage → Freight →
+    Promote). Promoting non-latest Freight puts an auto-promotion hold on `dev-canary` until you promote the latest
+    Freight to it again.
+  - **Skip the gate**: approve the Freight for `dev` (UI: Freight → Approve, or `kargo approve --project
+    addon-<name> --freight <id> --stage dev`); a manual approval supersedes verification (and soak).
+  - **Hold dev longer** (a canary that needs a day): give the `dev` stage a `soak` (`stages[].soak`, Kargo
+    `requiredSoakTime`, counted from the promotion to `dev-canary`, on top of verification), or drop `dev` from
+    `autoPromote` and promote it by hand. dev has no soak by default: a timer doesn't look at health, and the poll +
+    healthy streak already keep dev a few minutes behind the canary.
   For apps (until #16/#17), one cluster can still run ahead with `repos/apps/<app>/clusters/<cluster>/values.yaml`.
 - Never edit `rendered/*` by hand (the one documented exception is `make rendered-prune`). There is no pin file on
   `main` to edit for a break-glass: roll back by promoting older Freight to the stage (Kargo UI, stage → Freight).

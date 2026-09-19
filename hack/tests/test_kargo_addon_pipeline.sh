@@ -24,17 +24,17 @@ assert_yq "$o" '[select(.kind=="Stage")] | map(.metadata.name) | join(",")' 'dev
 assert_yq "$o" "$(stage dev-canary) | .spec.requestedFreight[0].sources.direct" true
 assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.stages[0]" dev-canary
 assert_yq "$o" "$(stage prod) | .spec.requestedFreight[0].sources.stages[0]" test
-# canary ring (#5): dev auto-promotes, but only Freight that soaked in dev-canary for its `soak` (without it dev
-# follows the canary within seconds and the ring shows nothing); manual stages and the first stage don't soak
-v=$charts/kargo-pipeline/values.yaml
-assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.requiredSoakTime" "$(yq '.stages[] | select(.name=="dev") | .soak' $v)"
-assert_yq "$o" "[$(stage dev-canary), $(stage test), $(stage prod)] | map(.spec.requestedFreight[0].sources | has(\"requiredSoakTime\")) | any" false
-# rule: an auto-promoted stage fed by a *-canary stage soaks there
+# canary ring (#5, #26): dev auto-promotes, but only Freight verified in dev-canary (its Applications Synced + Healthy
+# at the promoted commit, test_kargo_verification.sh). Without that gate dev follows the canary within seconds and the
+# ring shows nothing. No soak by default (a timer that ignores health); `soak` stays available per stage.
+assert_yq "$o" "[select(.kind==\"Stage\") | .spec.requestedFreight[0].sources | has(\"requiredSoakTime\")] | any" false
+# rule: an auto-promoted stage fed by a *-canary stage waits for that stage's verification
 auto=" $(yq eval-all 'select(.kind=="ProjectConfig") | .spec.promotionPolicies[] | select(.autoPromotionEnabled) | .stageSelector.name' "$o" | paste -sd' ' -) "
-[[ $auto == *" dev "* ]] || fail "dev must auto-promote (after its soak), auto-promoted: '$auto'"
+[[ $auto == *" dev "* ]] || fail "dev must auto-promote (after dev-canary's verification), auto-promoted: '$auto'"
 for s in $(yq eval-all 'select(.kind=="Stage" and ((.spec.requestedFreight[0].sources.stages[0] // "") | test("-canary$"))) | .metadata.name' "$o"); do
-  [[ $auto != *" $s "* ]] || [ "$(yq eval-all "$(stage "$s") | .spec.requestedFreight[0].sources.requiredSoakTime // \"\"" "$o")" != "" ] ||
-    fail "stage $s auto-promotes from a canary stage without a soak"
+  up=$(yq eval-all "$(stage "$s") | .spec.requestedFreight[0].sources.stages[0]" "$o")
+  [[ $auto != *" $s "* ]] || [ "$(yq eval-all "$(stage "$up") | .spec.verification.analysisTemplates | length" "$o")" -gt 0 ] ||
+    fail "stage $s auto-promotes from canary stage $up, which verifies nothing"
 done
 # the first stage takes Freight from the Warehouse: there is nothing to soak in
 printf 'stages:\n  - { name: a, env: dev, soak: 5m }\n' > "$tmp/soak-first.yaml"

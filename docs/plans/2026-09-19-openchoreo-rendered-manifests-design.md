@@ -190,3 +190,20 @@ Replaces "hub PushSecret writes into the worker with the CAPI admin kubeconfig".
   Escape hatch for a held step: `argocd app sync <addon>-<cluster>` on the hub. Kargo must then not sync these apps
   itself (`argocd-update`). Back out = drop `strategy` (auto-sync returns). Test sketch (step order == Kargo stages,
   every app in exactly one step): PR #51's first revision, commit fbe5e99.
+
+## Addendum: Kargo verification per addon stage (#26, 2026-09-19)
+- **Decision:** every stage of an addon pipeline verifies (Stage `spec.verification`, AnalysisTemplate `argocd-apps`
+  per project in the `kargo-pipeline` chart). A measurement is a Job on the hub reading the hub Applications of the
+  addon on the stage's clusters (labels addon + env + ring, from `worker-addons`): all Synced + Healthy at the promoted
+  rendered commit or a descendant on `rendered/<stage>`. Success = 4 in a row, failure = none such streak in 20.
+- **Why a Job, not `argocd-update`:** Kargo's Argo CD step and its health checks need Application names in the Stage;
+  ours are `<addon>-<cluster>`, generated per cluster (invariant 2: no cluster names outside the fleet files). A label
+  selector in the Job keeps the Stage cluster-agnostic, and nothing on the hub triggers syncs of agent-managed apps.
+- **Revision:** verification can't read promotion outputs (Kargo v1.11.4: only `ctx.project`, `ctx.stage`, Stage
+  vars and data functions), so the promotion's `set-metadata` step stores `outputs.render.commit` as Stage metadata
+  `renderedCommit` and the verification arg reads `stageMetadata(ctx.stage)`. Descendants count because every addon
+  pipeline pushes to the same branch; ancestry comes from a commit-only fetch (`--filter=tree:0`) of that branch.
+- **Soak:** dev's 15 min soak (#61) is dropped: a timer that ignores health. `stages[].soak` stays for a deliberate
+  minimum dwell on top of verification.
+- **Empty stages pass** (no clusters in test/prod today): the Stage can't know the fleet without breaking invariant 2.
+  Except `<env>-canary` stages (arg `requireApps`): an empty canary ring must not open the gate for `<env>`.

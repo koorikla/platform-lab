@@ -1,0 +1,107 @@
+{{- $p := include "kargo-pipeline.project" . }}
+{{- $v := .Values.verification }}
+{{- $argocd := $v.argocdNamespace }}
+# Kargo verification of every stage (Stage spec.verification in stages.yaml). Kargo creates the AnalysisRun from this
+# template in the project namespace; Argo Rollouts runs each measurement as a Job there, as SA verify-apps.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: argocd-apps
+  namespace: {{ $p }}
+spec:
+  # Values come from the Stage (spec.verification.args). Kargo v1.11.4 silently drops a Stage arg not declared here,
+  # and fails the AnalysisRun if one declared here gets no value: keep both lists equal (a test checks).
+  args:
+    - name: env
+    - name: ring
+    - name: branch      # rendered/<branch> = the stage's branch
+    - name: revision    # rendered commit of the last promotion (Stage status.metadata.renderedCommit)
+    - name: requireApps # "true" on <env>-canary stages: no Applications = fail, not pass
+  metrics:
+    - name: argocd-apps
+      # wait for the worker to pick the commit up (Argo polls ~3 min), then require a healthy streak; a failed
+      # measurement only resets the streak, running out of `count` fails the verification
+      interval: {{ $v.interval }}
+      count: {{ $v.count }}
+      failureLimit: -1
+      consecutiveSuccessLimit: {{ $v.consecutiveSuccesses }}
+      provider:
+        job:
+          spec:
+            backoffLimit: 0             # the next measurement is the retry
+            activeDeadlineSeconds: 120
+            template:
+              spec:
+                serviceAccountName: verify-apps
+                restartPolicy: Never
+                securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
+                containers:
+                  - name: verify
+                    image: {{ $v.image }}
+                    command: [bash, /scripts/verify-apps.sh]
+                    env:
+                      - { name: HOME, value: /tmp }   # kubectl cache + git scratch repo; root fs is read-only
+                      - { name: ADDON, value: {{ .Values.name | quote }} }
+                      - { name: ARGOCD_NS, value: {{ $argocd | quote }} }
+                      - { name: REPO_URL, value: {{ $v.repoURL | quote }} }
+                      # Rollouts substitutes {{`{{args.*}}`}} when it creates the Job
+                      - { name: ENV, value: {{ `"{{args.env}}"` }} }
+                      - { name: RING, value: {{ `"{{args.ring}}"` }} }
+                      - { name: BRANCH, value: {{ `"{{args.branch}}"` }} }
+                      - { name: REVISION, value: {{ `"{{args.revision}}"` }} }
+                      - { name: REQUIRE_APPS, value: {{ `"{{args.requireApps}}"` }} }
+                    securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+                    resources:
+                      requests: { cpu: 10m, memory: 32Mi }
+                      limits: { memory: 128Mi }
+                    volumeMounts:
+                      - { name: script, mountPath: /scripts }
+                      - { name: tmp, mountPath: /tmp }
+                volumes:
+                  - name: script
+                    configMap: { name: verify-apps }
+                  - name: tmp
+                    emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: verify-apps
+  namespace: {{ $p }}
+data:
+  verify-apps.sh: |
+{{ .Files.Get "files/verify-apps.sh" | indent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: verify-apps
+  namespace: {{ $p }}
+---
+# Read-only on Applications in Argo CD's namespace, nothing else (RBAC can't narrow list to a label selector: the SA
+# can read every Application there, spec and status; they hold no credentials). Per project, so disabling an addon
+# prunes its grant with its pipeline. Anyone who may create Pods or Jobs in addon-<name> (the Rollouts controller,
+# hub Argo CD, cluster admins) can run as verify-apps and so gets this read access too.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kargo-verify-{{ $p }}
+  namespace: {{ $argocd }}
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kargo-verify-{{ $p }}
+  namespace: {{ $argocd }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kargo-verify-{{ $p }}
+subjects:
+  - kind: ServiceAccount
+    name: verify-apps
+    namespace: {{ $p }}

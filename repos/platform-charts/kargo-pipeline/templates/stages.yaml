@@ -28,11 +28,33 @@ spec:
     spec:
       steps:
         - task: { name: render-{{ $.Values.kind }}, kind: ClusterPromotionTask }
-          as: render   # later steps (e.g. argocd-update) read outputs.render.commit = SHA on rendered/<stage>
+          as: render   # later steps read outputs.render.commit = SHA on rendered/<stage>
           vars:
             - { name: repoURL, value: {{ $.Values.repoURL | quote }} }
             {{- include (printf "kargo-pipeline.vars.%s" $.Values.kind) $ | nindent 12 }}
             - { name: env, value: {{ required "stages[].env is required" $s.env | quote }} }
             - { name: branch, value: {{ $s.name | quote }} }
             - { name: pr, value: {{ $s.pr | default false | toString | quote }} }
+        # verification can read Stage metadata but not promotion outputs: record the commit it has to find.
+        # quote() (here and in args below): Kargo turns an unquoted result that parses as a number (a SHA of digits
+        # and one e) into a number.
+        - uses: set-metadata
+          config:
+            updates:
+              - kind: Stage
+                name: {{ $s.name }}
+                values:
+                  renderedCommit: {{ `'${{ quote(outputs.render.commit) }}'` }}
+  # Freight is verified here (and may move on) once this stage's Applications are Synced + Healthy at renderedCommit
+  # for a streak of measurements (templates/verification.yaml). No Applications = passes, except on a canary stage.
+  verification:
+    analysisTemplates:
+      - name: argocd-apps
+    args:
+      - { name: env, value: {{ $s.env | quote }} }
+      - { name: ring, value: {{ include "kargo-pipeline.ring" $s }} }
+      # a canary stage gates the next one: without a canary cluster it must not pass by having nothing to check
+      - { name: requireApps, value: {{ eq (include "kargo-pipeline.ring" $s) "canary" | toString | quote }} }
+      - { name: branch, value: {{ $s.name | quote }} }
+      - { name: revision, value: {{ `'${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}'` }} }
 {{- end }}
