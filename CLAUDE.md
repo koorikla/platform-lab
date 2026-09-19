@@ -52,6 +52,10 @@ ships them → worker reconciles. Worker addon content: a `main` commit touching
 ## Hub access
 Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of container `mgmt-lb`>; bootstrap re-points it).
 UIs: `make ui` (port-forwards; CAPD nodes publish no host ports). Hub `Cluster` carries `Delete=false,Prune=false`.
+`make up` is resumable: `bootstrap/bootstrap.sh stage` prints the detected stage (fresh / bootstrap / hub-requested /
+hub-unpivoted / pivot-partial / pivoted / argo / orphan) and the steps left. `make down` never runs `kind delete`: Argo
+scaled to 0, workers deleted via CAPI and awaited, then containers labelled `io.x-k8s.kind.cluster=mgmt`.
+`make doctor` = preflight + health (read-only). Tests: `hack/tests/test_{boot,doctor}.sh` with fake tools (`fakebin.sh`).
 
 ## Verification status
 Booted end to end on Docker Desktop (2026-09-19): k3d bootstrap → CAPI creates hub → `clusterctl move` (clusterctl

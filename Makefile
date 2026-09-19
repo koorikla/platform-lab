@@ -5,11 +5,11 @@ CTX  := --context mgmt
 .PHONY: up down status ui argocd-password kargo-password set-repo kubeconfig lint test rendered-prune
 up:              ## bootstrap k3d -> CAPI builds hub "mgmt" -> clusterctl move -> Argo CD + root app
 	./bootstrap/bootstrap.sh
-down:            ## workers via CAPI, then the self-hosted hub's containers (it cannot delete itself)
-	-kubectl $(CTX) -n fleet delete clusters.cluster.x-k8s.io -l platform.lab/role=worker --timeout=10m
-	-k3d cluster delete bootstrap
-	-docker ps -aq --filter label=io.x-k8s.kind.cluster=mgmt | xargs docker rm -f
-	-kubectl config delete-context mgmt; kubectl config delete-cluster mgmt; kubectl config delete-user mgmt-admin
+down:            ## workers via CAPI (waits for their containers), then the hub's containers by CAPD label (FORCE=1: see bootstrap.sh)
+	./bootstrap/bootstrap.sh down
+.PHONY: doctor
+doctor:          ## preflight + lab health: docker disk/memory, tool versions, inotify, boot stage, hub, lab lock
+	./hack/doctor.sh
 status:
 	kubectl $(CTX) get applications -n argocd
 	kubectl $(CTX) get clusters.cluster.x-k8s.io,machines -n fleet
