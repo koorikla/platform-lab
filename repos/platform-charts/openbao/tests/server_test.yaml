@@ -1,43 +1,129 @@
-suite: OpenBao server on the hub - dev mode, API on NodePort 30820 (workers via mgmt-lb)
+suite: OpenBao server on the hub (#30) - raft on a PVC, static-key auto-unseal, API on NodePort 30820 (workers via mgmt-lb)
 release:
   name: openbao
   namespace: openbao
 templates:
+  - charts/openbao/templates/server-config-configmap.yaml   # the StatefulSet checksums it
   - charts/openbao/templates/server-statefulset.yaml
-  - templates/nodeport.yaml
   - charts/openbao/templates/server-service.yaml
+  - templates/nodeport.yaml
 tests:
-  - it: runs one server
+  - it: runs one server, rolled by config changes (auto-unseal makes a restart safe)
     template: charts/openbao/templates/server-statefulset.yaml
     asserts:
       - hasDocuments: { count: 1 }
       - isKind: { of: StatefulSet }
-
-  # no root token literal in git: dev mode generates one per start (kept in the pod's ~/.vault-token for postStart)
-  - it: sets no dev root token
-    template: charts/openbao/templates/server-statefulset.yaml
-    asserts:
-      - isNullOrEmpty: { path: 'spec.template.spec.containers[0].env[?(@.name == "VAULT_DEV_ROOT_TOKEN_ID")].value' }
-
-  - it: rolls the pod when postStart changes
-    template: charts/openbao/templates/server-statefulset.yaml
-    asserts:
+      - equal: { path: spec.replicas, value: 1 }
       - equal: { path: spec.updateStrategy.type, value: RollingUpdate }
+      - exists: { path: 'spec.template.metadata.annotations["openbao.hashicorp.com/config-checksum"]' }
 
-  # postStart seeds the roles the hub-writer store and the fleet-sync CronJob log in with
-  - it: seeds the hub-writer and fleet-sync roles in postStart
+  # hub default StorageClass (local-path): no storageClassName
+  - it: keeps raft data on a 1Gi PVC of the default StorageClass
     template: charts/openbao/templates/server-statefulset.yaml
     asserts:
-      - matchRegex: { path: 'spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]', pattern: 'role/hub-writer' }
-      - matchRegex: { path: 'spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]', pattern: 'role/fleet-sync' }
+      - equal:
+          path: spec.volumeClaimTemplates
+          value:
+            - apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata: { name: data }
+              spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 1Gi } } }
 
-  # values only, no KV data: every secret value is generated in-cluster (openchoreo_test.yaml)
-  - it: never writes KV data in postStart
+  - it: runs no dev mode and no postStart
     template: charts/openbao/templates/server-statefulset.yaml
     asserts:
-      - notMatchRegex:
-          path: 'spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]'
-          pattern: 'kv put|kv patch|/v1/secret/data'
+      - notMatchRegex: { path: 'spec.template.spec.containers[?(@.name == "openbao")].args[0]', pattern: 'server -dev' }
+      - notExists: { path: 'spec.template.spec.containers[?(@.name == "openbao")].env[?(@.name =~ /DEV/)]' }
+      - notExists: { path: 'spec.template.spec.containers[?(@.name == "openbao")].lifecycle.postStart' }
+
+  # the hub runs CPU-starved at times (#76)
+  - it: requests cpu and memory for the server and the configure sidecar
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - exists: { path: 'spec.template.spec.containers[?(@.name == "openbao")].resources.requests.cpu' }
+      - exists: { path: 'spec.template.spec.containers[?(@.name == "openbao")].resources.requests.memory' }
+      - exists: { path: 'spec.template.spec.containers[?(@.name == "configure")].resources.requests.cpu' }
+      - exists: { path: 'spec.template.spec.containers[?(@.name == "configure")].resources.requests.memory' }
+
+  - it: stores in raft on the data PVC mount
+    template: charts/openbao/templates/server-config-configmap.yaml
+    asserts:
+      - equal: { path: metadata.name, value: openbao-config }
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: '(?m)^storage "raft" \{\n +path += "/openbao/data"' }
+      # the chart's start script sed-replaces these words in the config: they must not appear by accident
+      - notMatchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: 'HOST_IP|POD_IP|HOSTNAME|API_ADDR|TRANSIT_ADDR|RAFT_ADDR' }
+
+  # lab stand-in for KMS: the key is a file the unseal-key init container fills, never a literal
+  - it: unseals with a static key read from the in-memory unseal volume
+    template: charts/openbao/templates/server-config-configmap.yaml
+    asserts:
+      - matchRegex:
+          path: 'data["extraconfig-from-values.hcl"]'
+          pattern: '(?m)^seal "static" \{\n( +.*\n)* +current_key += "file:///openbao/unseal/key"'
+      - matchRegex:
+          path: 'data["extraconfig-from-values.hcl"]'
+          pattern: '(?m)^seal "static" \{\n( +.*\n)* +current_key_id += "[A-Za-z0-9._-]+"'
+
+  - it: mounts the unseal key (in memory) and the configure ConfigMap read-only into the server
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - equal: { path: 'spec.template.spec.volumes[?(@.name == "unseal")].emptyDir.medium', value: Memory }
+      - equal: { path: 'spec.template.spec.volumes[?(@.name == "configure")].configMap.name', value: openbao-configure }
+      - equal:
+          path: 'spec.template.spec.containers[?(@.name == "openbao")].volumeMounts[?(@.name == "unseal")]'
+          value: { name: unseal, mountPath: /openbao/unseal, readOnly: true }
+      - equal:
+          path: 'spec.template.spec.containers[?(@.name == "openbao")].volumeMounts[?(@.name == "configure")]'
+          value: { name: configure, mountPath: /openbao/configure, readOnly: true }
+
+  # bootstrap only: enable + configure kubernetes auth, the configure policy (from the ConfigMap file) and its role bound
+  # to the server SA. Nothing may fail silently: a failed self-init refuses to unseal.
+  - it: self-initialises with exactly the four bootstrap requests
+    template: charts/openbao/templates/server-config-configmap.yaml
+    asserts:
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: 'path += "sys/auth/kubernetes"' }
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: 'path += "auth/kubernetes/config"' }
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: 'path += "sys/policies/acl/openbao-config"' }
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: 'path += "/openbao/configure/openbao-config.hcl"' }
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: 'path += "auth/kubernetes/role/openbao-config"' }
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: 'bound_service_account_names += "openbao"' }
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: 'bound_service_account_namespaces += "openbao"' }
+      # exactly four `request` blocks: at least 4, not 5
+      - matchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: '(?s)(\n *request "[^"]+".*){4}' }
+      - notMatchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: '(?s)(\n *request "[^"]+".*){5}' }
+      - notMatchRegex: { path: 'data["extraconfig-from-values.hcl"]', pattern: allow_failure }
+
+  # create-only: never overwrites; the Secret is outside Argo (no prune/cascade)
+  - it: generates the unseal key in an init container that writes the unseal volume and only reads the data PVC
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - equal: { path: 'spec.template.spec.initContainers[*].name', value: unseal-key }
+      - equal: { path: 'spec.template.spec.initContainers[0].command', value: [/bin/sh, -ec] }
+      # same kubectl image as fleet-sync (one pin)
+      - matchRegex: { path: 'spec.template.spec.initContainers[0].image', pattern: '^alpine/k8s:[0-9.]+@sha256:[0-9a-f]{64}$' }
+      - equal: { path: 'spec.template.spec.initContainers[0].env[?(@.name == "SECRET")].value', value: openbao-unseal-key }
+      - equal:
+          path: 'spec.template.spec.initContainers[0].volumeMounts[?(@.name == "unseal")]'
+          value: { name: unseal, mountPath: /openbao/unseal }
+      - equal:
+          path: 'spec.template.spec.initContainers[0].volumeMounts[?(@.name == "data")]'
+          value: { name: data, mountPath: /openbao/data, readOnly: true }
+      - notMatchRegex: { path: 'spec.template.spec.initContainers[0].args[0]', pattern: 'kubectl (apply|replace|patch|delete|edit)' }
+
+  # no readiness probe: a config error must not take the API out of the Service
+  - it: runs the configure sidecar from the server image, against the local API, as the server SA
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - equal: { path: 'spec.template.spec.containers[?(@.name == "configure")].image', value: quay.io/openbao/openbao:2.6.2 }
+      - equal: { path: 'spec.template.spec.containers[?(@.name == "openbao")].image', value: quay.io/openbao/openbao:2.6.2 }
+      - notExists: { path: 'spec.template.spec.containers[?(@.name == "configure")].readinessProbe' }
+      - matchRegex: { path: 'spec.template.spec.containers[?(@.name == "configure")].args[0]', pattern: 'sh /openbao/configure/configure\.sh' }
+      - equal:
+          path: 'spec.template.spec.containers[?(@.name == "configure")].volumeMounts[?(@.name == "configure")]'
+          value: { name: configure, mountPath: /openbao/configure, readOnly: true }
+      - equal: { path: 'spec.template.spec.containers[?(@.name == "configure")].env[?(@.name == "BAO_ADDR")].value', value: "http://127.0.0.1:8200" }
+      - equal: { path: 'spec.template.spec.containers[?(@.name == "configure")].env[?(@.name == "BAO_SA")].value', value: openbao }
+      - equal: { path: spec.template.spec.serviceAccountName, value: openbao }
 
   # only the API port is published (the chart's own Service also carries 8201, cluster-internal)
   - it: publishes only the API port as NodePort 30820
@@ -57,7 +143,7 @@ tests:
           value: { app.kubernetes.io/name: openbao, app.kubernetes.io/instance: openbao, component: server }
         template: charts/openbao/templates/server-statefulset.yaml
 
-  - it: the upstream chart's Services stay ClusterIP (one NodePort in the release)
+  - it: the upstream chart's Service stays ClusterIP (one NodePort in the release)
     template: charts/openbao/templates/server-service.yaml
     asserts:
       - notEqual: { path: spec.type, value: NodePort }

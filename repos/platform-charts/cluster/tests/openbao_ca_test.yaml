@@ -4,17 +4,22 @@ templates:
 values:
   - values/dev1.yaml
 tests:
+  # documents: 0+1 projector Role/RoleBinding (fleet), 2 ExternalSecret, 3+4 fleet-sync Role/RoleBinding (openbao)
   - it: lets the CA projector get exactly CAPI's <name>-ca in the fleet namespace
-    documentSelector: { path: kind, value: Role }
+    template: openbao-ca.yaml
+    documentIndex: 0
     asserts:
+      - isKind: { of: Role }
       - equal: { path: metadata.namespace, value: fleet }
       - equal:
           path: rules
           value: [{ apiGroups: [""], resources: [secrets], resourceNames: [dev1-ca], verbs: [get] }]
 
   - it: binds the projector ServiceAccount of the openbao namespace
-    documentSelector: { path: kind, value: RoleBinding }
+    template: openbao-ca.yaml
+    documentIndex: 1
     asserts:
+      - isKind: { of: RoleBinding }
       - equal: { path: metadata.namespace, value: fleet }
       - equal: { path: subjects, value: [{ kind: ServiceAccount, name: fleet-ca-projector, namespace: openbao }] }
 
@@ -33,6 +38,27 @@ tests:
     asserts:
       - equal: { path: spec.refreshInterval, value: 1m }
       - notExists: { path: spec.refreshPolicy }
+
+  # #30: the openbao namespace also holds the unseal key and generated sources; fleet-sync gets exactly this projection
+  - it: lets fleet-sync get exactly <name>-ca-public in the openbao namespace
+    template: openbao-ca.yaml
+    documentIndex: 3
+    asserts:
+      - isKind: { of: Role }
+      - equal: { path: metadata.name, value: fleet-sync-dev1 }
+      - equal: { path: metadata.namespace, value: openbao }
+      - equal:
+          path: rules
+          value: [{ apiGroups: [""], resources: [secrets], resourceNames: [dev1-ca-public], verbs: [get] }]
+
+  - it: binds that Role to the fleet-sync ServiceAccount
+    template: openbao-ca.yaml
+    documentIndex: 4
+    asserts:
+      - isKind: { of: RoleBinding }
+      - equal: { path: metadata.namespace, value: openbao }
+      - equal: { path: roleRef, value: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: fleet-sync-dev1 } }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: openbao-fleet-sync, namespace: openbao }] }
 
   - it: renders nothing for the hub
     values: [values/mgmt.yaml]

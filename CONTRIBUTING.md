@@ -98,7 +98,7 @@ script passes it), and builds chart dependencies first.
 
 Writing a repo-level test: `source "$(dirname "$0")/lib.sh"`, then `o=$(render <release> <chart> [helm args])` and
 `assert_yq "$o" '<yq expression>' '<expected>'` or `assert_fails <cmd>`. Assign `render` output to a variable first
-(an inline `$(render …)` swallows its exit code) and don't set your own `EXIT` trap. See `hack/tests/test_openbao.sh`
+(an inline `$(render …)` swallows its exit code) and don't set your own `EXIT` trap. See `hack/tests/test_gateway_api_crds.sh`
 for a minimal example.
 
 ## Recipes

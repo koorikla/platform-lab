@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
-# fleet-sync (hub CronJob): RBAC without fleet secrets, script shipped in the openbao chart ConfigMap; shellcheck, then
-# runs against stubbed kubectl/curl: DRY_RUN, one failing cluster, empty cluster list. #30: fleet-sync writes no policy
-# at all - every worker's ESO gets the one fixed, templated policy cluster-reader, and fleet-sync binds the login to
-# entity cluster-<name> (metadata cluster=<name>) instead. Every API path and parameter it sends must be granted by
-# the fleet-sync policy (ConfigMap openbao-configure, applied by the configure sidecar).
+# fleet-sync (hub CronJob): script shipped in the openbao chart ConfigMap; shellcheck, then runs against stubbed
+# kubectl/curl: DRY_RUN, one failing cluster, empty cluster list. #30: fleet-sync writes no policy at all - every
+# worker's ESO gets the one fixed, templated policy cluster-reader, and fleet-sync binds the login to entity
+# cluster-<name> (metadata cluster=<name>) instead. Every API path and parameter it sends must be granted by the
+# fleet-sync policy (ConfigMap openbao-configure, applied by the configure sidecar). CronJob, image and its own RBAC:
+# openbao chart unit tests (tests/fleet_sync_test.yaml); the per-worker grant: cluster chart (tests/openbao_ca_test.yaml).
 source "$(dirname "$0")/lib.sh"
 o=$(render openbao $charts/openbao -n openbao -f $config/addons/management/openbao/values.yaml)
 cj='select(.kind=="CronJob" and .metadata.name=="openbao-fleet-sync")'
-assert_yq "$o" "$cj | .spec.schedule" '*/2 * * * *'
-assert_yq "$o" "$cj | .spec.jobTemplate.spec.template.spec.serviceAccountName" openbao-fleet-sync
-assert_yq "$o" "$cj | .spec.jobTemplate.spec.template.spec.containers[0].image | test(\"^alpine/k8s:[0-9.]+@sha256:[0-9a-f]{64}\$\")" true
-# fleet namespace: CAPI Clusters only (kubeconfigs and CA keys live there); secrets only in openbao (<name>-ca-public)
-assert_yq "$o" '[select(.kind=="Role" and .metadata.namespace=="fleet") | .rules[] | .resources[]] | join(",")' clusters
-# ... and no Secret in openbao by chart: that namespace holds openbao-unseal-key and the openchoreo-* sources. The
-# cluster chart grants `get` on exactly <name>-ca-public per worker (test_cluster_identity.sh); the list of clusters
-# comes from CAPI Clusters, never from listing Secrets.
-sa_bindings='[select(.kind=="RoleBinding" or .kind=="ClusterRoleBinding") | select(.subjects | any_c(.name=="openbao-fleet-sync"))]'
+fs_sa=$(yq "$cj | .spec.jobTemplate.spec.template.spec.serviceAccountName" "$o")
+# no Secret in openbao by chart: that namespace holds openbao-unseal-key and the openchoreo-* sources. The cluster chart
+# grants `get` on exactly <name>-ca-public per worker, bound to this SA; the list of clusters comes from CAPI Clusters,
+# never from listing Secrets.
+sa_bindings="[select(.kind==\"RoleBinding\" or .kind==\"ClusterRoleBinding\") | select(.subjects | any_c(.name==\"$fs_sa\"))]"
 assert_yq "$o" "$sa_bindings | map(.metadata.namespace) | join(\",\")" fleet
+w=$(render dev1 $charts/cluster -f $config/fleet/clusters/dev/dev1.yaml)
+assert_yq "$w" "[select(.kind==\"RoleBinding\") | select(.subjects | any_c(.name==\"$fs_sa\")) | .metadata.namespace + \"/\" + .roleRef.name] | join(\",\")" \
+  "$(yq "$cj | .metadata.namespace" "$o")/fleet-sync-dev1"
 ! grep -qE 'kubectl (get|list) secrets?( |$).*(-l|--selector|-A|--all)' <<<"$(yq 'select(.kind=="ConfigMap" and .metadata.name=="openbao-fleet-sync") | .data["fleet-sync.sh"]' "$o")" ||
   fail "fleet-sync must get Secrets by name only"
-assert_yq "$o" 'select(.kind=="SecretStore" and .metadata.name=="fleet-ca") | .spec.provider.kubernetes.auth.serviceAccount.name' fleet-ca-projector
 
 script=$tmp/fleet-sync.sh
 yq 'select(.kind=="ConfigMap" and .metadata.name=="openbao-fleet-sync") | .data["fleet-sync.sh"]' "$o" > "$script"
