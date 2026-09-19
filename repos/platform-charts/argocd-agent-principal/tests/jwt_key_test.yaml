@@ -1,0 +1,41 @@
+suite: principal JWT key (#21) - minted by cert-manager (RSA PKCS#8), never self-generated
+release:
+  name: argocd-agent
+  namespace: argocd
+templates:
+  - templates/jwt-key.yaml
+  - charts/argocd-agent-principal/templates/principal-params-cm.yaml
+  - charts/argocd-agent-principal/templates/principal-deployment.yaml
+tests:
+  - it: reads the key from Secret argocd-agent-jwt instead of generating one
+    template: charts/argocd-agent-principal/templates/principal-params-cm.yaml
+    asserts:
+      - equal: { path: metadata.name, value: argocd-agent-principal-params }
+      - equal: { path: 'data["principal.jwt.allow-generate"]', value: "false" }
+      - equal: { path: 'data["principal.jwt.key-path"]', value: "" }
+      - equal: { path: 'data["principal.jwt.secret-name"]', value: argocd-agent-jwt }
+
+  # no config checksum in the chart: the pod template must change with the key source, or the old pod keeps its key.
+  # Bumpable (secret/argocd-agent-jwt@N) so a key rotation can roll the principal from git.
+  - it: names the key source in the pod template
+    template: charts/argocd-agent-principal/templates/principal-deployment.yaml
+    asserts:
+      - matchRegex:
+          path: 'spec.template.metadata.annotations["platform.lab/jwt-key"]'
+          pattern: '^secret/argocd-agent-jwt(@[0-9]+)?$'
+
+  # principal parses jwt.key with x509.ParsePKCS8PrivateKey and signs RS512; the key must survive renewals
+  - it: mints an RSA 4096 PKCS#8 key that renewals keep, into its own Secret
+    template: templates/jwt-key.yaml
+    documentSelector: { path: kind, value: Certificate }
+    asserts:
+      - equal: { path: spec.privateKey, value: { algorithm: RSA, size: 4096, encoding: PKCS8, rotationPolicy: Never } }
+      - equal: { path: spec.secretName, value: argocd-agent-jwt-key }
+
+  - it: copies tls.key to argocd-agent-jwt/jwt.key through the in-cluster store
+    template: templates/jwt-key.yaml
+    documentSelector: { path: kind, value: ExternalSecret }
+    asserts:
+      - equal: { path: spec.target.name, value: argocd-agent-jwt }
+      - equal: { path: spec.secretStoreRef, value: { kind: SecretStore, name: in-cluster } }
+      - equal: { path: spec.data, value: [{ secretKey: jwt.key, remoteRef: { key: argocd-agent-jwt-key, property: tls.key } }] }

@@ -74,12 +74,8 @@ for ff in $config/fleet/clusters/*/*.yaml $config/fleet/clusters/*/*.yaml.disabl
   [ "$(yq '.provider' "$ff")" = "$p" ] || fail "$ff: provider must be '$p' for class $class"
 done
 
-# capi-providers: cloud providers are opt-in; CAPA gets its clusterctl variables from configSecret
+# capi-providers: cloud providers are opt-in (chart unit tests: repos/platform-charts/capi-providers/tests/)
 c=$charts/capi-providers
-o=$(render capi-providers $c)
-assert_yq "$o" '[select(.kind=="InfrastructureProvider") | .metadata.name] | join(",")' docker
-o=$(render capi-providers $c --set infrastructure.aws.enabled=true)
-assert_yq "$o" 'select(.kind=="InfrastructureProvider" and .metadata.name=="aws") | .spec.configSecret.name' capa-variables
 # pins stay under their Renovate cap (the last line built on our CAPI core minor; reasons in renovate.json/values.yaml)
 for p in openstack:cluster-api-provider-openstack aws:cluster-api-provider-aws; do
   ver=$(yq ".infrastructure.${p%%:*}.version" $c/values.yaml); ver=${ver#v}

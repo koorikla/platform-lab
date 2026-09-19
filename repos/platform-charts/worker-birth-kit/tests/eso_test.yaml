@@ -1,0 +1,32 @@
+suite: ESO in its own namespace, a webhook that can't block the same install, and the CoreDNS override
+release:
+  name: worker-birth-kit
+  namespace: argocd
+values:
+  - values/dev1.yaml
+templates:
+  - templates/namespace.yaml
+  - templates/coredns-custom.yaml
+  - charts/external-secrets/templates/validatingwebhook.yaml
+tests:
+  # one release has one namespace (argocd): the chart creates ESO's
+  - it: creates the external-secrets namespace
+    template: templates/namespace.yaml
+    asserts:
+      - isKind: { of: Namespace }
+      - equal: { path: metadata.name, value: external-secrets }
+
+  # the store and the ExternalSecrets are created in the same install, before the webhook serves
+  - it: sets every ESO webhook to failurePolicy Ignore
+    template: charts/external-secrets/templates/validatingwebhook.yaml
+    asserts:
+      - hasDocuments: { count: 2 }
+      - equal: { path: 'webhooks[*].failurePolicy', value: Ignore }
+
+  # worker repo-servers clone from GitHub too (content equals the hub's: hack/tests/test_birth_kit.sh)
+  - it: overrides CoreDNS through k3s' coredns-custom in kube-system
+    template: templates/coredns-custom.yaml
+    asserts:
+      - equal: { path: metadata.namespace, value: kube-system }
+      - equal: { path: metadata.name, value: coredns-custom }
+      - exists: { path: 'data["external.server"]' }

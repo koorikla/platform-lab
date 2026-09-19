@@ -1,0 +1,71 @@
+suite: OpenChoreo cluster-agent identity (#14) - ClusterExternalSecrets into the data plane's namespace
+# The agent itself is the worker addon openchoreo-data-plane (Kargo); its identity comes from here. ClusterExternalSecrets,
+# not ExternalSecrets: that namespace belongs to Argo (addon namespace, CreateNamespace), and ESO creates the
+# ExternalSecrets once it exists. Contract with the addon: hack/tests/test_openchoreo_data_plane.sh
+release:
+  name: worker-birth-kit
+  namespace: argocd
+values:
+  - values/dev1.yaml
+templates:
+  - templates/openchoreo-agent-identity.yaml
+  - templates/hub-openbao.yaml
+  - charts/external-secrets/templates/deployment.yaml
+  - charts/external-secrets/templates/rbac.yaml
+tests:
+  - it: renders the two identity ClusterExternalSecrets, targeting only openchoreo-data-plane
+    template: templates/openchoreo-agent-identity.yaml
+    asserts:
+      - hasDocuments: { count: 2 }
+      - isKind: { of: ClusterExternalSecret }
+      - isAPIVersion: { of: external-secrets.io/v1 }
+      # namespaceSelectors on the name label (spec.namespaces is deprecated in ESO v2.10.0)
+      - equal: { path: spec.namespaceSelectors, value: [{ matchLabels: { kubernetes.io/metadata.name: openchoreo-data-plane } }] }
+      - notExists: { path: spec.namespaces }
+      - notExists: { path: spec.namespaceSelector }
+      - equal: { path: spec.externalSecretSpec.secretStoreRef, value: { kind: ClusterSecretStore, name: hub-openbao } }
+
+  # client cert (CN = cluster name, issued on the hub) + the plane ID next to it: one identity, one Secret. The agent reads
+  # plane-id through an env var (the upstream chart's extraEnvs only take secretKeyRef).
+  - it: pulls the client cert plus plane-id into a tls Secret cluster-agent-tls
+    template: templates/openchoreo-agent-identity.yaml
+    documentSelector: { path: metadata.name, value: openchoreo-agent-tls }
+    asserts:
+      - equal: { path: spec.externalSecretName, value: cluster-agent-tls }
+      - equal: { path: spec.externalSecretSpec.target.name, value: cluster-agent-tls }
+      - equal: { path: spec.externalSecretSpec.target.template.type, value: kubernetes.io/tls }
+      - equal: { path: spec.externalSecretSpec.target.template.mergePolicy, value: Merge }
+      - equal: { path: spec.externalSecretSpec.target.template.data, value: { plane-id: dev1 } }
+      - equal:
+          path: spec.externalSecretSpec.data
+          value:
+            - { secretKey: tls.crt, remoteRef: { key: clusters/dev1/openchoreo-agent, property: tls.crt } }
+            - { secretKey: tls.key, remoteRef: { key: clusters/dev1/openchoreo-agent, property: tls.key } }
+
+  # the upstream chart mounts clusterAgent.tls.serverCAConfigMap; ESO generic target, no template -> .data = fetched keys
+  - it: pulls the cluster-gateway's server CA into ConfigMap cluster-gateway-ca
+    template: templates/openchoreo-agent-identity.yaml
+    documentSelector: { path: metadata.name, value: openchoreo-gateway-ca }
+    asserts:
+      - equal: { path: spec.externalSecretName, value: cluster-gateway-ca }
+      - equal: { path: spec.externalSecretSpec.target.name, value: cluster-gateway-ca }
+      - equal: { path: spec.externalSecretSpec.target.manifest, value: { apiVersion: v1, kind: ConfigMap } }
+      - notExists: { path: spec.externalSecretSpec.target.template }
+      - equal:
+          path: spec.externalSecretSpec.data
+          value: [{ secretKey: ca.crt, remoteRef: { key: clusters/dev1/openchoreo-gateway-ca, property: ca.crt } }]
+
+  # generic targets (the ConfigMap above) are opt-in in ESO: flag + ConfigMap RBAC
+  - it: enables ESO generic targets
+    template: charts/external-secrets/templates/deployment.yaml
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: --unsafe-allow-generic-targets=true }
+
+  - it: lets the ESO controller manage ConfigMaps
+    template: charts/external-secrets/templates/rbac.yaml
+    documentIndex: 0            # the controller ClusterRole (its ClusterRoleBinding shares the name)
+    asserts:
+      - isKind: { of: ClusterRole }
+      - equal: { path: metadata.name, value: external-secrets-controller }
+      - contains: { path: rules, content: { apiGroups: [""], resources: [configmaps], verbs: [get, list, watch] } }
+      - contains: { path: rules, content: { apiGroups: [""], resources: [configmaps], verbs: [create, update, delete, patch] } }

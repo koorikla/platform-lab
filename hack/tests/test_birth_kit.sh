@@ -3,6 +3,8 @@
 # per-cluster OpenBao pull wiring), one Helm release per worker. CAAPH renders the HelmChartProxy valuesTemplate
 # (clusterName: {{ .Cluster.metadata.name }}) per cluster; offline we pass dev1. Object-by-object equivalence with the
 # four HelmChartProxies it replaced was checked in #52 (git history of this file).
+# What the chart renders for a cluster: its unit tests (repos/platform-charts/worker-birth-kit/tests/). Here: the
+# HelmChartProxy that installs it, whole-render sets, what it shares with the hub, its crds/ copies, release size.
 source "$(dirname "$0")/lib.sh"
 kit=$charts/worker-birth-kit
 hcps=$config/fleet/base/helmchartproxies.yaml
@@ -26,118 +28,38 @@ assert_yq "$hcps" "$h | .spec.options | [.skipCRDs, .install.includeCRDs, .takeO
 yq "$h | .spec.valuesTemplate" "$hcps" | sed 's/{{ \.Cluster\.metadata\.name }}/dev1/g' > "$tmp/values.yaml"
 o=$(render "$release" $kit -n "$ns" -f "$tmp/values.yaml")
 
+# the chart's unit tests use the same release name and namespace
+for s in $kit/tests/*_test.yaml; do
+  assert_yq "$s" '.release.name + "/" + .release.namespace' "$release/$ns"
+done
+
 # --- same versions as the hub (Renovate groups them)
 [ "$(dep $kit external-secrets)" = "$(dep $charts/external-secrets external-secrets)" ] || fail "ESO: birth kit != hub"
 [ "$(dep $kit argo-cd)" = "$(dep $charts/argo-cd argo-cd)" ] || fail "argo-cd: birth kit != hub"
 [ ! -e $config/addons/workers/external-secrets ] || fail "ESO is birth kit now: remove addons/workers/external-secrets"
 
-# --- clusterName: required, a DNS-1123 label (auth mount k8s-<name>, OpenBao path, agent identity)
-# fails_with <message> <cmd...>: the command must fail with that message (not just any render error)
-fails_with() {
-  local out
-  if out=$("${@:2}" 2>&1); then fail "line ${BASH_LINENO[0]}: expected failure: ${*:2}"; fi
-  grep -qF -- "$1" <<<"$out" || fail "line ${BASH_LINENO[0]}: want error '$1', got: $out"
-}
-fails_with 'clusterName is required' helm template "$release" $kit -n "$ns"
-fails_with 'clusterName "Dev_1" is not a DNS-1123 label' helm template "$release" $kit -n "$ns" --set clusterName=Dev_1
-long=$(printf 'a%.0s' {1..64})
-fails_with "clusterName \"$long\" is not a DNS-1123 label" helm template "$release" $kit -n "$ns" --set clusterName="$long"
-fails_with 'external-secrets.namespaceOverride is required' \
-  helm template "$release" $kit -n "$ns" --set clusterName=dev1 --set external-secrets.namespaceOverride=
-
-# --- OpenBao pull wiring (store + TokenReview binding + agent identity)
-css='select(.kind=="ClusterSecretStore")'
-assert_yq "$o" "$css | .metadata.name" hub-openbao
-assert_yq "$o" "$css | .spec.provider.vault.server" http://mgmt-lb:30820
-assert_yq "$o" "$css | .spec.provider.vault.auth.kubernetes.mountPath" k8s-dev1
-assert_yq "$o" "$css | .spec.provider.vault.auth.kubernetes.role" eso
-assert_yq "$o" "$css | .spec.provider.vault.auth.kubernetes.serviceAccountRef | .namespace + \"/\" + .name" \
-  external-secrets/external-secrets
-assert_yq "$o" "$css | .spec.conditions[0].namespaces | join(\",\")" argocd,openchoreo-data-plane
-assert_yq "$o" 'select(.kind=="ClusterRoleBinding" and .metadata.name=="external-secrets-openbao-tokenreview") | .roleRef.name' \
-  system:auth-delegator
-assert_yq "$o" 'select(.metadata.name=="external-secrets-openbao-tokenreview") | .subjects[0] | .namespace + "/" + .name' \
-  external-secrets/external-secrets
-# the store's ServiceAccount is the one ESO really runs as
-assert_yq "$o" 'select(.kind=="Deployment" and .metadata.name=="external-secrets") | .metadata.namespace + "/" + .spec.template.spec.serviceAccountName' \
-  external-secrets/external-secrets
-# agent identity: tls secret (type kubernetes.io/tls) + CA secret with ONLY ca.crt (the agent parses every key as a cert)
-es='select(.kind=="ExternalSecret" and .metadata.name=="argocd-agent-client-tls")'
-assert_yq "$o" "$es | .metadata.namespace" argocd
-assert_yq "$o" "$es | .spec.target.template.type" kubernetes.io/tls
-assert_yq "$o" "$es | [.spec.data[].secretKey] | sort | join(\",\")" tls.crt,tls.key
-assert_yq "$o" "$es | [.spec.data[].remoteRef.key] | unique | join(\",\")" clusters/dev1/argocd-agent
-ca='select(.kind=="ExternalSecret" and .metadata.name=="argocd-agent-ca")'
-assert_yq "$o" "$ca | [.spec.data[].secretKey] | join(\",\")" ca.crt
-assert_yq "$o" "$ca | .spec.data[0].remoteRef.key" clusters/dev1/argocd-agent
+# --- whole render (per-template unit tests can't see what another template adds)
+# every ExternalSecret / ClusterExternalSecret reads through the one per-cluster store
 assert_yq "$o" '[select(.kind=="ExternalSecret" or .kind=="ClusterExternalSecret") | (.spec.externalSecretSpec // .spec) |
   .secretStoreRef | .kind + "/" + .name] | unique | join(",")' ClusterSecretStore/hub-openbao
+# the one Namespace the kit creates is ESO's; openchoreo-data-plane belongs to Argo (addon, CreateNamespace)
+assert_yq "$o" '[select(.kind=="Namespace") | .metadata.name] | join(",")' external-secrets
+# argo-cd worker profile: exactly these workloads run in argocd (ApplicationSets and the UI live on the hub; any other
+# component the argo-cd subchart can add - commit-server, redis-ha, dex, notifications - must fail here)
+assert_yq "$o" '[select(.kind=="Deployment" or .kind=="StatefulSet") | select(.metadata.namespace=="argocd") | select(.spec.replicas != 0) | .metadata.name] | sort | join(",")' \
+  argocd-agent-agent-helm,argocd-application-controller,argocd-redis,argocd-repo-server
+# ...and the redis NetworkPolicy admits the agent's pods by the label the agent Deployment really sets
+assert_yq "$o" 'select(.kind=="NetworkPolicy" and .metadata.name=="argocd-redis-allow-agent") | .spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/name"]' \
+  "$(yq 'select(.kind=="Deployment" and .metadata.name=="argocd-agent-agent-helm") | .spec.template.metadata.labels["app.kubernetes.io/name"]' "$o")"
 
-# --- OpenChoreo cluster-agent identity (#14): the agent is the worker addon openchoreo-data-plane (Kargo), its identity
-# comes from here. ClusterExternalSecrets, not ExternalSecrets: the namespace belongs to Argo (addon namespace,
-# CreateNamespace), and ESO creates the ExternalSecrets once it exists. Contract with the addon: test_openchoreo_data_plane.sh
-ces() { echo "select(.kind==\"ClusterExternalSecret\" and .metadata.name==\"$1\")"; }
-assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .metadata.name] | sort | join(",")' \
-  openchoreo-agent-tls,openchoreo-gateway-ca
-assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .apiVersion] | unique | join(",")' external-secrets.io/v1
-# namespaceSelectors on the name label (spec.namespaces is deprecated in ESO v2.10.0)
-assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .spec.namespaceSelectors[].matchLabels["kubernetes.io/metadata.name"]] | unique | join(";")' \
-  openchoreo-data-plane
-assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .spec | has("namespaces") or has("namespaceSelector") or (.namespaceSelectors | length != 1)] | unique | join(",")' false
-assert_yq "$o" '[select(.kind=="Namespace") | .metadata.name] | join(",")' external-secrets   # not openchoreo-data-plane
-# client cert (CN = dev1, issued on the hub) + the plane ID next to it: one identity, one Secret. The agent reads
-# plane-id through an env var (the chart's extraEnvs only take secretKeyRef).
-t=$(ces openchoreo-agent-tls)
-assert_yq "$o" "$t | .spec.externalSecretName + \"/\" + .spec.externalSecretSpec.target.name" cluster-agent-tls/cluster-agent-tls
-assert_yq "$o" "$t | .spec.externalSecretSpec.target.template | .type + \" \" + .mergePolicy" 'kubernetes.io/tls Merge'
-assert_yq "$o" "$t | .spec.externalSecretSpec.target.template.data | to_entries | map(.key + \"=\" + .value) | join(\",\")" \
-  plane-id=dev1
-assert_yq "$o" "$t | [.spec.externalSecretSpec.data[] | .secretKey + \"<-\" + .remoteRef.key + \"#\" + .remoteRef.property] | join(\",\")" \
-  'tls.crt<-clusters/dev1/openchoreo-agent#tls.crt,tls.key<-clusters/dev1/openchoreo-agent#tls.key'
-# the cluster-gateway's server CA as a ConfigMap (the chart mounts clusterAgent.tls.serverCAConfigMap): ESO generic
-# target, no template -> ConfigMap .data = the fetched keys
-g=$(ces openchoreo-gateway-ca)
-assert_yq "$o" "$g | .spec.externalSecretName + \"/\" + .spec.externalSecretSpec.target.name" cluster-gateway-ca/cluster-gateway-ca
-assert_yq "$o" "$g | .spec.externalSecretSpec.target.manifest | .apiVersion + \"/\" + .kind" v1/ConfigMap
-assert_yq "$o" "$g | .spec.externalSecretSpec.target.template" null
-assert_yq "$o" "$g | [.spec.externalSecretSpec.data[] | .secretKey + \"<-\" + .remoteRef.key + \"#\" + .remoteRef.property] | join(\",\")" \
-  'ca.crt<-clusters/dev1/openchoreo-gateway-ca#ca.crt'
-# generic targets are opt-in in ESO (flag + ConfigMap RBAC)
-assert_yq "$o" 'select(.kind=="Deployment" and .metadata.name=="external-secrets") | .spec.template.spec.containers[0].args[] | select(. == "--unsafe-allow-generic-targets=true")' \
-  --unsafe-allow-generic-targets=true
-assert_yq "$o" '[select(.kind=="ClusterRole" and .metadata.name=="external-secrets-controller") | .rules[] | select(.resources[] == "configmaps") | .verbs[]] | unique | sort | join(",")' \
-  create,delete,get,list,patch,update,watch
-# worker repo-servers clone from GitHub too: same CoreDNS override as the hub
-assert_yq "$o" 'select(.kind=="ConfigMap" and .metadata.name=="coredns-custom") | .metadata.namespace' kube-system
+# --- worker repo-servers clone from GitHub too: same CoreDNS override as the hub
 [ "$(yq 'select(.kind=="ConfigMap" and .metadata.name=="coredns-custom") | .data["external.server"]' "$o")" = \
   "$(yq '.data["external.server"]' $config/fleet/base/hub-coredns.yaml)" ] ||
   fail "worker coredns-custom differs from fleet/base/hub-coredns.yaml"
 
-# --- argocd-agent: v0.10.0 from quay, managed mode, dials the hub LB, heartbeat below the LB idle timeout
-assert_yq "$o" 'select(.kind=="Deployment" and .metadata.name=="argocd-agent-agent-helm") | .spec.template.spec.containers[0].image' \
-  quay.io/argoprojlabs/argocd-agent:v0.10.0
-p='select(.kind=="ConfigMap" and .metadata.name=="argocd-agent-agent-helm-params") | .data'
-assert_yq "$o" "$p | [\"agent.mode\", \"agent.creds\", \"agent.server.address\", \"agent.server.port\", \"agent.heartbeat.interval\",
-  \"agent.redis.address\", \"agent.destination-based-mapping\", \"agent.create-namespace\", \"agent.allowed-namespaces\",
-  \"agent.label-selector\", \"agent.tls.secret-name\", \"agent.tls.root-ca-secret-name\"] as \$k | [\$k[] as \$x | .[\$x]] | join(\" \")" \
-  'managed mtls:any mgmt-lb 30443 30s argocd-redis:6379 true true * argocd-agent=true argocd-agent-client-tls argocd-agent-ca'
-# one hub host for both hub endpoints (agent -> principal, ESO -> OpenBao)
+# --- one hub host for both hub endpoints (agent -> principal, ESO -> OpenBao); subchart values can't reference it
 [ "$(yq '.["argocd-agent-agent"].server' $kit/values.yaml)" = "$(yq '.hub.host' $kit/values.yaml)" ] ||
   fail "argocd-agent-agent.server != hub.host"
-
-# --- argo-cd worker profile: application-controller + repo-server + redis only (ApplicationSets live on the hub)
-assert_yq "$o" '[select(.kind=="Deployment" and (.metadata.name=="argocd-server" or .metadata.name=="argocd-applicationset-controller")) | .spec.replicas] | join(",")' 0,0
-assert_yq "$o" '[select(.kind=="Deployment" or .kind=="StatefulSet") | select(.metadata.namespace=="argocd") | select(.spec.replicas != 0) | .metadata.name] | sort | join(",")' \
-  argocd-agent-agent-helm,argocd-application-controller,argocd-redis,argocd-repo-server
-# the argo-helm redis NetworkPolicy admits only Argo's own components: the agent needs redis too
-np='select(.kind=="NetworkPolicy" and .metadata.name=="argocd-redis-allow-agent")'
-assert_yq "$o" "$np | .spec.podSelector.matchLabels[\"app.kubernetes.io/name\"]" argocd-redis
-assert_yq "$o" "$np | .spec.ingress[0].from[0].podSelector.matchLabels[\"app.kubernetes.io/name\"]" \
-  "$(yq 'select(.kind=="Deployment" and .metadata.name=="argocd-agent-agent-helm") | .spec.template.metadata.labels["app.kubernetes.io/name"]' "$o")"
-
-# --- ESO in its own namespace; its webhook must not block the store/ExternalSecrets created in the same install
-assert_yq "$o" 'select(.kind=="Namespace") | .metadata.name' external-secrets
-assert_yq "$o" '[select(.kind=="ValidatingWebhookConfiguration") | .webhooks[].failurePolicy] | unique | join(",")' Ignore
 
 # --- crds/: bootstrap copies of the three ESO CRDs this chart instantiates. Helm installs crds/ before it maps the
 # templates (else: "no matches for kind ClusterSecretStore"); the ownership metadata lets the same install adopt them

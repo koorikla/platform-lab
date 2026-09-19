@@ -1,0 +1,120 @@
+suite: OpenChoreo registration (#13) - ClusterDataPlane + Environment + the agent's per-cluster CA chain
+# Rendered only when the hub serves the OpenChoreo CRDs (Argo passes the cluster's API versions to helm).
+templates:
+  - openchoreo.yaml
+values:
+  - values/dev1.yaml
+capabilities:
+  apiVersions:
+    - openchoreo.dev/v1alpha1/ClusterDataPlane
+    - openchoreo.dev/v1alpha1/Environment
+tests:
+  - it: renders nothing for the hub (the control plane, not a data plane)
+    values: [values/mgmt.yaml]
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  # invariant 1: name == planeID == cluster name; client CA from the hub-side Secret, never a key
+  - it: registers a cluster-scoped ClusterDataPlane named after the cluster
+    documentSelector: { path: kind, value: ClusterDataPlane }
+    asserts:
+      - isAPIVersion: { of: openchoreo.dev/v1alpha1 }
+      - equal: { path: metadata.name, value: dev1 }
+      - equal: { path: spec.planeID, value: dev1 }
+      - notExists: { path: metadata.namespace }
+      - equal:
+          path: spec.clusterAgent.clientCA
+          value: { secretKeyRef: { name: dev1-openchoreo-agent-ca, namespace: openchoreo-control-plane, key: ca.crt } }
+      # names a ClusterSecretStore ON THE WORKER (CRD description); none exists yet -> omitted (optional)
+      - notExists: { path: spec.secretStoreRef }
+
+  - it: carries the fleet labels (invariant 2)
+    documentSelector: { path: kind, value: ClusterDataPlane }
+    set: { ring: canary }
+    asserts:
+      - equal: { path: 'metadata.labels["platform.lab/env"]', value: dev }
+      - equal: { path: 'metadata.labels["platform.lab/ring"]', value: canary }
+
+  # the openchoreo-data-plane chart's Gateway: gateway-default, listener http, port 80
+  - it: routes ingress through the data plane's Gateway
+    documentSelector: { path: kind, value: ClusterDataPlane }
+    asserts:
+      - equal:
+          path: spec.gateway.ingress.external
+          value:
+            name: gateway-default
+            namespace: openchoreo-data-plane
+            http: { host: dev1.apps.lab.localhost, listenerName: http, port: 80 }
+
+  # dataPlaneRef is immutable: one Environment per cluster, in the org namespace
+  - it: creates Environment <name> in the org namespace, bound to that plane
+    documentSelector: { path: kind, value: Environment }
+    asserts:
+      - equal: { path: metadata.namespace, value: default }
+      - equal: { path: metadata.name, value: dev1 }
+      - equal: { path: spec.dataPlaneRef, value: { kind: ClusterDataPlane, name: dev1 } }
+      - equal: { path: spec.isProduction, value: false }
+      - equal: { path: 'metadata.annotations["openchoreo.dev/display-name"]', value: dev / dev1 }
+
+  - it: marks a prod cluster's Environment as production
+    documentSelector: { path: kind, value: Environment }
+    set: { name: prod1, env: prod }
+    asserts:
+      - equal: { path: spec.isProduction, value: true }
+      - equal: { path: spec.dataPlaneRef.name, value: prod1 }
+
+  # a shared CA would let any agent claim any plane (the gateway takes planeID from the URL, checks only the chain)
+  - it: keeps a per-cluster CA chain next to the cluster-gateway
+    asserts:
+      - equal: { path: metadata.namespace, value: openchoreo-control-plane }
+        documentSelector: { path: kind, value: Issuer, matchMany: true }
+      - equal: { path: metadata.namespace, value: openchoreo-control-plane }
+        documentSelector: { path: kind, value: Certificate, matchMany: true }
+      - equal: { path: spec.selfSigned, value: {} }
+        documentSelector: { path: metadata.name, value: dev1-openchoreo-agent-selfsigned }
+      - isKind: { of: Issuer }        # issuers: selfsigned (0) -> CA cert (1) -> CA issuer (2)
+        documentIndex: 2
+      - equal: { path: spec.ca.secretName, value: dev1-openchoreo-agent-ca }
+        documentIndex: 2
+
+  - it: mints the CA from the self-signed issuer
+    documentSelector: { path: spec.secretName, value: dev1-openchoreo-agent-ca }
+    asserts:
+      - isKind: { of: Certificate }
+      - equal: { path: spec.isCA, value: true }
+      - equal: { path: spec.issuerRef, value: { name: dev1-openchoreo-agent-selfsigned, kind: Issuer } }
+
+  # upstream cluster-agent loads its cert once at startup (agent.go:83): renew rarely; #14 restarts it on Secret change
+  - it: issues the agent's client cert (CN = cluster name) from that CA, renewed yearly
+    documentSelector: { path: metadata.name, value: dev1-openchoreo-agent-tls }
+    asserts:
+      - isKind: { of: Certificate }
+      - equal: { path: spec.commonName, value: dev1 }
+      - equal: { path: spec.usages, value: [client auth] }
+      - equal: { path: spec.issuerRef, value: { name: dev1-openchoreo-agent-ca, kind: Issuer } }
+      - notExists: { path: spec.isCA }
+      - equal: { path: spec.duration, value: 8760h }
+      - equal: { path: spec.renewBefore, value: 720h }
+
+  # pull model: the worker reads secret/clusters/<name>/* (#14); never a CA's key, no ca.crt with the client cert (that is
+  # the agent's own CA, easy to mistake for the gateway CA, which has its own path)
+  - it: pushes the client cert and the gateway's server CA to this cluster's OpenBao path, nothing else
+    documentSelector: { path: kind, value: PushSecret, matchMany: true }
+    asserts:
+      - equal: { path: spec.secretStoreRefs, value: [{ kind: ClusterSecretStore, name: openbao }] }
+      - equal: { path: metadata.namespace, value: openchoreo-control-plane }
+      - equal: { path: spec.selector.secret.name, value: dev1-openchoreo-agent-tls }
+        documentSelector: { path: metadata.name, value: dev1-openchoreo-agent }
+      - equal:
+          path: spec.data
+          value:
+            - match: { secretKey: tls.crt, remoteRef: { remoteKey: clusters/dev1/openchoreo-agent, property: tls.crt } }
+            - match: { secretKey: tls.key, remoteRef: { remoteKey: clusters/dev1/openchoreo-agent, property: tls.key } }
+        documentSelector: { path: metadata.name, value: dev1-openchoreo-agent }
+      - equal: { path: spec.selector.secret.name, value: cluster-gateway-ca }
+        documentSelector: { path: metadata.name, value: dev1-openchoreo-gateway-ca }
+      - equal:
+          path: spec.data
+          value: [{ match: { secretKey: ca.crt, remoteRef: { remoteKey: clusters/dev1/openchoreo-gateway-ca, property: ca.crt } } }]
+        documentSelector: { path: metadata.name, value: dev1-openchoreo-gateway-ca }
+      - hasDocuments: { count: 2, filterAware: true }

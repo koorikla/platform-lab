@@ -1,0 +1,51 @@
+suite: unseal-key RBAC and the configure ConfigMap (#30) - policies from git, nothing reads Secrets by namespace
+release:
+  name: openbao
+  namespace: openbao
+templates:
+  - templates/unseal-key.yaml
+  - templates/configure.yaml
+tests:
+  # the openbao namespace holds the unseal key and the openchoreo-* sources: get only by name
+  - it: lets the server SA get exactly the unseal-key Secret and create Secrets, nothing else
+    template: templates/unseal-key.yaml
+    asserts:
+      - equal:
+          path: rules
+          value:
+            - { apiGroups: [""], resources: [secrets], resourceNames: [openbao-unseal-key], verbs: [get] }
+            - { apiGroups: [""], resources: [secrets], verbs: [create] }
+        documentSelector: { path: kind, value: Role }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: openbao, namespace: openbao }] }
+        documentSelector: { path: kind, value: RoleBinding }
+
+  - it: ships configure.sh and every policy file in ConfigMap openbao-configure
+    template: templates/configure.yaml
+    documentSelector: { path: kind, value: ConfigMap }
+    asserts:
+      - equal: { path: metadata.name, value: openbao-configure }
+      - exists: { path: 'data["configure.sh"]' }
+      - exists: { path: 'data["openbao-config.hcl"]' }
+      - exists: { path: 'data["hub-writer.hcl"]' }
+      - exists: { path: 'data["fleet-sync.hcl"]' }
+      - exists: { path: 'data["cluster-reader.hcl"]' }
+      - exists: { path: 'data["openchoreo-reader.hcl"]' }
+      - exists: { path: 'data["openchoreo-seeder.hcl"]' }
+      - exists: { path: 'data["operator.hcl"]' }
+
+  # values belong in generators/PushSecrets; the hub's kubernetes auth config is self-init's alone (a wrong rewrite
+  # would lock configure's own login out)
+  - it: writes no KV data, and its policy can't rewrite auth/kubernetes/config (the calls it makes are checked in hack/tests/test_openbao.sh)
+    template: templates/configure.yaml
+    documentSelector: { path: kind, value: ConfigMap }
+    asserts:
+      - notMatchRegex: { path: 'data["configure.sh"]', pattern: 'kv put|kv patch|/v1/secret/data' }
+      - notMatchRegex: { path: 'data["openbao-config.hcl"]', pattern: 'auth/kubernetes/config' }
+
+  # humans: `make bao` (role operator); no pod runs as this SA
+  - it: renders the operator ServiceAccount
+    template: templates/configure.yaml
+    documentSelector: { path: kind, value: ServiceAccount }
+    asserts:
+      - equal: { path: metadata.name, value: openbao-operator }
+      - equal: { path: metadata.namespace, value: openbao }

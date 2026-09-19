@@ -34,6 +34,28 @@ chart c 0.1.0; g add -A; g commit -qm "new chart c"
 g rm -rq repos/platform-charts/b; g commit -qm "b deleted"
 bash "$check" main >/dev/null || fail "new/deleted charts must pass"
 
+# helm-unittest suites: not packaged when .helmignore says /tests/, so changing only them needs no bump...
+g checkout -q main; g merge -q --ff-only pr; g checkout -q pr   # start from a merged branch
+mkdir -p repos/platform-charts/a/tests; echo x > repos/platform-charts/a/tests/a_test.yaml
+printf '/tests/\n' > repos/platform-charts/a/.helmignore; g add -A; g commit -qm "a: tests + .helmignore"
+assert_fails bash "$check" main          # .helmignore itself is packaged
+sed -i.bak 's/^version: .*/version: 0.1.2/' repos/platform-charts/a/Chart.yaml && rm repos/platform-charts/a/Chart.yaml.bak
+g commit -qam "a bumped"
+bash "$check" main >/dev/null || fail "bumped chart must pass"
+g checkout -q main; g merge -q --ff-only pr; g checkout -q pr
+echo y > repos/platform-charts/a/tests/a_test.yaml; g commit -qam "a: tests only"
+bash "$check" main >/dev/null || fail "tests/ excluded by .helmignore: no bump needed"
+# ...only the root tests/: templates/tests/ (helm test hooks) is packaged
+mkdir -p repos/platform-charts/a/templates/tests; echo x > repos/platform-charts/a/templates/tests/t.yaml
+g add -A; g commit -qm "a: helm test hook"
+out=$(bash "$check" main 2>&1) && fail "templates/tests/ is packaged: bump needed"
+g reset -q --hard HEAD~1
+# ...but they are packaged without it
+mkdir -p repos/platform-charts/d/tests; echo x > repos/platform-charts/d/tests/d_test.yaml; g add -A; g commit -qm "d: tests"
+out=$(bash "$check" main 2>&1) && fail "tests/ of a chart without .helmignore are packaged: bump needed"
+grep -q 'repos/platform-charts/d' <<<"$out" || fail "failure must name chart d: $out"
+g reset -q --hard HEAD~1
+
 # base moved on after the branch point: only this branch's changes count (merge-base)
 g checkout -q main; echo z > repos/platform-charts/d/values.yaml; g commit -qam "d changed on main"
 g checkout -q pr

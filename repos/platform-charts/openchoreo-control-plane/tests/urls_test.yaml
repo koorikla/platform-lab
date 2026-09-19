@@ -1,0 +1,42 @@
+suite: upstream k3d hostnames/ports - one plain-http URL on :8080 for browsers (make ui) and pods (CoreDNS rewrite)
+# Values = upstream install/k3d/multi-cluster/values-cp.yaml @ v1.2.5. Thunder's side of the OIDC contract (issuer,
+# registered client and redirect): hack/tests/test_openchoreo_control_plane.sh.
+release:
+  name: openchoreo-control-plane
+  namespace: openchoreo-control-plane
+templates:
+  - charts/openchoreo-control-plane/templates/backstage/*.yaml
+  - charts/openchoreo-control-plane/templates/openchoreo-api/*.yaml
+tests:
+  - it: routes openchoreo.localhost to Backstage and api.openchoreo.localhost to the API
+    asserts:
+      - equal: { path: spec.hostnames, value: [openchoreo.localhost] }
+        template: charts/openchoreo-control-plane/templates/backstage/httproute.yaml
+      - equal: { path: spec.hostnames, value: [api.openchoreo.localhost] }
+        template: charts/openchoreo-control-plane/templates/openchoreo-api/httproute.yaml
+
+  - it: serves Backstage at http://openchoreo.localhost:8080 and logs in through Thunder
+    template: charts/openchoreo-control-plane/templates/backstage/deployment.yaml
+    asserts:
+      - equal: { path: 'spec.template.spec.containers[0].env[?(@.name == "BACKSTAGE_BASE_URL")].value', value: "http://openchoreo.localhost:8080" }
+      - equal:
+          path: 'spec.template.spec.containers[0].env[?(@.name == "OPENCHOREO_AUTH_AUTHORIZATION_URL")].value'
+          value: "http://thunder.openchoreo.localhost:8080/oauth2/authorize"
+      - equal:
+          path: 'spec.template.spec.containers[0].env[?(@.name == "OPENCHOREO_AUTH_TOKEN_URL")].value'
+          value: "http://thunder.openchoreo.localhost:8080/oauth2/token"
+      - equal: { path: 'spec.template.spec.containers[0].env[?(@.name == "OPENCHOREO_AUTH_CLIENT_ID")].value', value: openchoreo-backstage-client }
+      # generated once in-cluster, same OpenBao key Thunder registers (backstage_secrets_test.yaml)
+      - equal:
+          path: 'spec.template.spec.containers[0].env[?(@.name == "OPENCHOREO_AUTH_CLIENT_SECRET")].valueFrom.secretKeyRef'
+          value: { name: backstage-secrets, key: client-secret }
+
+  - it: publishes the API at http://api.openchoreo.localhost:8080 and trusts Thunder's tokens
+    template: charts/openchoreo-control-plane/templates/openchoreo-api/configmap.yaml
+    asserts:
+      - equal: { path: metadata.name, value: openchoreo-api-config }
+      - matchRegex: { path: 'data["config.yaml"]', pattern: '(?m)^  public_url: "http://api\.openchoreo\.localhost:8080"$' }
+      - matchRegex: { path: 'data["config.yaml"]', pattern: '(?m)^    issuer: "http://thunder\.openchoreo\.localhost:8080"$' }
+      - matchRegex: { path: 'data["config.yaml"]', pattern: '(?m)^    jwks_url: "http://thunder\.openchoreo\.localhost:8080/oauth2/jwks"$' }
+      - matchRegex: { path: 'data["config.yaml"]', pattern: '(?m)^    authorization_endpoint: "http://thunder\.openchoreo\.localhost:8080/oauth2/authorize"$' }
+      - matchRegex: { path: 'data["config.yaml"]', pattern: '(?m)^    token_endpoint: "http://thunder\.openchoreo\.localhost:8080/oauth2/token"$' }

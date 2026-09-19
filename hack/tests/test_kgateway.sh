@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
 # kgateway (OpenChoreo prerequisite) on the hub and on workers, at the version and in the namespaces OpenChoreo v1.2.5
-# installs it (install/k3d/k3d-prerequisites.sh, install/k3d/multi-cluster/README.md at v1.2.5).
+# installs it (install/k3d/k3d-prerequisites.sh, install/k3d/multi-cluster/README.md at v1.2.5). What the chart
+# renders: its unit tests (repos/platform-charts/kgateway/tests/). Here: the pins, the addons, and the hub/worker
+# renders with their config values.
 source "$(dirname "$0")/lib.sh"
 want_crds='backendconfigpolicies,backends,directresponses,gatewayextensions,gatewayparameters,httplistenerpolicies,listenerpolicies,trafficpolicies'
-# upstream pins both charts to the same release
+# upstream pins both charts to the same release (the CRD chart's version shows in no rendered object)
 assert_yq $charts/kgateway/Chart.yaml '[.dependencies[] | .name + "@" + .version] | join(",")' 'kgateway-crds@v2.3.1,kgateway@v2.3.1'
 
-check() {   # check <render> <namespace>
-  # only gateway.kgateway.dev CRDs: Gateway API CRDs belong to the gateway-api-crds addon (and its safe-upgrades VAP)
+check() {   # check <render> <namespace>: kgateway's CRDs, everything namespaced in the addon namespace
   assert_yq "$1" '[select(.kind=="CustomResourceDefinition") | .spec.names.plural] | sort | join(",")' "$want_crds"
-  assert_yq "$1" '[select(.kind=="CustomResourceDefinition") | .spec.group] | unique | join(",")' gateway.kgateway.dev
-  # one controller, upstream image at the pinned tag
-  assert_yq "$1" '[select(.kind=="Deployment") | .metadata.name] | join(",")' kgateway
-  assert_yq "$1" 'select(.kind=="Deployment") | .spec.template.spec.containers[0].image' \
-    cr.kgateway.dev/kgateway-dev/kgateway:v2.3.1
-  # everything namespaced lands in the addon namespace
   assert_yq "$1" "[select(.metadata.namespace != null) | .metadata.namespace] | unique | join(\",\")" "$2"
-  # GatewayClass kgateway is created by the controller at startup, not by the chart: nothing for Argo to fight over
-  assert_yq "$1" '[select(.kind=="GatewayClass")] | length' 0
 }
 
 # hub: kgateway next to the OpenChoreo control plane, like upstream

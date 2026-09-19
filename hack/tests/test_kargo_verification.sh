@@ -2,86 +2,21 @@
 # Kargo verification (#26): every addon stage runs AnalysisTemplate argocd-apps after a promotion. Its Job checks that
 # the stage's hub Applications (worker-addons labels addon + env + ring) are Synced + Healthy at the promoted rendered
 # commit (or a later commit of rendered/<stage>); Freight moves on only once that held for a few measurements.
+# Template, Job, args and RBAC: kargo-pipeline unit tests (tests/verification_test.yaml). Here: what the Job shares
+# with the rest of the repo (image pin, the repo and labels worker-addons uses), then verify-apps.sh against stubs.
 source "$(dirname "$0")/lib.sh"
-stage() { echo "select(.kind==\"Stage\" and .metadata.name==\"$1\")"; }
-arg() { echo "$(stage "$1") | .spec.verification.args[] | select(.name==\"$2\") | .value"; }
 o=$(render p $charts/kargo-pipeline --set kind=addon --set name=cert-manager)
-at='select(.kind=="AnalysisTemplate")'
-job="$at | .spec.metrics[0].provider.job.spec"
-
-# every stage verifies with the project's template; args say which Applications and which commit
-assert_yq "$o" '[select(.kind=="Stage") | .spec.verification.analysisTemplates | map(.name) | join(",")] | unique | join(";")' argocd-apps
-assert_yq "$o" "$at | .metadata.namespace" addon-cert-manager
-for s in dev-canary dev nit sit prod; do
-  assert_yq "$o" "$(arg $s branch)" "$s"
-  assert_yq "$o" "$(arg $s env)" "$(yq ".stages[] | select(.name==\"$s\") | .env" $charts/kargo-pipeline/values.yaml)"
-done
-# ring: same rule as the worker-addons appset (a <env>-canary branch <=> ring canary)
-assert_yq "$o" "$(arg dev-canary ring)" canary
-assert_yq "$o" "[$(arg dev ring), $(arg nit ring), $(arg sit ring), $(arg prod ring)] | join(\",\")" stable,stable,stable,stable
-# the promoted rendered commit: the render task's output, recorded on the Stage by the step after it (verification
-# can't read promotion outputs, only Stage metadata)
-assert_yq "$o" "[select(.kind==\"Stage\") | .spec.promotionTemplate.spec.steps[1]] | map(.uses) | unique | join(\",\")" set-metadata
-for s in dev-canary prod; do
-  assert_yq "$o" "$(stage $s) | .spec.promotionTemplate.spec.steps[1].config.updates[0] | .kind + \"/\" + .name" "Stage/$s"
-  # quote(): a SHA of digits (and one e) would otherwise come back from Kargo's evaluator as a number
-  assert_yq "$o" "$(stage $s) | .spec.promotionTemplate.spec.steps[1].config.updates[0].values.renderedCommit" '${{ quote(outputs.render.commit) }}'
-done
-assert_yq "$o" "$(arg dev revision)" '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}'
-# an empty canary ring must not open the gate for the next stage; other empty stages pass
-assert_yq "$o" "$(arg dev-canary requireApps)" true
-assert_yq "$o" "[$(arg dev requireApps), $(arg nit requireApps), $(arg sit requireApps), $(arg prod requireApps)]
-  | join(\",\")" false,false,false,false
-# Kargo v1.11.4 silently drops a Stage arg the template doesn't declare, and fails the run for a declared arg without
-# a value: both lists must be equal
-assert_yq "$o" "$at | .spec.args | map(.name) | sort | join(\",\")" \
-  "$(yq eval-all "$(stage dev) | .spec.verification.args | map(.name) | sort | join(\",\")" "$o")"
-
-# measurement = one Job; wait for convergence, then require consecutive successes; give up after count
-m="$at | .spec.metrics[0]"
-assert_yq "$o" "$m | .failureLimit" -1
-assert_yq "$o" "$m | .consecutiveSuccessLimit > 1" true
-assert_yq "$o" "$m | .count > .consecutiveSuccessLimit" true
-assert_yq "$o" "$m | .interval | test(\"^[0-9]+[sm]\$\")" true
-assert_yq "$o" "$job | .backoffLimit" 0
-assert_yq "$o" "$job | .activeDeadlineSeconds > 0" true
-assert_yq "$o" "$job | .template.spec.serviceAccountName" verify-apps
-# same kubectl+git+jq image as fleet-sync (one pin for Renovate's kubernetes group)
-assert_yq "$o" "$job | .template.spec.containers[0].image" \
-  "$(yq .fleetSync.image $charts/openbao/values.yaml)"
+job='select(.kind=="AnalysisTemplate") | .spec.metrics[0].provider.job.spec'
 envv() { echo "$job | .template.spec.containers[0].env[] | select(.name==\"$1\") | .value"; }
-assert_yq "$o" "$(envv ADDON)" cert-manager
-assert_yq "$o" "$(envv ARGOCD_NS)" argocd
-assert_yq "$o" "$(envv REPO_URL)" https://github.com/koorikla/platform-lab.git
-for a in env:ENV ring:RING branch:BRANCH revision:REVISION requireApps:REQUIRE_APPS; do
-  assert_yq "$o" "$(envv "${a#*:}")" "{{args.${a%%:*}}}"
-done
-# every declared arg reaches the Job
-assert_yq "$o" "[$at | .spec.args[].name | \"{{args.\" + . + \"}}\"] - [$job | .template.spec.containers[0].env[].value] | length" 0
+# same kubectl+git+jq image as fleet-sync (one pin for Renovate's kubernetes group)
+assert_yq "$o" "$job | .template.spec.containers[0].image" "$(yq .fleetSync.image $charts/openbao/values.yaml)"
 # the rendered branches the Job reads are the ones Argo syncs (worker-addons appset source)
 assert_yq "$o" "$(envv REPO_URL)" "$(yq .spec.template.spec.source.repoURL $config/argocd/appset-worker-addons.yaml)"
-assert_yq "$o" "$job | .template.spec.securityContext.runAsNonRoot" true
-assert_yq "$o" "$job | .template.spec.containers[0].securityContext.readOnlyRootFilesystem" true
-
-# least privilege: the Job's SA may only read Applications in argocd
-assert_yq "$o" 'select(.kind=="ServiceAccount") | .metadata.namespace + "/" + .metadata.name' addon-cert-manager/verify-apps
-assert_yq "$o" '[select(.kind=="Role" or .kind=="ClusterRole" or .kind=="RoleBinding" or .kind=="ClusterRoleBinding") | .kind + ":" + .metadata.namespace] | join(",")' Role:argocd,RoleBinding:argocd
-assert_yq "$o" 'select(.kind=="Role") | .rules | map(.apiGroups[] + "/" + (.resources | join("+")) + ":" + (.verbs | join("+"))) | join(",")' \
-  argoproj.io/applications:get+list
-assert_yq "$o" 'select(.kind=="RoleBinding") | .roleRef.kind + "/" + .roleRef.name' \
-  "Role/$(yq eval-all 'select(.kind=="Role") | .metadata.name' "$o")"
-assert_yq "$o" 'select(.kind=="RoleBinding") | .subjects | map(.kind + ":" + .namespace + "/" + .name) | join(",")' \
-  ServiceAccount:addon-cert-manager/verify-apps
-# two addons don't fight over one RBAC object in argocd
-k=$(render p $charts/kargo-pipeline --set name=kgateway)
-[ "$(yq eval-all 'select(.kind=="Role") | .metadata.name' "$k")" != "$(yq eval-all 'select(.kind=="Role") | .metadata.name' "$o")" ] ||
-  fail "Role name in argocd must be per project"
 
 # the selector's labels are exactly what worker-addons stamps on each Application
 script=$tmp/verify-apps.sh
 yq eval-all 'select(.kind=="ConfigMap" and .metadata.name=="verify-apps") | .data["verify-apps.sh"]' "$o" > "$script"
 [ -s "$script" ] || fail "verify-apps.sh missing from the ConfigMap"
-assert_yq "$o" "$job | .template.spec.volumes[] | select(.name==\"script\") | .configMap.name" verify-apps
 for l in addon env ring; do
   [ "$(yq ".spec.template.metadata.labels | has(\"platform.lab/$l\")" $config/argocd/appset-worker-addons.yaml)" = true ] ||
     fail "worker-addons Applications lack label platform.lab/$l"

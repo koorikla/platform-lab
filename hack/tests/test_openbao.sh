@@ -1,73 +1,24 @@
 #!/usr/bin/env bash
 # OpenBao on the hub (#30): raft on a PVC, static-key auto-unseal (key generated in-cluster into a hub Secret by the
 # unseal-key init container), declarative self-init (bootstrap only, root token revoked, no recovery keys) and the
-# `configure` sidecar that applies the rest idempotently. API on NodePort 30820 (workers reach it via mgmt-lb),
-# hub-writer ClusterSecretStore. The init and configure scripts run here against stubbed kubectl/bao.
+# `configure` sidecar that applies the rest idempotently. API on NodePort 30820 (workers reach it via mgmt-lb).
+# What the chart renders (server, seal, self-init, init container, sidecar, RBAC, stores): its unit tests
+# (repos/platform-charts/openbao/tests/). Here: the hub render and the hub LB, a render-wide RBAC rule, and the init
+# and configure scripts run against stubbed kubectl/bao; the Makefile's operator targets.
 source "$(dirname "$0")/lib.sh"
 o=$(render openbao $charts/openbao -n openbao -f $config/addons/management/openbao/values.yaml)
 sts='select(.kind=="StatefulSet")'
-assert_yq "$o" "[$sts] | length" 1
-# only the API port is published (the chart Service also carries 8201, cluster-internal)
-assert_yq "$o" '[select(.kind=="Service" and .spec.type=="NodePort")] | length' 1
-assert_yq "$o" 'select(.kind=="Service" and .spec.type=="NodePort") | [.spec.ports[] | .port + ":" + .nodePort] | join(",")' 8200:30820
-assert_yq "$o" 'select(.kind=="Service" and .spec.type=="NodePort") | .spec.selector | to_entries | map(.key + "=" + .value) | sort | join(",")' \
-  "$(yq "$sts | .spec.selector.matchLabels | to_entries | map(.key + \"=\" + .value) | sort | join(\",\")" "$o")"
-# ... and mgmt-lb forwards 30820 to it
+# with the hub's values: one NodePort, and mgmt-lb forwards exactly that port to it
+np=$(yq 'select(.kind=="Service" and .spec.type=="NodePort") | .spec.ports[0].nodePort' "$o")
+[ "$np" = 30820 ] || fail "OpenBao NodePort with hub values = '$np', want 30820"
 lb=$(yq '.data.value' $config/fleet/base/hub-lb.yaml)
-grep -qE '^ *bind \*:30820$' <<<"$lb" || fail "hub-lb.yaml: no frontend bound to :30820"
-grep -qF 'JoinHostPort $backend.Address "30820"' <<<"$lb" || fail "hub-lb.yaml: no backend on node port 30820"
-# openbao = hub-writer (argocd only); default = OpenChoreo's read-only store (test_openchoreo_secrets.sh)
+grep -qE "^ *bind \*:$np\$" <<<"$lb" || fail "hub-lb.yaml: no frontend bound to :$np"
+grep -qF "JoinHostPort \$backend.Address \"$np\"" <<<"$lb" || fail "hub-lb.yaml: no backend on node port $np"
+# whole render (per-template unit tests can't see what another template adds): exactly one NodePort Service and exactly
+# the two ClusterSecretStores - openbao (hub writer) and default (OpenChoreo, read-only)
+assert_yq "$o" '[select(.kind=="Service" and .spec.type=="NodePort")] | length' 1
 assert_yq "$o" '[select(.kind=="ClusterSecretStore") | .metadata.name] | sort | join(",")' default,openbao
-assert_yq "$o" 'select(.kind=="ClusterSecretStore" and .metadata.name=="openbao") | .spec.provider.vault.server' http://openbao.openbao.svc:8200
-assert_yq "$o" 'select(.kind=="ClusterSecretStore" and .metadata.name=="openbao") | .spec.provider.vault.auth.kubernetes.role' hub-writer
 
-# --- server: no dev mode, no postStart; data on a PVC (hub default StorageClass = local-path); auto-unseal lets a
-#     config change roll the pod (RollingUpdate + config checksum)
-srv="$sts | .spec.template.spec.containers[] | select(.name==\"openbao\")"
-assert_yq "$o" "$srv | .args | join(\" \") | test(\"server -dev\")" false
-assert_yq "$o" "[$srv | .env[] | select(.name | test(\"DEV\"))] | length" 0
-assert_yq "$o" "$srv | .lifecycle.postStart" null
-# the hub runs CPU-starved at times (#76): every OpenBao container asks for a modest share
-for c in openbao configure; do
-  assert_yq "$o" "$sts | .spec.template.spec.containers[] | select(.name==\"$c\") | .resources.requests | keys | sort | join(\",\")" cpu,memory
-done
-assert_yq "$o" "$sts | .spec.updateStrategy.type" RollingUpdate
-assert_yq "$o" "$sts | .spec.replicas" 1
-assert_yq "$o" "$sts | .spec.template.metadata.annotations | has(\"openbao.hashicorp.com/config-checksum\")" true
-assert_yq "$o" "$sts | .spec.volumeClaimTemplates | map(.metadata.name + \":\" + .spec.resources.requests.storage) | join(\",\")" data:1Gi
-assert_yq "$o" "$sts | .spec.volumeClaimTemplates[0].spec.storageClassName" null
-cfg=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="openbao-config") | .data["extraconfig-from-values.hcl"]' "$o")
-[ -n "$cfg" ] || fail "no server config (ConfigMap openbao-config)"
-grep -qE '^storage "raft" \{' <<<"$cfg" || fail "server config: storage must be raft: $cfg"
-grep -qE '^ *path += "/openbao/data"' <<<"$cfg" || fail "raft must live on the data PVC mount"
-# the chart's start script sed-replaces these words in the config: they must not appear by accident
-! grep -qE 'HOST_IP|POD_IP|HOSTNAME|API_ADDR|TRANSIT_ADDR|RAFT_ADDR' <<<"$cfg" || fail "server config contains a word the chart's start script rewrites"
-
-# --- static seal: key file from the in-memory volume the init container fills, never a literal
-seal=$(awk '/^seal "static"/ {f=1} f {print} f && /^}/ {exit}' <<<"$cfg")
-[ -n "$seal" ] || fail "server config: no seal \"static\" stanza"
-grep -qE 'current_key += "file:///openbao/unseal/key"' <<<"$seal" || fail "static seal must read the key file: $seal"
-grep -qE 'current_key_id += "[A-Za-z0-9._-]+"' <<<"$seal" || fail "static seal needs current_key_id: $seal"
-vol() { yq "$sts | .spec.template.spec.volumes[] | select(.name==\"$1\") | $2" "$o"; }
-[ "$(vol unseal .emptyDir.medium)" = Memory ] || fail "unseal volume must be an in-memory emptyDir"
-[ "$(vol configure .configMap.name)" = openbao-configure ] || fail "configure volume must be ConfigMap openbao-configure"
-mnt() { yq "$sts | .spec.template.spec.$1[] | select(.name==\"$2\") | .volumeMounts[] | select(.name==\"$3\") | .mountPath + \":\" + (.readOnly // false)" "$o"; }
-[ "$(mnt containers openbao unseal)" = /openbao/unseal:true ] || fail "server: unseal volume at /openbao/unseal, read-only"
-[ "$(mnt containers openbao configure)" = /openbao/configure:true ] || fail "server: configure volume (self-init reads its policy)"
-
-# --- self-init: bootstrap only - the configure login and nothing else (a failed self-init refuses to unseal)
-init=$(awk '/^initialize "/ {f=1} f {print}' <<<"$cfg")
-[ -n "$init" ] || fail "server config: no initialize stanza"
-assert_req() { grep -qE "$1" <<<"$init" || fail "self-init: $2"; }
-assert_req 'path += "sys/auth/kubernetes"' "must enable kubernetes auth"
-assert_req 'path += "auth/kubernetes/config"' "must configure kubernetes auth"
-assert_req 'path += "sys/policies/acl/openbao-config"' "must write policy openbao-config"
-assert_req 'path += "/openbao/configure/openbao-config.hcl"' "policy openbao-config must come from the configure ConfigMap (one source)"
-assert_req 'path += "auth/kubernetes/role/openbao-config"' "must create role openbao-config"
-assert_req 'bound_service_account_names += "openbao"' "role openbao-config: server SA only"
-assert_req 'bound_service_account_namespaces += "openbao"' "role openbao-config: openbao namespace only"
-[ "$(grep -cE '^ *request "' <<<"$init")" = 4 ] || fail "self-init must stay the 4 bootstrap requests: $init"
-! grep -q allow_failure <<<"$init" || fail "self-init bootstrap requests must not be allowed to fail"
 cm=$tmp/configure; mkdir -p "$cm"
 for k in $(yq 'select(.kind=="ConfigMap" and .metadata.name=="openbao-configure") | .data | keys | .[]' "$o"); do
   yq "select(.kind==\"ConfigMap\" and .metadata.name==\"openbao-configure\") | .data[\"$k\"]" "$o" > "$cm/$k"
@@ -77,27 +28,15 @@ done
 
 # --- unseal-key init container: create-only, never overwrites; the Secret is outside Argo (no prune/cascade)
 ic="$sts | .spec.template.spec.initContainers[] | select(.name==\"unseal-key\")"
-assert_yq "$o" "[$ic] | length" 1
+# same kubectl image as fleet-sync (one pin for Renovate)
 assert_yq "$o" "$ic | .image" "$(yq '.fleetSync.image' $charts/openbao/values.yaml)"
-[ "$(mnt initContainers unseal-key unseal)" = /openbao/unseal:false ] || fail "init: writes the unseal volume"
-[ "$(mnt initContainers unseal-key data)" = /openbao/data:true ] || fail "init: reads the data PVC (refuses a new key over existing data)"
 ukey=$tmp/unseal-key.sh; yq "$ic | .args[0]" "$o" > "$ukey"
-[ "$(yq "$ic | .command | join(\" \")" "$o")" = "/bin/sh -ec" ] || fail "init: command must be /bin/sh -ec"
 if command -v shellcheck >/dev/null; then shellcheck -s sh "$ukey" || fail "shellcheck unseal-key"; fi
-! grep -qE 'kubectl (apply|replace|patch|delete|edit)' "$ukey" || fail "unseal-key must only get/create: $(cat "$ukey")"
-secret=$(yq "$ic | .env[] | select(.name==\"SECRET\") | .value" "$o")
-[ "$secret" = openbao-unseal-key ] || fail "init: SECRET env = $secret"
-# nothing in this chart may read Secrets in openbao by namespace (unseal key, openchoreo-* sources): every get/list/
+# nothing in the render may read Secrets in openbao by namespace (unseal key, openchoreo-* sources): every get/list/
 # watch rule on secrets is name-scoped
 assert_yq "$o" '[select(.kind=="Role" or .kind=="ClusterRole") | .rules[] | select((.resources // []) | contains(["secrets"])) |
   select((.verbs | contains(["list"])) or (.verbs | contains(["watch"])) or ((.verbs | contains(["get"])) and ((.resourceNames // []) | length == 0)))] | length' 0
-# the server SA may read exactly that Secret and create Secrets; nothing else
-role='select(.kind=="Role" and .metadata.name=="openbao-unseal-key")'
-assert_yq "$o" "$role | .rules | map(.verbs | join(\",\")) | sort | join(\"|\")" "create|get"
-assert_yq "$o" "$role | .rules[] | select(.verbs[0]==\"get\") | .resourceNames | join(\",\")" "$secret"
-assert_yq "$o" "[$role | .rules[].resources[]] | unique | join(\",\")" secrets
-assert_yq "$o" 'select(.kind=="RoleBinding" and .metadata.name=="openbao-unseal-key") | .subjects | map(.kind + "/" + .name) | join(",")' \
-  "ServiceAccount/$(yq "$sts | .spec.template.spec.serviceAccountName" "$o")"
+
 
 bin=$tmp/ubin; mkdir -p "$bin"
 cat > "$bin/kubectl" <<'STUB'
@@ -142,17 +81,8 @@ grep -q 'openbao-unseal-key' <<<"$out" || fail "refusal must name the Secret: $o
 ! grep -q '^create' "$tmp/kubectl" || fail "refusal must not create a Secret"
 [ ! -e "$tmp/u/unseal/key" ] || fail "refusal must not leave a key file"
 
-# --- configure sidecar: same image as the server, reruns the ConfigMap script (no readiness probe: a config error
-#     must not take the API out of the Service)
-sc="$sts | .spec.template.spec.containers[] | select(.name==\"configure\")"
-assert_yq "$o" "[$sc] | length" 1
-assert_yq "$o" "$sc | .image" "$(yq "$srv | .image" "$o")"
-assert_yq "$o" "$sc | .readinessProbe" null
-assert_yq "$o" "$sc | [.command[], .args[]] | join(\" \") | test(\"/openbao/configure/configure.sh\")" true
-[ "$(mnt containers configure configure)" = /openbao/configure:true ] || fail "configure: reads its ConfigMap"
-assert_yq "$o" "$sc | .env[] | select(.name==\"BAO_ADDR\") | .value" http://127.0.0.1:8200
+# --- configure sidecar script: shellcheck, then against a stubbed bao
 if command -v shellcheck >/dev/null; then shellcheck -s sh "$cm/configure.sh" || fail "shellcheck configure.sh"; fi
-! grep -qE 'kv put|kv patch|/v1/secret/data' "$cm/configure.sh" || fail "configure writes KV data (values belong in generators/PushSecrets)"
 
 # stub bao: records "<METHOD> <api path>" (what the CLI would call) and fails without a token where OpenBao would
 cbin=$tmp/cbin; mkdir -p "$cbin" "$tmp/csa"; printf 'fake-jwt' > "$tmp/csa/token"
@@ -193,7 +123,6 @@ done
 grep -qx 'POST auth/token/revoke-self' "$tmp/bao-calls" || fail "configure must revoke its token"
 # the hub's kubernetes auth config is self-init's alone: a wrong rewrite here would lock this very login out
 ! grep -q 'auth/kubernetes/config' "$tmp/bao-calls" || fail "configure must not rewrite auth/kubernetes/config"
-! grep -q 'auth/kubernetes/config' "$cm/openbao-config.hcl" || fail "openbao-config must not be able to rewrite auth/kubernetes/config"
 ! grep -q 's.cfgtoken\|fake-jwt' "$tmp/bao-argv" || fail "token/JWT on bao's argv"
 # existing kv mount: not re-enabled
 crun 'Path Type\nsecret/ kv\nsys/ system\n'
@@ -218,10 +147,8 @@ done < "$tmp/bao-calls"
 line=$(grep -A1 'auth/kubernetes/role/openbao-config ' "$cm/configure.sh" | tr -d '\\\n' | tr -s ' ')
 grep -q 'token_policies=openbao-config ' <<<"$line" || fail "role openbao-config: $line"
 grep -q 'bound_service_account_names="$BAO_SA"' <<<"$line" || fail "role openbao-config must bind the server SA: $line"
-assert_yq "$o" "$sc | .env[] | select(.name==\"BAO_SA\") | .value" "$(yq "$sts | .spec.template.spec.serviceAccountName" "$o")"
 
 # --- humans: role operator (SA openbao-operator, no pod uses it) may only touch hand-written hub material
-assert_yq "$o" '[select(.kind=="ServiceAccount" and .metadata.name=="openbao-operator")] | length' 1
 ! grep -vE '^ *(#|$)' "$cm/operator.hcl" | grep -v 'secret/[a-z]*/hub/' | grep -q path || fail "operator policy reaches beyond secret/*/hub/: $(cat "$cm/operator.hcl")"
 grep -qE '^bao:' Makefile || fail "Makefile: no bao target (operator shell)"
 mk=$(awk '/^bao:/ {f=1; print; next} f && /^\t/ {print; next} f {exit}' Makefile)

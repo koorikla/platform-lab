@@ -1,0 +1,35 @@
+suite: Argo Rollouts (Kargo verification = AnalysisRuns) ships in the kargo umbrella
+# kargo-controller detects the Rollouts CRDs only at startup: they must come in the same render (same sync)
+release:
+  name: kargo
+  namespace: kargo
+templates:
+  - charts/argo-rollouts/templates/crds/*.yaml
+  - charts/argo-rollouts/templates/controller/*.yaml   # the Deployment checksums its ConfigMap
+  - charts/argo-rollouts/templates/dashboard/deployment.yaml
+  - charts/kargo/templates/controller/deployment.yaml
+  - charts/kargo/templates/controller/configmap.yaml
+tests:
+  - it: renders the AnalysisRun and AnalysisTemplate CRDs as templates (not crds/, so they upgrade)
+    asserts:
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: analysisruns.argoproj.io, any: true }
+        template: charts/argo-rollouts/templates/crds/analysis-run-crd.yaml
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: analysistemplates.argoproj.io, any: true }
+        template: charts/argo-rollouts/templates/crds/analysis-template-crd.yaml
+
+  - it: runs one single-replica rollouts controller next to kargo-controller, no dashboard
+    asserts:
+      - equal: { path: 'metadata.labels["app.kubernetes.io/name"]', value: argo-rollouts }
+        template: charts/argo-rollouts/templates/controller/deployment.yaml
+      - equal: { path: spec.replicas, value: 1 }
+        template: charts/argo-rollouts/templates/controller/deployment.yaml
+      - hasDocuments: { count: 0 }
+        template: charts/argo-rollouts/templates/dashboard/deployment.yaml
+      - equal: { path: metadata.name, value: kargo-controller }
+        template: charts/kargo/templates/controller/deployment.yaml
+
+  - it: turns kargo-controller's Rollouts integration on
+    template: charts/kargo/templates/controller/configmap.yaml
+    asserts:
+      - equal: { path: metadata.name, value: kargo-controller }
+      - equal: { path: data.ROLLOUTS_INTEGRATION_ENABLED, value: "true" }

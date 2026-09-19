@@ -1,0 +1,36 @@
+suite: argocd-agent - v0.10.0 from quay, managed mode, dials the hub LB, heartbeat below the LB idle timeout
+release:
+  name: worker-birth-kit
+  namespace: argocd
+values:
+  - values/dev1.yaml
+templates:
+  - charts/argocd-agent-agent/templates/agent-deployment.yaml
+  - charts/argocd-agent-agent/templates/agent-params-cm.yaml
+tests:
+  # the chart's default (ghcr) tag does not exist; releases live on quay
+  - it: runs the quay image
+    template: charts/argocd-agent-agent/templates/agent-deployment.yaml
+    asserts:
+      - equal: { path: metadata.name, value: argocd-agent-agent-helm }
+      - equal: { path: 'spec.template.spec.containers[0].image', value: quay.io/argoprojlabs/argocd-agent:v0.10.0 }
+
+  - it: runs managed, mTLS, destination-based mapping, against mgmt-lb:30443
+    template: charts/argocd-agent-agent/templates/agent-params-cm.yaml
+    asserts:
+      - equal: { path: metadata.name, value: argocd-agent-agent-helm-params }
+      - isSubset:
+          path: data
+          content:
+            agent.mode: managed
+            agent.creds: "mtls:any"
+            agent.server.address: mgmt-lb        # = hub.host, the store's host (hub_openbao_test.yaml)
+            agent.server.port: "30443"
+            agent.heartbeat.interval: 30s        # < hub LB haproxy idle timeout (50s)
+            agent.redis.address: "argocd-redis:6379"
+            agent.destination-based-mapping: "true"
+            agent.create-namespace: "true"
+            agent.allowed-namespaces: "*"
+            agent.label-selector: argocd-agent=true
+            agent.tls.secret-name: argocd-agent-client-tls
+            agent.tls.root-ca-secret-name: argocd-agent-ca

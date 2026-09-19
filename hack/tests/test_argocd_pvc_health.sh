@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Hub Argo CD: a Pending PVC that is a Helm hook (Argo PreSync) is Healthy, so PreSync can reach the later hook that
 # consumes it (local-path binds on first consumer). Needed by Thunder's sqlite PVC (#10); otherwise built-in semantics.
+# That the override exists: argo-cd chart unit test (tests/pvc_health_test.yaml). Here: its Lua, evaluated by the real
+# Argo CD code against the hub's argocd-cm (chart + hub values), when the CLI is around (CI doesn't install it).
 source "$(dirname "$0")/lib.sh"
-h=$(render argocd $charts/argo-cd -n argocd -f $config/addons/management/argo-cd/values.yaml)
-lua=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="argocd-cm") | .data["resource.customizations.health.PersistentVolumeClaim"]' "$h")
-grep -q 'helm.sh/hook' <<<"$lua" || fail "argocd-cm: no PVC health override for Helm hooks"
-# evaluate the Lua with the real Argo CD code when the CLI is around (CI doesn't install it)
 command -v argocd >/dev/null || { echo "skip: argocd CLI not on PATH (Lua not evaluated)"; exit 0; }
+h=$(render argocd $charts/argo-cd -n argocd -f $config/addons/management/argo-cd/values.yaml)
 cm=$tmp/argocd-cm.yaml; yq 'select(.kind=="ConfigMap" and .metadata.name=="argocd-cm")' "$h" >"$cm"
 pvc() {   # pvc <phase> <helm.sh/hook value or ""> -> STATUS reported by argocd admin
   local f; f=$(mktemp "$tmp/pvc.XXXXXX")

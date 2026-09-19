@@ -1,0 +1,65 @@
+suite: argo-cd worker profile - application-controller + repo-server + redis only (ApplicationSets live on the hub)
+release:
+  name: worker-birth-kit
+  namespace: argocd
+values:
+  - values/dev1.yaml
+templates:
+  # the argo-cd Deployments checksum these configs: they must be rendered too
+  - charts/argo-cd/templates/argocd-configs/*.yaml
+  - charts/argo-cd/templates/argocd-server/deployment.yaml
+  - charts/argo-cd/templates/argocd-applicationset/deployment.yaml
+  - charts/argo-cd/templates/argocd-application-controller/statefulset.yaml
+  - charts/argo-cd/templates/argocd-repo-server/deployment.yaml
+  - charts/argo-cd/templates/redis/deployment.yaml
+  - charts/argo-cd/templates/dex/deployment.yaml
+  - charts/argo-cd/templates/argocd-notifications/deployment.yaml
+  - charts/argocd-agent-agent/templates/agent-deployment.yaml
+  - templates/argocd-redis-networkpolicy.yaml
+tests:
+  - it: scales argocd-server and the applicationset controller to zero
+    asserts:
+      - equal: { path: spec.replicas, value: 0 }
+        template: charts/argo-cd/templates/argocd-server/deployment.yaml
+      - equal: { path: spec.replicas, value: 0 }
+        template: charts/argo-cd/templates/argocd-applicationset/deployment.yaml
+
+  - it: runs application-controller, repo-server, redis and the agent in argocd
+    asserts:
+      - equal: { path: metadata.name, value: argocd-application-controller }
+        template: charts/argo-cd/templates/argocd-application-controller/statefulset.yaml
+      - equal: { path: metadata.name, value: argocd-repo-server }
+        template: charts/argo-cd/templates/argocd-repo-server/deployment.yaml
+      - equal: { path: metadata.name, value: argocd-redis }
+        template: charts/argo-cd/templates/redis/deployment.yaml
+      - equal: { path: metadata.namespace, value: argocd }
+        template: charts/argocd-agent-agent/templates/agent-deployment.yaml
+      - notEqual: { path: spec.replicas, value: 0 }
+        template: charts/argo-cd/templates/argocd-application-controller/statefulset.yaml
+      - notEqual: { path: spec.replicas, value: 0 }
+        template: charts/argo-cd/templates/argocd-repo-server/deployment.yaml
+      - notEqual: { path: spec.replicas, value: 0 }
+        template: charts/argo-cd/templates/redis/deployment.yaml
+      - notEqual: { path: spec.replicas, value: 0 }
+        template: charts/argocd-agent-agent/templates/agent-deployment.yaml
+
+  - it: renders no dex and no notifications controller
+    asserts:
+      - hasDocuments: { count: 0 }
+        template: charts/argo-cd/templates/dex/deployment.yaml
+      - hasDocuments: { count: 0 }
+        template: charts/argo-cd/templates/argocd-notifications/deployment.yaml
+
+  # the argo-helm redis NetworkPolicy admits only Argo's own components: the agent needs redis too
+  - it: lets the agent's pods reach redis
+    asserts:
+      - equal: { path: metadata.name, value: argocd-redis-allow-agent }
+        template: templates/argocd-redis-networkpolicy.yaml
+      - equal: { path: 'spec.podSelector.matchLabels["app.kubernetes.io/name"]', value: argocd-redis }
+        template: templates/argocd-redis-networkpolicy.yaml
+      - equal: { path: 'spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/name"]', value: argocd-agent-agent }
+        template: templates/argocd-redis-networkpolicy.yaml
+      - equal: { path: 'spec.template.metadata.labels["app.kubernetes.io/name"]', value: argocd-agent-agent }
+        template: charts/argocd-agent-agent/templates/agent-deployment.yaml
+      - equal: { path: 'spec.template.metadata.labels["app.kubernetes.io/name"]', value: argocd-redis }
+        template: charts/argo-cd/templates/redis/deployment.yaml

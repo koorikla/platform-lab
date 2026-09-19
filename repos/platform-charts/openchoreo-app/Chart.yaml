@@ -2,4 +2,4 @@ apiVersion: v2
 name: openchoreo-app
 description: OpenChoreo types, Component, ComponentRelease and ReleaseBinding for one app (rendered manifests pattern)
 type: application
-version: 0.1.0
+version: 0.1.1

@@ -1,0 +1,60 @@
+suite: OpenBao pull wiring - store hub-openbao, TokenReview binding, agent identity ExternalSecrets
+release:
+  name: worker-birth-kit
+  namespace: argocd
+values:
+  - values/dev1.yaml
+templates:
+  - templates/hub-openbao.yaml
+  - templates/argocd-agent-identity.yaml
+  - charts/external-secrets/templates/deployment.yaml
+tests:
+  - it: logs in to the hub's OpenBao (via mgmt-lb) on this cluster's mount, as ESO's ServiceAccount
+    template: templates/hub-openbao.yaml
+    documentSelector: { path: kind, value: ClusterSecretStore }
+    asserts:
+      - equal: { path: metadata.name, value: hub-openbao }
+      - equal: { path: spec.provider.vault.server, value: "http://mgmt-lb:30820" }
+      - equal:
+          path: spec.provider.vault.auth.kubernetes
+          value: { mountPath: k8s-dev1, role: eso, serviceAccountRef: { name: external-secrets, namespace: external-secrets } }
+      - equal: { path: spec.conditions, value: [{ namespaces: [argocd, openchoreo-data-plane] }] }   # agent identity + OpenChoreo identity (#14)
+
+  - it: lets ESO's ServiceAccount review tokens (OpenBao's kubernetes auth calls TokenReview with it)
+    template: templates/hub-openbao.yaml
+    documentSelector: { path: kind, value: ClusterRoleBinding }
+    asserts:
+      - equal: { path: metadata.name, value: external-secrets-openbao-tokenreview }
+      - equal: { path: roleRef.name, value: "system:auth-delegator" }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: external-secrets, namespace: external-secrets }] }
+
+  - it: the store's ServiceAccount is the one ESO really runs as
+    template: charts/external-secrets/templates/deployment.yaml
+    asserts:
+      - equal: { path: metadata.name, value: external-secrets }
+      - equal: { path: metadata.namespace, value: external-secrets }
+      - equal: { path: spec.template.spec.serviceAccountName, value: external-secrets }
+
+  # the agent requires a kubernetes.io/tls Secret, and a CA Secret with ONLY ca.crt (it parses every key as a cert)
+  - it: pulls the agent client cert as a tls Secret in argocd, from this cluster's path only
+    template: templates/argocd-agent-identity.yaml
+    documentSelector: { path: metadata.name, value: argocd-agent-client-tls }
+    asserts:
+      - equal: { path: metadata.namespace, value: argocd }
+      - equal: { path: spec.target.template.type, value: kubernetes.io/tls }
+      - equal:
+          path: spec.data
+          value:
+            - { secretKey: tls.crt, remoteRef: { key: clusters/dev1/argocd-agent, property: tls.crt } }
+            - { secretKey: tls.key, remoteRef: { key: clusters/dev1/argocd-agent, property: tls.key } }
+
+  - it: pulls the CA with ca.crt only
+    template: templates/argocd-agent-identity.yaml
+    documentSelector: { path: metadata.name, value: argocd-agent-ca }
+    asserts:
+      - equal: { path: spec.data, value: [{ secretKey: ca.crt, remoteRef: { key: clusters/dev1/argocd-agent, property: ca.crt } }] }
+
+  - it: reads both through store hub-openbao
+    template: templates/argocd-agent-identity.yaml
+    asserts:
+      - equal: { path: spec.secretStoreRef, value: { kind: ClusterSecretStore, name: hub-openbao } }

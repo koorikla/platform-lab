@@ -7,8 +7,8 @@ Closes #
 <!-- Paste the summary lines, not the whole log. -->
 - [ ] `make lint` → `lint: OK`
 - [ ] `make test` → all `ok`
-- [ ] New/changed behaviour has a `hack/tests/test_*.sh` assertion (written first, seen failing)
-- [ ] `version` bumped in `Chart.yaml` of every chart this PR changes
+- [ ] New/changed behaviour has a test, written first and seen failing: chart behaviour in the chart's helm-unittest suite (`tests/*_test.yaml`), integration/scripts in `hack/tests/test_*.sh`
+- [ ] `version` bumped in `Chart.yaml` of every chart whose packaged content this PR changes (not needed for `tests/` only)
 
 ## Live lab
 - [ ] Does not change what runs on the lab (docs, tests, tooling only)

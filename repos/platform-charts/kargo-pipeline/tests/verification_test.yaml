@@ -1,0 +1,162 @@
+suite: Kargo verification of addon stages (#26) - AnalysisTemplate argocd-apps, its Job and RBAC
+templates:
+  - verification.yaml
+  - stages.yaml
+set:
+  name: cert-manager
+tests:
+  - it: verifies every stage with the project's template
+    template: stages.yaml
+    asserts:
+      - equal: { path: spec.verification.analysisTemplates, value: [{ name: argocd-apps }] }
+
+  # ring: same rule as the worker-addons appset (a <env>-canary branch <=> ring canary). An empty canary ring must not
+  # open the gate for the next stage; other empty stages pass. revision: the commit set-metadata recorded.
+  - it: passes env, ring, requireApps, branch, revision - canary stage
+    template: stages.yaml
+    documentSelector: { path: metadata.name, value: dev-canary }
+    asserts:
+      - equal:
+          path: spec.verification.args
+          value:
+            - { name: env, value: dev }
+            - { name: ring, value: canary }
+            - { name: requireApps, value: "true" }
+            - { name: branch, value: dev-canary }
+            - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
+
+  - it: passes env, ring, requireApps, branch, revision - stable stages
+    template: stages.yaml
+    asserts:
+      - equal:
+          path: spec.verification.args
+          value:
+            - { name: env, value: dev }
+            - { name: ring, value: stable }
+            - { name: requireApps, value: "false" }
+            - { name: branch, value: dev }
+            - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
+        documentSelector: { path: metadata.name, value: dev }
+      - equal:
+          path: spec.verification.args
+          value:
+            - { name: env, value: nit }
+            - { name: ring, value: stable }
+            - { name: requireApps, value: "false" }
+            - { name: branch, value: nit }
+            - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
+        documentSelector: { path: metadata.name, value: nit }
+      - equal:
+          path: spec.verification.args
+          value:
+            - { name: env, value: sit }
+            - { name: ring, value: stable }
+            - { name: requireApps, value: "false" }
+            - { name: branch, value: sit }
+            - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
+        documentSelector: { path: metadata.name, value: sit }
+      - equal:
+          path: spec.verification.args
+          value:
+            - { name: env, value: prod }
+            - { name: ring, value: stable }
+            - { name: requireApps, value: "false" }
+            - { name: branch, value: prod }
+            - { name: revision, value: '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}' }
+        documentSelector: { path: metadata.name, value: prod }
+
+  # Kargo v1.11.4 silently drops a Stage arg the template doesn't declare, and fails the run for a declared arg without
+  # a value: the template declares exactly the Stage's args (above), and every one reaches the Job
+  - it: declares exactly the args the Stages pass
+    template: verification.yaml
+    documentSelector: { path: kind, value: AnalysisTemplate }
+    asserts:
+      - equal: { path: metadata.namespace, value: addon-cert-manager }
+      - equal:
+          path: spec.args
+          value: [{ name: env }, { name: ring }, { name: branch }, { name: revision }, { name: requireApps }]
+
+  - it: hands every arg and the addon to the Job
+    template: verification.yaml
+    documentSelector: { path: kind, value: AnalysisTemplate }
+    asserts:
+      - equal:
+          path: spec.metrics[0].provider.job.spec.template.spec.containers[0].env
+          value:
+            - { name: HOME, value: /tmp }
+            - { name: ADDON, value: cert-manager }
+            - { name: ARGOCD_NS, value: argocd }
+            - { name: REPO_URL, value: https://github.com/koorikla/platform-lab.git }
+            - { name: ENV, value: "{{args.env}}" }
+            - { name: RING, value: "{{args.ring}}" }
+            - { name: BRANCH, value: "{{args.branch}}" }
+            - { name: REVISION, value: "{{args.revision}}" }
+            - { name: REQUIRE_APPS, value: "{{args.requireApps}}" }
+
+  # one measurement = one Job (one pod on the hub): every 60 s (#76); wait for convergence, then require consecutive
+  # successes; give up after count. The window vs the worker's repo poll: hack/tests/test_hub_load.sh
+  - it: measures every minute, requires a healthy streak, and gives up after count measurements
+    template: verification.yaml
+    documentSelector: { path: kind, value: AnalysisTemplate }
+    asserts:
+      - equal: { path: 'spec.metrics[0].failureLimit', value: -1 }
+      - equal: { path: 'spec.metrics[0].interval', value: 60s }
+      - equal: { path: 'spec.metrics[0].consecutiveSuccessLimit', value: 3 }
+      - equal: { path: 'spec.metrics[0].count', value: 10 }
+
+  - it: runs the Job once per measurement, bounded, as verify-apps, non-root with a read-only root fs
+    template: verification.yaml
+    documentSelector: { path: kind, value: AnalysisTemplate }
+    asserts:
+      - equal: { path: 'spec.metrics[0].provider.job.spec.backoffLimit', value: 0 }
+      - equal: { path: 'spec.metrics[0].provider.job.spec.activeDeadlineSeconds', value: 120 }
+      - equal: { path: 'spec.metrics[0].provider.job.spec.template.spec.serviceAccountName', value: verify-apps }
+      - equal: { path: 'spec.metrics[0].provider.job.spec.template.spec.securityContext.runAsNonRoot', value: true }
+      - equal: { path: 'spec.metrics[0].provider.job.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem', value: true }
+      - equal:
+          path: 'spec.metrics[0].provider.job.spec.template.spec.volumes[?(@.name == "script")].configMap.name'
+          value: verify-apps
+
+  - it: ships verify-apps.sh in the ConfigMap the Job mounts
+    template: verification.yaml
+    documentSelector: { path: kind, value: ConfigMap }
+    asserts:
+      - equal: { path: metadata.name, value: verify-apps }
+      - matchRegex: { path: 'data["verify-apps.sh"]', pattern: '^#!/usr/bin/env bash' }
+
+  # least privilege: the Job's SA may only read Applications in argocd
+  - it: gives the Job's ServiceAccount read access to Applications in argocd, nothing else
+    template: verification.yaml
+    asserts:
+      - equal: { path: metadata.namespace, value: addon-cert-manager }
+        documentSelector: { path: kind, value: ServiceAccount }
+      - equal: { path: metadata.name, value: verify-apps }
+        documentSelector: { path: kind, value: ServiceAccount }
+      - equal: { path: metadata.namespace, value: argocd }
+        documentSelector: { path: kind, value: Role }
+      - equal: { path: rules, value: [{ apiGroups: [argoproj.io], resources: [applications], verbs: [get, list] }] }
+        documentSelector: { path: kind, value: Role }
+      - equal: { path: metadata.namespace, value: argocd }
+        documentSelector: { path: kind, value: RoleBinding }
+      - equal: { path: roleRef, value: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: kargo-verify-addon-cert-manager } }
+        documentSelector: { path: kind, value: RoleBinding }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: verify-apps, namespace: addon-cert-manager }] }
+        documentSelector: { path: kind, value: RoleBinding }
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: ClusterRole, matchMany: true, skipEmptyTemplates: true }
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: ClusterRoleBinding, matchMany: true, skipEmptyTemplates: true }
+
+  # two addons don't fight over one RBAC object in argocd
+  - it: names the argocd Role per project
+    template: verification.yaml
+    set: { name: kgateway }
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal: { path: metadata.name, value: kargo-verify-addon-kgateway }
+
+  - it: renders no verification objects for an app
+    template: verification.yaml
+    set: { kind: app, name: podinfo, image: ghcr.io/stefanprodan/podinfo }
+    asserts:
+      - hasDocuments: { count: 0 }

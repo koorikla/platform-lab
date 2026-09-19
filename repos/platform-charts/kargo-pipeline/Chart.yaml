@@ -2,4 +2,4 @@ apiVersion: v2
 name: kargo-pipeline
 description: Kargo Project/Warehouse/Stages for one addon or app (rendered manifests pattern)
 type: application
-version: 0.5.0
+version: 0.5.1

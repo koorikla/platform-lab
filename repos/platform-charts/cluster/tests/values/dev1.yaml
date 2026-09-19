@@ -1,0 +1,5 @@
+# A worker, shaped like a fleet file (repos/platform-config/fleet/clusters/<env>/<name>.yaml)
+name: dev1
+env: dev
+provider: docker
+region: local

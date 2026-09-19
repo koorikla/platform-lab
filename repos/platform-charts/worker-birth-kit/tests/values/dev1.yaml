@@ -1,0 +1,2 @@
+# What CAAPH passes for worker dev1: the HelmChartProxy valuesTemplate `clusterName: {{ .Cluster.metadata.name }}`
+clusterName: dev1

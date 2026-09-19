@@ -1,0 +1,69 @@
+suite: OpenChoreo secrets (#9) - generated once in-cluster, pushed to secret/openchoreo/<key>
+release:
+  name: openbao
+  namespace: openbao
+templates:
+  - templates/openchoreo.yaml
+tests:
+  # CreatedOnce regenerates a whole Secret: adding or rotating one key must not touch the others
+  - it: gives every key its own generator, Secret and PushSecret
+    asserts:
+      - hasDocuments: { count: 3, filterAware: true }
+        documentSelector: { path: kind, value: Password, matchMany: true }
+      - hasDocuments: { count: 3, filterAware: true }
+        documentSelector: { path: kind, value: ExternalSecret, matchMany: true }
+      - hasDocuments: { count: 3, filterAware: true }
+        documentSelector: { path: kind, value: PushSecret, matchMany: true }
+      - equal: { path: metadata.name, value: openchoreo-backstage-backend-secret }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: openchoreo-backstage-client-secret }
+        documentIndex: 3
+      - equal: { path: metadata.name, value: openchoreo-backstage-jenkins-api-key }
+        documentIndex: 6
+
+  - it: generates each value once, 32+ characters without symbols (OAuth forms/headers/JSON take it verbatim)
+    set: { openchoreo.generated: [backstage-client-secret] }
+    documentSelector: { path: kind, value: Password }
+    asserts:
+      - isAPIVersion: { of: generators.external-secrets.io/v1alpha1 }
+      - equal: { path: metadata.namespace, value: openbao }
+      - equal: { path: spec.secretKeys, value: [value] }
+      - greaterOrEqual: { path: spec.length, value: 32 }
+      - equal: { path: spec.symbols, value: 0 }
+
+  # source of truth: survives OpenBao's in-memory dev mode; a refresh never rotates it
+  - it: keeps the generated value in its own Secret, created once
+    set: { openchoreo.generated: [backstage-client-secret] }
+    documentSelector: { path: kind, value: ExternalSecret }
+    asserts:
+      - equal: { path: spec.refreshPolicy, value: CreatedOnce }
+      - equal: { path: spec.target.name, value: openchoreo-backstage-client-secret }
+      - equal:
+          path: 'spec.dataFrom[0].sourceRef.generatorRef'
+          value: { apiVersion: generators.external-secrets.io/v1alpha1, kind: Password, name: openchoreo-backstage-client-secret }
+
+  # a Delete finalizer could never reach a server removed in the same release
+  - it: pushes Secret key value to secret/openchoreo/<key> (property value) every minute, never deleting
+    set: { openchoreo.generated: [backstage-client-secret] }
+    documentSelector: { path: kind, value: PushSecret }
+    asserts:
+      - equal: { path: spec.selector.secret.name, value: openchoreo-backstage-client-secret }
+      - equal: { path: spec.refreshInterval, value: 1m }
+      - equal: { path: spec.deletionPolicy, value: None }
+      - equal: { path: spec.secretStoreRefs, value: [{ kind: SecretStore, name: openchoreo-seeder }] }
+      - equal:
+          path: spec.data
+          value: [{ match: { secretKey: value, remoteRef: { remoteKey: openchoreo/backstage-client-secret, property: value } } }]
+
+  - it: pushes through the seeder store (role openchoreo-seeder) in the openbao namespace
+    documentSelector: { path: kind, value: SecretStore }
+    asserts:
+      - equal: { path: metadata.name, value: openchoreo-seeder }
+      - equal: { path: metadata.namespace, value: openbao }
+      - equal:
+          path: spec.provider.vault
+          value:
+            server: http://openbao.openbao.svc:8200
+            path: secret
+            version: v2
+            auth: { kubernetes: { mountPath: kubernetes, role: openchoreo-seeder, serviceAccountRef: { name: openbao-openchoreo-seeder } } }

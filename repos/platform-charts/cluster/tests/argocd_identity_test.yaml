@@ -1,0 +1,62 @@
+suite: agent identity (pull model, invariant 7)
+templates:
+  - argocd-identity.yaml
+values:
+  - values/dev1.yaml
+tests:
+  - it: pushes the agent client cert and CA to OpenBao through the hub-local store, one path per cluster
+    documentSelector: { path: kind, value: PushSecret }
+    asserts:
+      - equal: { path: spec.secretStoreRefs, value: [{ kind: ClusterSecretStore, name: openbao }] }
+      - equal: { path: spec.selector.secret.name, value: dev1-agent-client-tls }
+      - equal:
+          path: spec.data
+          value:
+            - match: { secretKey: tls.crt, remoteRef: { remoteKey: clusters/dev1/argocd-agent, property: tls.crt } }
+            - match: { secretKey: tls.key, remoteRef: { remoteKey: clusters/dev1/argocd-agent, property: tls.key } }
+            - match: { secretKey: ca.crt, remoteRef: { remoteKey: clusters/dev1/argocd-agent, property: ca.crt } }
+
+  # counts are per template here; the release-wide PushSecret set: hack/tests/test_cluster_openchoreo.sh
+  - it: renders one PushSecret in argocd-identity.yaml and no ClusterSecretStore in any template (nothing on the hub writes into a worker)
+    templates: [argocd-identity.yaml, cluster.yaml, openbao-ca.yaml, openchoreo.yaml]
+    asserts:
+      - hasDocuments: { count: 1, filterAware: true }
+        template: argocd-identity.yaml
+        documentSelector: { path: kind, value: PushSecret, matchMany: true }
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: ClusterSecretStore, matchMany: true, skipEmptyTemplates: true }
+
+  - it: renders the hub's Argo cluster secret through the in-cluster store
+    documentSelector: { path: metadata.name, value: cluster-dev1 }
+    asserts:
+      - isKind: { of: ExternalSecret }
+      - equal: { path: spec.secretStoreRef, value: { kind: SecretStore, name: in-cluster } }
+
+  # #40: the in-cluster store's SA may get exactly this worker's client cert (the store itself is the principal chart's)
+  - it: grants the in-cluster store's SA get on this worker's client cert only
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal: { path: metadata.namespace, value: argocd }
+      - equal: { path: metadata.name, value: eso-in-cluster-dev1 }
+      - equal:
+          path: rules
+          value: [{ apiGroups: [""], resources: [secrets], resourceNames: [dev1-agent-client-tls], verbs: [get] }]
+
+  - it: binds that Role, and only it, to the principal chart's store SA in argocd
+    documentSelector: { path: kind, value: RoleBinding }
+    asserts:
+      - equal: { path: metadata.namespace, value: argocd }
+      - equal: { path: roleRef, value: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: eso-in-cluster-dev1 } }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: eso-in-cluster, namespace: argocd }] }
+
+  # a [*] path asserts every match
+  - it: reads through the in-cluster store exactly the cert the Role grants
+    documentSelector: { path: kind, value: ExternalSecret }
+    asserts:
+      - equal: { path: 'spec.data[*].remoteRef.key', value: dev1-agent-client-tls }
+      - notExists: { path: spec.dataFrom }
+
+  - it: gives the hub (role management) no agent identity and no grant
+    values: [values/mgmt.yaml]
+    asserts:
+      - hasDocuments: { count: 0 }

@@ -30,8 +30,9 @@ GitHub issue ──claim──▶ worktree branch ──TDD──▶ PR ──re
    per person or agent at a time.
 3. **Branch in your own worktree** from `origin/main`: `git worktree add ../lab-issue-<n> -b issue-<n>-<slug> origin/main`.
    Parallel workers never share a working tree.
-4. **Test first.** Add or extend `hack/tests/test_*.sh`, watch it fail, implement, then `make lint && make test`
-   (see [Local checks](#local-checks)).
+4. **Test first.** New chart behaviour gets a helm-unittest suite in the chart (`repos/platform-charts/<chart>/tests/`);
+   config × chart integration, cross-chart contracts and scripts get `hack/tests/test_*.sh`. Watch it fail, implement,
+   then `make lint && make test` (see [Local checks](#local-checks)).
 5. **Open a PR** for that one issue with `Closes #<n>`; the template asks for tests run, lab verification and the
    invariants checklist. Rebase on `origin/main` yourself if it moved.
 6. **Review.** CODEOWNERS (`.github/CODEOWNERS`) requests the owners of the paths you touched. The coordinator reviews
@@ -66,15 +67,41 @@ general) and `go` (`hub-lb-reload.sh` renders the CAPD LB template with it).
 | Command | What it proves |
 |---|---|
 | `make lint` (`hack/lint.sh`) | every chart builds its deps and passes `helm lint`; every hub addon renders with its values; every worker addon renders for every stage env (dev/nit/sit/prod) with no nameless or duplicate resources (Kargo's flat layout would overwrite them); `addon.name` == folder name; fleet file `env` == its folder and a kargo-pipeline stage env; fleet `kubernetesVersion` minor == `render-addon` `kubeVersion` minor (enabled worker clusters); every cluster file renders, enabled or not |
-| `make test` (`hack/tests/run.sh`) | render assertions in `hack/tests/test_*.sh`, each in its own process |
+| `make test` (`hack/tests/run.sh`) | every chart's helm-unittest suites (`hack/tests/unittest.sh`), then the repo-level tests `hack/tests/test_*.sh`, each in its own process |
 
-Writing a test: `source "$(dirname "$0")/lib.sh"`, then `o=$(render <release> <chart> [helm args])` and
+CI (`.github/workflows/ci.yaml`) runs `make lint`, `make test` and the chart version guard
+(`hack/check-chart-versions.sh`) on every PR.
+
+### Where a test goes
+- **Chart behaviour → helm-unittest, inside the chart.** Anything you can check by rendering one chart with values of
+  its own (kinds, fields, hooks and weights, RBAC rules, required values via `failedTemplate`, …) is a suite in
+  `repos/platform-charts/<chart>/tests/<template-or-topic>_test.yaml`, fixtures in `tests/values/`. It travels with the
+  chart when `repos/*` split (invariant 6), so it must not read `repos/platform-config` or another chart: copy the
+  shape of a fleet file or an app into `tests/values/` instead. The chart's `.helmignore` lists `/tests/` (root only: a `templates/tests/` with
+  helm test hooks must stay), so suites are not packaged, and changing only them needs no version bump (`hack/check-chart-versions.sh` knows).
+- **`hack/tests/test_*.sh` → integration and scripts only:** a chart rendered with `platform-config` values, contracts
+  between charts or between a chart and config (appset labels vs the verification selector, issuer and redirects across
+  thunder/argo-cd/kargo, NodePort ↔ hub LB ↔ data-plane URL), config-only checks, and script tests with fake tools
+  (bootstrap, doctor, fleet-sync, verify-apps, publish, prune), shellcheck and the version guard.
+
+Writing a unittest: one suite per template or topic, `it:` says what the chart guarantees (see
+`repos/platform-charts/cluster/tests/` for small examples, the
+[helm-unittest docs](https://github.com/helm-unittest/helm-unittest/blob/v1.1.2/DOCUMENT.md) for assertions). Things
+that bite: assertions run per document and per template (`hasDocuments` counts per template; use `documentSelector`
+with `matchMany`/`skipEmptyTemplates` for "none anywhere"). A count across the whole release ("exactly one PushSecret",
+"exactly these workloads") can't be a unittest: keep it as one `assert_yq` in the `hack/tests` test that already renders
+the chart; a path with `[*]` or a filter (`[?(@.name == "x")]`)
+asserts every match; `containsDocument` needs `any: true` in a multi-document template; umbrella suites list subchart
+templates as `charts/<dep>/templates/…` and must include what those `include` (e.g. the ConfigMaps a Deployment
+checksums); quote paths with `[` and values with `,` inside `{ }`. `hack/tests/unittest.sh [chart dir…]` runs one
+chart (paths relative to the repo root: `hack/tests/unittest.sh repos/platform-charts/cluster`); it installs the pinned plugin (`HELM_UNITTEST_VERSION`, Renovate-tracked) on first use into
+`~/.cache/platform-lab/helm-plugins/`, with helm 3 or 4 (helm 4 needs `--verify=false` for a git plugin source, the
+script passes it; concurrent runs wait on a lock), and builds chart dependencies first.
+
+Writing a repo-level test: `source "$(dirname "$0")/lib.sh"`, then `o=$(render <release> <chart> [helm args])` and
 `assert_yq "$o" '<yq expression>' '<expected>'` or `assert_fails <cmd>`. Assign `render` output to a variable first
-(an inline `$(render …)` swallows its exit code) and don't set your own `EXIT` trap. See `hack/tests/test_cluster_ring.sh`
+(an inline `$(render …)` swallows its exit code) and don't set your own `EXIT` trap. See `hack/tests/test_gateway_api_crds.sh`
 for a minimal example.
-
-CI running both on every PR, plus a chart-version-bump guard, is planned (#1, PR #35). Until then, paste the summary lines
-into the PR.
 
 ## Recipes
 
@@ -428,6 +455,8 @@ It covers:
   always waits for dashboard approval: rolling the self-hosted, single-control-plane hub is its own change.
 - `gateway-crds-helm` grouped with kgateway and held below 1.9 (1.9 brings Gateway API v1.6, which kgateway and
   OpenChoreo have to support first).
+- The helm-unittest plugin (`HELM_UNITTEST_VERSION` in `hack/tests/unittest.sh`); check the release still installs on
+  helm 3 and helm 4.
 
 PRs are grouped per area and labelled `dependencies` plus the `area:*` label. Nothing automerges. Everything under
 `repos/apps/*/envs/` is ignored (Kargo writes the image tag there). When Renovate changes a chart through a

@@ -1,0 +1,12 @@
+suite: Argo Rollouts CRDs - never deleted by Argo CD (a deleted CRD cascades to every AnalysisRun/Template)
+# every CRD template of the subchart, including any upstream adds later
+release:
+  name: kargo
+  namespace: kargo
+templates:
+  - charts/argo-rollouts/templates/crds/*.yaml
+tests:
+  - it: marks every Rollouts CRD Delete=false
+    asserts:
+      - isKind: { of: CustomResourceDefinition }
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-options"]', value: Delete=false }

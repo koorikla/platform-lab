@@ -1,0 +1,18 @@
+suite: hub Argo CD - PVC health override for Helm-hook PVCs (Thunder's sqlite PVC, #10)
+# A Pending PVC that is a Helm hook (Argo PreSync) counts as Healthy, so PreSync reaches the later hook that consumes it
+# (local-path binds on first consumer). The Lua itself is evaluated with the argocd CLI in
+# hack/tests/test_argocd_pvc_health.sh.
+release:
+  name: argocd
+  namespace: argocd
+templates:
+  - charts/argo-cd/templates/argocd-configs/argocd-cm.yaml
+tests:
+  - it: overrides PersistentVolumeClaim health, keyed on the helm.sh/hook annotation
+    asserts:
+      - matchRegex:
+          path: 'data["resource.customizations.health.PersistentVolumeClaim"]'
+          pattern: 'annotations\["helm\.sh/hook"\]'
+      - matchRegex:
+          path: 'data["resource.customizations.health.PersistentVolumeClaim"]'
+          pattern: 'hs\.status = "Healthy"'

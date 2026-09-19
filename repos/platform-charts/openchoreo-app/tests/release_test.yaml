@@ -1,0 +1,104 @@
+suite: mode=release (Kargo render-app) - ComponentRelease <app>-<stage>-<tag>-<hash8>, frozen type spec + workload
+templates:
+  - templates/release.yaml
+values:
+  - values/podinfo/app.yaml
+  - values/podinfo/envs/dev/values.yaml
+set:        # what render-app passes for stage dev
+  mode: release
+  env: dev
+  stage: dev
+  image.tag: 6.15.0
+tests:
+  # golden: the hash must not drift between Helm versions (tests run Helm 4, Kargo embeds Helm 3) or refactors. Update
+  # only on an intentional change of the frozen spec (it re-cuts every release on the next promotion).
+  - it: names the release after app, stage, tag and a hash of the frozen spec (golden)
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - equal: { path: metadata.name, value: podinfo-dev-6-15-0-ee034475 }
+      - equal: { path: metadata.namespace, value: default }
+
+  - it: owns the release by project/component and labels it like upstream
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - equal: { path: 'metadata.labels["openchoreo.dev/project"]', value: lab }
+      - equal: { path: 'metadata.labels["openchoreo.dev/component"]', value: podinfo }
+      - equal: { path: spec.owner, value: { projectName: lab, componentName: podinfo } }
+
+  - it: freezes the workload - image at the Freight's tag, env config, endpoints
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - equal:
+          path: spec.workload
+          value:
+            container:
+              image: ghcr.io/stefanprodan/podinfo:6.15.0
+              env: [{ key: PODINFO_UI_MESSAGE, value: podinfo @ dev }]
+            endpoints:
+              http: { type: HTTP, port: 9898, visibility: [external] }
+
+  # frozen = the vendored ClusterComponentType spec plus the defaults the apiserver adds (equality with the vendored
+  # file: hack/tests/test_openchoreo_app.sh)
+  - it: freezes the ClusterComponentType spec with its apiserver defaults
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - equal: { path: spec.componentType.kind, value: ClusterComponentType }
+      - equal: { path: spec.componentType.name, value: deployment/service }
+      - equal: { path: 'spec.componentType.spec.resources[*].targetPlane', value: dataplane }
+
+  # upstream BuildSpec leaves componentProfile and traits unset without parameters/traits
+  - it: renders only componentType, owner and workload
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - notExists: { path: spec.componentProfile }
+      - notExists: { path: spec.traits }
+
+  # what the OpenChoreo UI shows as "latest": exactly one per Component, from the workloadStage (dev)
+  - it: renders the Workload in the dev stage
+    documentSelector: { path: kind, value: Workload }
+    asserts:
+      - equal: { path: metadata.name, value: podinfo-workload }
+      - equal: { path: 'metadata.labels["openchoreo.dev/component"]', value: podinfo }
+      - equal: { path: spec.owner, value: { projectName: lab, componentName: podinfo } }
+      - equal: { path: spec.container.image, value: ghcr.io/stefanprodan/podinfo:6.15.0 }
+
+  - it: a new tag is a new release
+    set: { image.tag: 6.16.0 }
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - matchRegex: { path: metadata.name, pattern: '^podinfo-dev-6-16-0-[0-9a-f]{8}$' }
+
+  - it: changed env config is a new release (same tag, other hash)
+    set:
+      container.env: [{ key: X, value: y }]
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - matchRegex: { path: metadata.name, pattern: '^podinfo-dev-6-15-0-[0-9a-f]{8}$' }
+      - notEqual: { path: metadata.name, value: podinfo-dev-6-15-0-ee034475 }
+
+  - it: nit stage - its own release name, no Workload
+    values: [values/podinfo/app.yaml, values/podinfo/envs/nit/values.yaml]
+    set: { env: nit, stage: nit }
+    asserts:
+      - hasDocuments: { count: 1 }
+      - matchRegex: { path: metadata.name, pattern: '^podinfo-nit-6-15-0-[0-9a-f]{8}$' }
+
+  # stage (Kargo branch), not env, names the release: dev-canary renders env=dev too and must not share dev's objects
+  - it: dev-canary stage - named by the stage, no Workload
+    set: { stage: dev-canary }
+    asserts:
+      - hasDocuments: { count: 1 }
+      - matchRegex: { path: metadata.name, pattern: '^podinfo-dev-canary-6-15-0-[0-9a-f]{8}$' }
+
+  - it: freezes parameters as componentProfile.parameters
+    set: { parameters.foo: bar }
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - equal: { path: spec.componentProfile.parameters.foo, value: bar }
+      - notEqual: { path: metadata.name, value: podinfo-dev-6-15-0-ee034475 }
+
+  - it: sanitises the tag into a DNS label
+    set: { image.tag: v1.2.3_rc.1 }
+    documentSelector: { path: kind, value: ComponentRelease }
+    asserts:
+      - matchRegex: { path: metadata.name, pattern: '^podinfo-dev-v1-2-3-rc-1-[0-9a-f]{8}$' }

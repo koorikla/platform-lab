@@ -2,4 +2,4 @@ apiVersion: v2
 name: cluster
 description: One workload cluster = CAPI topology Cluster + its Argo CD identity (agent cert, labelled cluster secret, cert -> OpenBao) + its OpenChoreo registration
 type: application
-version: 0.4.2
+version: 0.4.3

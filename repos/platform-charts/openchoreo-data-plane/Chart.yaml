@@ -2,7 +2,7 @@ apiVersion: v2
 name: openchoreo-data-plane
 description: OpenChoreo data plane on a worker (cluster-agent + Gateway), cluster-agnostic; identity from the birth kit
 type: application
-version: 0.2.0
+version: 0.2.1
 # Worker addon (Kargo renders it per env). The cluster's identity (client cert, plane ID, gateway CA) is not in here:
 # the birth kit pulls it from the hub's OpenBao (worker-birth-kit templates/openchoreo-agent-identity.yaml, #14).
 # Invariant 4 exception: Reloader lands with the agent because the agent is not correct without it: upstream

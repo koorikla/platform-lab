@@ -1,0 +1,6 @@
+# The hub, shaped like its fleet file (role management): no agent identity, nothing granted to it
+name: mgmt
+env: mgmt
+role: management
+provider: docker
+region: local

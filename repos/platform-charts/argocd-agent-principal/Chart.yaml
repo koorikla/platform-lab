@@ -2,7 +2,7 @@ apiVersion: v2
 name: argocd-agent-principal
 description: argocd-agent principal (hub side) + its PKI + the in-cluster ESO store (name-scoped reads) used to mint Argo cluster secrets
 type: application
-version: 0.2.2
+version: 0.2.3
 dependencies:
   - name: argocd-agent-principal
     version: 0.3.3             # identical to install/helm-repo at argocd-agent v0.10.0; image pinned in values

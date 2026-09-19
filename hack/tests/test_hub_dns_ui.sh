@@ -10,8 +10,7 @@ cp=$(render openchoreo-control-plane $charts/openchoreo-control-plane -n "$ns" -
 gw=$(yq eval-all 'select(.kind=="Gateway") | .metadata.name' "$cp")
 [ "$gw" = gateway-default ] || fail "control-plane Gateway is '$gw', want gateway-default (Service name for DNS + make ui)"
 assert_yq "$cp" 'select(.kind=="Gateway") | .metadata.namespace' "$ns"
-# upstream issuer/public URLs carry :8080, so the listener must be 8080 inside the cluster too
-assert_yq "$cp" 'select(.kind=="Gateway") | .spec.listeners[] | select(.name=="http") | .port' 8080
+# its listener (http:8080): openchoreo-control-plane chart unit tests (tests/gateway_test.yaml)
 
 # pods: *.openchoreo.localhost -> the gateway Service (k3s imports *.override into the default server block)
 f=$config/fleet/base/hub-coredns.yaml

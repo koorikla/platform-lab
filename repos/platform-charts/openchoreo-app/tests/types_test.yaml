@@ -1,0 +1,39 @@
+suite: mode=types (hub addon) - upstream v1.2.5 getting-started types, vendored verbatim
+# Vendored from the tag the control plane runs, and frozen into releases equal to these files:
+# hack/tests/test_openchoreo_app.sh (compares against the openchoreo-control-plane chart and the release render).
+templates:
+  - templates/types.yaml
+set:
+  mode: types
+tests:
+  - it: renders the four ClusterComponentTypes and the default ClusterProjectType, nothing else
+    asserts:
+      - hasDocuments: { count: 5 }
+      - equal: { path: metadata.name, value: scheduled-task }
+        documentIndex: 0
+      - equal: { path: spec.workloadType, value: cronjob }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: service }
+        documentIndex: 1
+      - equal: { path: spec.workloadType, value: deployment }
+        documentIndex: 1
+      - equal: { path: metadata.name, value: web-application }
+        documentIndex: 2
+      - equal: { path: spec.workloadType, value: deployment }
+        documentIndex: 2
+      - equal: { path: metadata.name, value: worker }
+        documentIndex: 3
+      - equal: { path: spec.workloadType, value: deployment }
+        documentIndex: 3
+      - hasDocuments: { count: 4, filterAware: true }
+        documentSelector: { path: kind, value: ClusterComponentType, matchMany: true }
+      - equal: { path: metadata.name, value: default }
+        documentSelector: { path: kind, value: ClusterProjectType }
+
+  # the frozen spec equals what the apiserver stores only if refs carry an explicit kind (CRD defaults would differ)
+  - it: gives every trait/workflow ref an explicit kind
+    documentSelector: { path: kind, value: ClusterComponentType, matchMany: true }
+    asserts:
+      - notExists: { path: 'spec.allowedTraits[?(!@.kind)]' }
+      - notExists: { path: 'spec.allowedWorkflows[?(!@.kind)]' }
+      - notExists: { path: 'spec.traits[?(!@.kind)]' }
