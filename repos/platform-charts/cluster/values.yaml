@@ -4,6 +4,7 @@ env: ""                        # dev | test | prod
 role: worker                   # worker | management (the self-hosted hub, see fleet/clusters/mgmt)
 provider: docker
 region: local
+ring: stable                   # stable | canary — canary clusters follow rendered/<env>-canary
 extraLabels: {}                # extra platform.lab/* style selectors, stamped on CAPI Cluster AND Argo cluster secret
 
 fleetNamespace: fleet
