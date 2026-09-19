@@ -1,0 +1,28 @@
+# Source: openchoreo-app/templates/release.yaml
+# The Component's "latest" Workload (UI, autoDeploy). Exactly one per Component, so only one stage renders it.
+# spec.owner is immutable and the name has no project: moving the app to another project needs a delete/Replace.
+apiVersion: openchoreo.dev/v1alpha1
+kind: Workload
+metadata:
+  name: podinfo-workload
+  namespace: default
+  labels:
+    openchoreo.dev/project: lab
+    openchoreo.dev/component: podinfo
+    platform.lab/app: podinfo
+    platform.lab/stage: dev
+spec:
+  container:
+    env:
+    - key: PODINFO_UI_MESSAGE
+      value: podinfo @ dev
+    image: ghcr.io/stefanprodan/podinfo:6.15.0
+  endpoints:
+    http:
+      port: 9898
+      type: HTTP
+      visibility:
+      - external
+  owner:
+    componentName: podinfo
+    projectName: lab
