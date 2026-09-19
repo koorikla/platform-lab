@@ -3,78 +3,24 @@
 # Kargo Project app-<app>, Warehouse on the image + the app's config, Stages running the render-app
 # ClusterPromotionTask, which renders openchoreo-app (mode=release) into rendered/<stage>:apps/<app>/release/.
 # Kargo writes only rendered/* (invariant 5): no promotion writes main.
+# What kargo-pipeline renders for kind=app: its unit tests (repos/platform-charts/kargo-pipeline/tests/). Here: the
+# contracts with the config repo (render-app task, apps, appset) and with the openchoreo-app chart.
 source "$(dirname "$0")/lib.sh"
-stage() { echo "select(.kind==\"Stage\" and .metadata.name==\"$1\")"; }
-var() { echo "$(stage "$1") | .spec.promotionTemplate.spec.steps[0].vars[] | select(.name==\"$2\") | .value"; }
 ra=$config/kargo/shared/render-app.yaml
 kp=$charts/kargo-pipeline
-
-# --- kargo-pipeline, kind=app
-o=$(render p $kp --set kind=app --set name=podinfo --set image=ghcr.io/stefanprodan/podinfo --set imageConstraint=^6.0.0)
-assert_yq "$o" 'select(.kind=="Project") | .metadata.name' app-podinfo
-assert_yq "$o" 'select(.kind=="Namespace") | .metadata.labels["kargo.akuity.io/project"]' true
-assert_yq "$o" '[select(.kind=="Warehouse")] | length' 1
 w='select(.kind=="Warehouse") | .spec.subscriptions'
-assert_yq "$o" "${w} | length" 2
-# a new image tag is Freight...
-assert_yq "$o" "${w}[0].image.repoURL" ghcr.io/stefanprodan/podinfo
-assert_yq "$o" "${w}[0].image.imageSelectionStrategy" SemVer
-assert_yq "$o" "${w}[0].image.constraint" '^6.0.0'
-# ...and so is a main commit changing what the release freezes: the app's definition/env config or the chart
-assert_yq "$o" "${w}[1].git.repoURL" 'git@github.com:koorikla/platform-lab.git'
-assert_yq "$o" "${w}[1].git.branch" main
-assert_yq "$o" "${w}[1].git.includePaths | join(\",\")" 'repos/apps/podinfo/,repos/platform-charts/openchoreo-app/'
-# same stages as addons: a canary-ring cluster binds from rendered/dev-canary (#17), so apps need that branch too
-assert_yq "$o" '[select(.kind=="Stage")] | map(.metadata.name) | join(",")' \
-  "$(yq '.stages | map(.name) | join(",")' $kp/values.yaml)"
-assert_yq "$o" "[select(.kind==\"Stage\")] | map(.metadata.name) | contains([\"dev-canary\"])" true
-assert_yq "$o" "$(var dev-canary app)" podinfo
-assert_yq "$o" "$(var dev-canary image)" ghcr.io/stefanprodan/podinfo
-assert_yq "$o" "$(var dev-canary env)" dev
-assert_yq "$o" "$(var dev-canary branch)" dev-canary
-assert_yq "$o" "$(var prod branch)" prod
-# contract: every Stage passes exactly the vars render-app declares, to the task of that name
+
+# --- kargo-pipeline (kind=app) x render-app x openchoreo-app
+o=$(render p $kp --set kind=app --set name=podinfo --set image=ghcr.io/stefanprodan/podinfo --set imageConstraint=^6.0.0)
+# every Stage passes exactly the vars render-app declares, to the task of that name
 want=$(yq '.spec.vars[].name' $ra | sort | paste -sd, -)
 assert_yq "$o" '[select(.kind=="Stage") | .spec.promotionTemplate.spec.steps[0].vars | map(.name) | sort | join(",")]
   | unique | join(";")' "$want"
 assert_yq "$o" '[select(.kind=="Stage") | .spec.promotionTemplate.spec.steps[0].task.name] | unique | join(",")' \
   "$(yq .metadata.name $ra)"
-# the image var names the Warehouse subscription imageFrom() looks the Freight up by
-assert_yq "$o" "[select(.kind==\"Stage\") | .spec.promotionTemplate.spec.steps[0].vars[] | select(.name==\"image\")
-  | .value] | unique | join(\",\")" "$(yq eval-all "${w}[0].image.repoURL" "$o")"
-# promotion gate: the #26 verification reads an addon's worker Applications; an app has none until #17 (its
-# releases are bound on the hub), so kind=app renders no verification at all (it would fail every canary stage)...
-assert_yq "$o" '[select(.kind=="AnalysisTemplate" or .kind=="Role" or .kind=="RoleBinding" or .kind=="ServiceAccount"
-  or .kind=="ConfigMap")] | length' 0
-assert_yq "$o" '[select(.kind=="Stage") | .spec | has("verification")] | any' false
-# ...and dev follows its canary stage after a soak instead; the other stages chain without one
-assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.stages[0]" dev-canary
-assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.requiredSoakTime" "$(yq .appSoak $kp/values.yaml)"
-[ "$(yq .appSoak $kp/values.yaml)" != null ] || fail "appSoak must have a default"
-assert_yq "$o" "[$(stage dev-canary), $(stage nit), $(stage sit), $(stage prod)] | map(.spec.requestedFreight[0].sources
-  | has(\"requiredSoakTime\")) | any" false
-assert_yq "$o" "$(stage nit) | .spec.requestedFreight[0].sources.stages[0]" dev
-assert_yq "$o" "$(stage sit) | .spec.requestedFreight[0].sources.stages[0]" nit
-assert_yq "$o" "$(stage prod) | .spec.requestedFreight[0].sources.stages[0]" sit
-# an explicit stage soak wins over appSoak
-printf 'stages:\n  - { name: dev-canary, env: dev }\n  - { name: dev, env: dev, soak: 1h }\n' > "$tmp/soak.yaml"
-x=$(render p $kp --set kind=app --set name=foo --set image=example.org/foo -f "$tmp/soak.yaml")
-assert_yq "$x" "$(stage dev) | .spec.requestedFreight[0].sources.requiredSoakTime" 1h
-# addons keep verification and get no appSoak
-ad=$(render p $kp --set name=cert-manager)
-assert_yq "$ad" '[select(.kind=="AnalysisTemplate")] | length' 1
-assert_yq "$ad" "$(stage dev) | .spec.requestedFreight[0].sources | has(\"requiredSoakTime\")" false
 # the one stage that renders the Component's Workload (openchoreo-app workloadStage) must be a pipeline stage, or no
 # Workload is ever rendered and the Component never becomes Ready
 assert_yq "$o" "[select(.kind==\"Stage\") | .metadata.name] | contains([\"$(yq .workloadStage $charts/openchoreo-app/values.yaml)\"])" true
-# no constraint: any semver tag (no empty constraint field)
-n=$(render p $kp --set kind=app --set name=foo --set image=example.org/foo)
-assert_yq "$n" "${w}[0].image | has(\"constraint\")" false
-# an addon pipeline has no app Warehouse and vice versa
-a=$(render p $kp --set name=cert-manager)
-assert_yq "$a" "[select(.kind==\"Warehouse\")] | length" 1
-assert_yq "$a" "${w} | map(has(\"image\")) | any" false
-assert_fails helm template p $kp --set kind=app --set name=foo                     # no image
 
 # --- render-app: shape (same conventions as render-addon)
 h='.spec.steps[] | select(.uses=="helm-template") | .config'

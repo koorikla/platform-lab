@@ -1,0 +1,109 @@
+suite: Stages - chain, soak, and the vars handed to render-<kind>
+templates:
+  - stages.yaml
+set:
+  name: cert-manager
+tests:
+  - it: renders one Stage per values stage, in promotion order
+    asserts:
+      - hasDocuments: { count: 4 }
+      - equal: { path: metadata.name, value: dev-canary }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: dev }
+        documentIndex: 1
+      - equal: { path: metadata.name, value: test }
+        documentIndex: 2
+      - equal: { path: metadata.name, value: prod }
+        documentIndex: 3
+      - equal: { path: metadata.namespace, value: addon-cert-manager }
+
+  - it: feeds the first stage from the Warehouse and every next one from its predecessor
+    asserts:
+      - equal: { path: spec.requestedFreight, value: [{ origin: { kind: Warehouse, name: cert-manager }, sources: { direct: true } }] }
+        documentSelector: { path: metadata.name, value: dev-canary }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [dev-canary] } }
+        documentSelector: { path: metadata.name, value: dev }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [dev] } }
+        documentSelector: { path: metadata.name, value: test }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [test] } }
+        documentSelector: { path: metadata.name, value: prod }
+
+  # a soak is a timer that ignores health: the canary gate is verification (verification_test.yaml)
+  - it: addon - no soak anywhere by default
+    asserts:
+      - notExists: { path: 'spec.requestedFreight[0].sources.requiredSoakTime' }
+
+  - it: an explicit stage soak becomes requiredSoakTime
+    set:
+      stages: [{ name: a, env: dev }, { name: b, env: dev, soak: 1h30m }]
+    documentSelector: { path: metadata.name, value: b }
+    asserts:
+      - equal: { path: 'spec.requestedFreight[0].sources.requiredSoakTime', value: 1h30m }
+
+  - it: rejects a soak on the first stage (nothing upstream to soak in)
+    set:
+      stages: [{ name: a, env: dev, soak: 5m }]
+    asserts:
+      - failedTemplate: { errorPattern: "stages\\[0\\] \\(a\\) takes Freight from the Warehouse" }
+
+  - it: rejects a soak that is not a Kargo duration (fails the render, not the Kargo webhook after a sync)
+    set:
+      stages: [{ name: a, env: dev }, { name: b, env: dev, soak: 15 }]
+    asserts:
+      - failedTemplate: { errorPattern: "stages\\[\\]\\.soak of b: 15 is not a duration" }
+
+  - it: runs render-addon as step `render` (later steps read outputs.render.commit), then records the commit on the Stage
+    asserts:
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].task', value: { name: render-addon, kind: ClusterPromotionTask } }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].as', value: render }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[1].uses', value: set-metadata }
+      # quote(): a SHA of digits (and one e) would otherwise come back from Kargo's evaluator as a number
+      - equal:
+          path: 'spec.promotionTemplate.spec.steps[1].config.updates[0]'
+          value: { kind: Stage, name: dev-canary, values: { renderedCommit: '${{ quote(outputs.render.commit) }}' } }
+        documentSelector: { path: metadata.name, value: dev-canary }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[1].config.updates[0].name', value: prod }
+        documentSelector: { path: metadata.name, value: prod }
+
+  # names and order are the contract with render-addon's spec.vars (hack/tests/test_kargo_addon_pipeline.sh)
+  - it: addon - passes repoURL, addon, chart, namespace, releaseName, env, branch, pr
+    documentSelector: { path: metadata.name, value: dev-canary }
+    set: { chart: cert-manager, namespace: cert-manager, releaseName: cert-manager }
+    asserts:
+      - equal:
+          path: 'spec.promotionTemplate.spec.steps[0].vars'
+          value:
+            - { name: repoURL, value: git@github.com:koorikla/platform-lab.git }
+            - { name: addon, value: cert-manager }
+            - { name: chart, value: cert-manager }
+            - { name: namespace, value: cert-manager }
+            - { name: releaseName, value: cert-manager }
+            - { name: env, value: dev }          # dev-canary renders dev values into its own branch
+            - { name: branch, value: dev-canary }
+            - { name: pr, value: "false" }
+
+  - it: addon - each stage renders its env into its own branch
+    asserts:
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "branch")].value', value: prod }
+        documentSelector: { path: metadata.name, value: prod }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "env")].value', value: prod }
+        documentSelector: { path: metadata.name, value: prod }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "pr")].value', value: "false" }
+        documentSelector: { path: metadata.name, value: prod }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "repoURL")].value', value: git@github.com:koorikla/platform-lab.git }
+        documentSelector: { path: metadata.name, value: dev }
+
+  - it: addon - chart, namespace and releaseName default to the name
+    set: { name: foo }
+    documentSelector: { path: metadata.name, value: dev }
+    asserts:
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "chart")].value', value: foo }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "namespace")].value', value: foo }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "releaseName")].value', value: foo }
+
+  - it: addon - an explicit chart is passed as is, the addon keeps the name
+    set: { name: foo, chart: bar }
+    documentSelector: { path: metadata.name, value: dev }
+    asserts:
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "chart")].value', value: bar }
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "addon")].value', value: foo }

@@ -1,0 +1,38 @@
+suite: Kargo project <kind>-<name>, its namespace and promotion policies
+templates:
+  - project.yaml
+set:
+  name: cert-manager
+tests:
+  - it: names the project after kind and name, in a namespace Kargo may adopt
+    asserts:
+      - equal: { path: metadata.name, value: addon-cert-manager }
+        documentSelector: { path: kind, value: Project }
+      - equal: { path: 'metadata.labels["kargo.akuity.io/project"]', value: "true" }
+        documentSelector: { path: kind, value: Namespace }
+
+  - it: names an app pipeline app-<name>
+    set: { kind: app, image: ghcr.io/stefanprodan/podinfo, name: podinfo }
+    documentSelector: { path: kind, value: Project }
+    asserts:
+      - equal: { path: metadata.name, value: app-podinfo }
+
+  # canary ring (#5, #26): dev auto-promotes, but only Freight verified in dev-canary (verification_test.yaml)
+  - it: auto-promotes dev-canary and dev only
+    documentSelector: { path: kind, value: ProjectConfig }
+    asserts:
+      - equal:
+          path: spec.promotionPolicies
+          value:
+            - { stageSelector: { name: dev-canary }, autoPromotionEnabled: true }
+            - { stageSelector: { name: dev }, autoPromotionEnabled: true }
+
+  - it: requires a name
+    set: { name: "" }
+    asserts:
+      - failedTemplate: { errorPattern: "name is required" }
+
+  - it: rejects an unknown kind
+    set: { kind: bogus }
+    asserts:
+      - failedTemplate: { errorPattern: 'kind "bogus" is not supported' }

@@ -1,0 +1,68 @@
+suite: Stages of an app pipeline (kind=app, issue 16)
+templates:
+  - stages.yaml
+set:
+  kind: app
+  name: podinfo
+  image: ghcr.io/stefanprodan/podinfo
+  imageConstraint: ^6.0.0
+tests:
+  # a canary-ring cluster binds from rendered/dev-canary (#17), so apps need that branch too
+  - it: has the same stages as an addon pipeline
+    asserts:
+      - hasDocuments: { count: 4 }
+      - equal: { path: metadata.name, value: dev-canary }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: prod }
+        documentIndex: 3
+
+  # names and order are the contract with render-app's spec.vars (hack/tests/test_app_pipeline.sh)
+  - it: passes repoURL, app, image, env, branch, pr to render-app
+    documentSelector: { path: metadata.name, value: dev-canary }
+    asserts:
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].task.name', value: render-app }
+      - equal:
+          path: 'spec.promotionTemplate.spec.steps[0].vars'
+          value:
+            - { name: repoURL, value: git@github.com:koorikla/platform-lab.git }
+            - { name: app, value: podinfo }
+            - { name: image, value: ghcr.io/stefanprodan/podinfo }   # the Warehouse subscription imageFrom() finds
+            - { name: env, value: dev }
+            - { name: branch, value: dev-canary }
+            - { name: pr, value: "false" }
+
+  - it: renders prod into rendered/prod
+    documentSelector: { path: metadata.name, value: prod }
+    asserts:
+      - equal: { path: 'spec.promotionTemplate.spec.steps[0].vars[?(@.name == "branch")].value', value: prod }
+
+  # the #26 verification reads an addon's worker Applications; an app has none until #17 binds its releases on the hub
+  - it: renders no verification (it would fail every canary stage)
+    asserts:
+      - notExists: { path: spec.verification }
+
+  - it: lets dev follow its canary stage only after appSoak
+    documentSelector: { path: metadata.name, value: dev }
+    asserts:
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [dev-canary], requiredSoakTime: 15m } }
+
+  - it: chains the other stages without a soak
+    asserts:
+      - notExists: { path: 'spec.requestedFreight[0].sources.requiredSoakTime' }
+        documentSelector: { path: metadata.name, value: dev-canary }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [dev] } }
+        documentSelector: { path: metadata.name, value: test }
+      - equal: { path: 'spec.requestedFreight[0].sources', value: { stages: [test] } }
+        documentSelector: { path: metadata.name, value: prod }
+
+  - it: an explicit stage soak wins over appSoak
+    set:
+      stages: [{ name: dev-canary, env: dev }, { name: dev, env: dev, soak: 1h }]
+    documentSelector: { path: metadata.name, value: dev }
+    asserts:
+      - equal: { path: 'spec.requestedFreight[0].sources.requiredSoakTime', value: 1h }
+
+  - it: requires the image
+    set: { image: "" }
+    asserts:
+      - failedTemplate: { errorPattern: "image \\(repository\\) is required for kind=app" }

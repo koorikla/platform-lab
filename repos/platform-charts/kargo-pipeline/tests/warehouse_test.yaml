@@ -1,0 +1,73 @@
+suite: Warehouse = what becomes Freight
+templates:
+  - warehouse-addon.yaml
+  - warehouse-app.yaml
+tests:
+  # rendered manifests pattern: a commit touching the chart or the addon's config folder is Freight; everything in the
+  # folder is rendered (fleet + env values), so nothing is excluded
+  - it: addon - subscribes to main, restricted to the chart and the addon's config folder
+    template: warehouse-addon.yaml
+    set: { name: cert-manager }
+    asserts:
+      - equal: { path: metadata.namespace, value: addon-cert-manager }
+      - equal:
+          path: spec.subscriptions
+          value:
+            - git:
+                repoURL: git@github.com:koorikla/platform-lab.git
+                branch: main
+                commitSelectionStrategy: NewestFromBranch
+                includePaths:
+                  - repos/platform-charts/cert-manager/
+                  - repos/platform-config/addons/workers/cert-manager/
+
+  - it: addon - an explicit chart replaces the chart path (the config folder stays the addon's name)
+    template: warehouse-addon.yaml
+    set: { name: foo, chart: bar }
+    asserts:
+      - equal:
+          path: spec.subscriptions[0].git.includePaths
+          value: [repos/platform-charts/bar/, repos/platform-config/addons/workers/foo/]
+
+  - it: addon - renders no app Warehouse
+    template: warehouse-app.yaml
+    set: { name: cert-manager }
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  # a new image tag is Freight, and so is a main commit changing what the release freezes (app config or the chart)
+  - it: app - subscribes to the image (semver, constraint) and to the app's config + the openchoreo-app chart
+    template: warehouse-app.yaml
+    set: { kind: app, name: podinfo, image: ghcr.io/stefanprodan/podinfo, imageConstraint: ^6.0.0 }
+    asserts:
+      - equal:
+          path: spec.subscriptions
+          value:
+            - image:
+                repoURL: ghcr.io/stefanprodan/podinfo
+                imageSelectionStrategy: SemVer
+                constraint: ^6.0.0
+                discoveryLimit: 5
+            - git:
+                repoURL: git@github.com:koorikla/platform-lab.git
+                branch: main
+                commitSelectionStrategy: NewestFromBranch
+                includePaths: [repos/apps/podinfo/, repos/platform-charts/openchoreo-app/]
+
+  - it: app - no constraint means any semver tag (no empty constraint field)
+    template: warehouse-app.yaml
+    set: { kind: app, name: foo, image: example.org/foo }
+    asserts:
+      - notExists: { path: 'spec.subscriptions[0].image.constraint' }
+
+  - it: app - renders no addon Warehouse
+    template: warehouse-addon.yaml
+    set: { kind: app, name: foo, image: example.org/foo }
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: app - requires the image
+    template: warehouse-app.yaml
+    set: { kind: app, name: foo }
+    asserts:
+      - failedTemplate: { errorPattern: "image \\(repository\\) is required for kind=app" }
