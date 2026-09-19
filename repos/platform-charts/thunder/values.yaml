@@ -13,18 +13,28 @@
 #   hook-delete-policy hook-failed (below) so later syncs re-apply it instead of deleting the in-use PVC (data loss).
 # - Job thunder-setup runs on every sync; all bootstrap scripts are check-then-create/update, so re-runs are safe.
 # - ServiceAccount + ConfigMaps are re-created on every sync (no chart knob; Thunder's API use is an endpoints read).
+# - ExternalSecret thunder-backstage-client (ours, templates/): weight -20, before the Job; see the template.
 #
-# LAB ONLY - literal/well-known credentials (all from upstream; follow-up in the spirit of #21 to generate them):
+# Backstage client secret: NOT a literal (upstream: "backstage-portal-secret"). Generated in-cluster, OpenBao
+# secret/openchoreo/backstage-client-secret (#9) -> ExternalSecret -> setup Job env -> script 51.
+#
+# LAB ONLY - literal/well-known credentials (from upstream; follow-up in the spirit of #21 to generate them):
 # - users (script 50): admin@openchoreo.dev/Admin@123, developer@openchoreo.dev/Dev@123,
 #   platform-engineer@openchoreo.dev/PE@123, sre@openchoreo.dev/SRE@123
-# - Backstage client secret "backstage-portal-secret" (script 51); OpenChoreo's backstage-secrets client-secret (#9)
-#   must be the same value
 # - Thunder console admin admin/admin: not in this file, created by the image's bootstrap/01-default-resources.sh
 # - token signing + encryption keys: files shipped in the image (repository/resources/security/*); VERIFY whether they
 #   are per build (then shared by every install of 0.28.0) and mount per-install keys before trusting these tokens
 #
 # Footprint: one pod, requests 100m CPU / 50Mi, limits 200m / 100Mi (chart defaults = upstream); the setup Job the same
 # while it runs (per sync, ~1 min); PVC 1Gi on local-path (node-affine: Job and Deployment share the node).
+
+# Backstage OAuth client secret from OpenBao (templates/backstage-client-secret.yaml). The store `default` admits
+# namespace thunder (openbao values `openchoreo.namespaces`). secretName must match thunder.setup.env below.
+backstageClientSecret:
+  store: default
+  remoteKey: openchoreo/backstage-client-secret   # KV v2 mount `secret`, property `value`
+  secretName: thunder-backstage-client
+
 thunder:
   fullnameOverride: thunder
 
@@ -93,8 +103,14 @@ thunder:
 
   setup:
     enabled: true
+    # lab: setup.sh sources each bootstrap script in a subshell, so they see the Job's env
+    env:
+      - name: BACKSTAGE_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef: { name: thunder-backstage-client, key: client-secret }   # = backstageClientSecret.secretName
 
-  # Run by the setup Job against the Thunder it starts on localhost:8090. Upstream scripts 50, 51, 54 verbatim.
+  # Run by the setup Job against the Thunder it starts on localhost:8090. Upstream scripts 50, 51, 54 verbatim, except
+  # the Backstage client secret in 51 (lab: from env, see backstageClientSecret).
   # lab: upstream's 52, 53, 55-61 dropped - service clients with well-known secrets for components the lab doesn't run
   # (customer portal sample, RCA/FinOps agents, MCP, workload publisher, observer, e2e); service_mcp_client would even
   # map to OpenChoreo admin. Add a client back together with the feature that uses it.
@@ -275,6 +291,8 @@ thunder:
         set -e
 
         THUNDER_URL="http://localhost:8090"
+        # lab: generated secret (OpenBao, #9) instead of upstream's literal; alphanumeric, so JSON-safe as spliced below
+        : "${BACKSTAGE_CLIENT_SECRET:?not set - the setup Job reads it from Secret thunder-backstage-client}"
 
         log_info "Checking if application 'Backstage' already exists..."
         existing_apps=$(curl -s --max-time 10 "${THUNDER_URL}/applications")
@@ -294,7 +312,7 @@ thunder:
               "type": "oauth2",
               "config": {
                 "client_id": "openchoreo-backstage-client",
-                "client_secret": "backstage-portal-secret",
+                "client_secret": "'"${BACKSTAGE_CLIENT_SECRET}"'",
                 "redirect_uris": [
                   "http://openchoreo.localhost:8080/api/auth/openchoreo-auth/handler/frame"
                 ],

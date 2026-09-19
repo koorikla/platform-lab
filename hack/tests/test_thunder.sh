@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Thunder IdP on the hub (upstream OpenChoreo 1.2.5 k3d values) + the Argo CD health override its PVC hook needs
+# Thunder IdP on the hub (upstream OpenChoreo 1.2.5 k3d values). Its PVC hook also needs the argocd-cm PVC health
+# override (test_argocd_pvc_health.sh); its Backstage client secret comes from OpenBao (#9 contract).
 source "$(dirname "$0")/lib.sh"
 a=$config/addons/management/thunder
 assert_yq $a/addon.yaml '.addon.namespace' thunder
@@ -27,12 +28,25 @@ assert_yq - '.cors.allowed_origins | sort | join(",")' \
 
 # Helm hooks become Argo sync hooks. Exactly these, and the PVC must survive every sync after the first:
 # hook-failed -> HookFailed instead of the default BeforeHookCreation (which deletes the in-use PVC).
-# No DB-credentials Secret hook: sqlite has no password.
-hooks='ConfigMap/thunder-bootstrap:pre-install:,ConfigMap/thunder-setup-config-map:pre-install:,Job/thunder-setup:pre-install:hook-succeeded,PersistentVolumeClaim/thunder-database-pvc:pre-install:hook-failed,ServiceAccount/thunder-service-account:pre-install:'
-assert_yq "$o" '[select(.metadata.annotations["helm.sh/hook"] != null) | .kind + "/" + .metadata.name + ":" + .metadata.annotations["helm.sh/hook"] + ":" + (.metadata.annotations["helm.sh/hook-delete-policy"] // "")] | sort | join(",")' "$hooks"
+# No DB-credentials Secret hook: sqlite has no password. The ExternalSecret is ours (Backstage client secret, below).
+hooks='ConfigMap/thunder-bootstrap:pre-install:-10:,ConfigMap/thunder-setup-config-map:pre-install:-10:,ExternalSecret/thunder-backstage-client:pre-install:-20:hook-failed,Job/thunder-setup:pre-install:-5:hook-succeeded,PersistentVolumeClaim/thunder-database-pvc:pre-install:-15:hook-failed,ServiceAccount/thunder-service-account:pre-install:-10:'
+assert_yq "$o" '[select(.metadata.annotations["helm.sh/hook"] != null) | .kind + "/" + .metadata.name + ":" + .metadata.annotations["helm.sh/hook"] + ":" + .metadata.annotations["helm.sh/hook-weight"] + ":" + (.metadata.annotations["helm.sh/hook-delete-policy"] // "")] | sort | join(",")' "$hooks"
 assert_yq "$o" '[select(.metadata.annotations["argocd.argoproj.io/hook"] != null)] | length' 0
 # the setup Job is the PVC's first consumer (local-path is WaitForFirstConsumer), so it must mount it
 assert_yq "$o" 'select(.kind=="Job") | .spec.template.spec.volumes[] | select(.persistentVolumeClaim) | .persistentVolumeClaim.claimName' thunder-database-pvc
+
+# Backstage OAuth client secret (#9 contract): generated in-cluster, OpenBao secret/openchoreo/backstage-client-secret
+# (property value), read through ClusterSecretStore `default`. PreSync hook at a lower weight than the Job: Argo waits
+# until the ExternalSecret is Ready (= Secret written) before the Job starts. hook-failed keeps it (and its Secret)
+# across syncs; BeforeHookCreation would delete it and garbage-collect the Secret on every sync.
+es='select(.kind=="ExternalSecret" and .metadata.name=="thunder-backstage-client")'
+assert_yq "$o" "$es | .spec.secretStoreRef.kind + \"/\" + .spec.secretStoreRef.name" ClusterSecretStore/default
+assert_yq "$o" "$es | .spec.data | map(.secretKey + \"=\" + .remoteRef.key + \"#\" + .remoteRef.property) | join(\",\")" \
+  client-secret=openchoreo/backstage-client-secret#value
+assert_yq "$o" "$es | .spec.target.name" thunder-backstage-client
+assert_yq "$o" 'select(.kind=="Job") | .spec.template.spec.containers[0].env[] | select(.name=="BACKSTAGE_CLIENT_SECRET") | .valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key' \
+  thunder-backstage-client/client-secret
+grep -q backstage-portal-secret "$o" && fail "upstream literal Backstage client secret still rendered"
 
 # seed data (bootstrap scripts run by the setup Job; every script is check-then-create/update, so re-runs are safe)
 scripts=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="thunder-bootstrap") | .data' "$o")
@@ -47,15 +61,31 @@ payloads=$tmp/payloads.json
 for k in $(yq 'keys | .[]' <<<"$scripts"); do
   yq ".[\"$k\"]" <<<"$scripts" >"$tmp/$k"
   if command -v shellcheck >/dev/null; then shellcheck -s bash "$tmp/$k" || fail "shellcheck $k"; fi
+  # '"${VAR}"' = the script splices an env var into the single-quoted payload: validate it as a string
   awk "/APP_PAYLOAD='/ {f=1; sub(/.*APP_PAYLOAD='/, \"\")} f && /^ *}'\$/ {print \"}\"; f=0; next} f" "$tmp/$k" |
-    jq -c . >>"$payloads" || fail "$k: APP_PAYLOAD is not valid JSON"
+    sed -E "s/'\"\\$\\{([A-Z_]+)\\}\"'/env:\\1/g" | jq -c . >>"$payloads" || fail "$k: APP_PAYLOAD is not valid JSON"
 done
 app() { jq -c --arg c "$1" '.inbound_auth_config[].config | select(.client_id == $c)' "$payloads"; }
 got=$(jq -r '.inbound_auth_config[].config.client_id' "$payloads" | sort | paste -sd, -)
 [ "$got" = argocd,kargo,openchoreo-backstage-client,openchoreo-cli ] || fail "OAuth clients = '$got'"
-# Backstage: upstream literal secret (backstage-secrets client-secret must match, see values.yaml LAB ONLY)
 [ "$(app openchoreo-backstage-client | jq -r '.redirect_uris | join(",")')" = \
   http://openchoreo.localhost:8080/api/auth/openchoreo-auth/handler/frame ] || fail "backstage redirect_uris"
+# Backstage script with stubbed curl/log_*: it registers exactly $BACKSTAGE_CLIENT_SECRET and refuses to run without it
+b=$tmp/51-backstage-app.sh
+backstage() {   # backstage <secret> -> the JSON body the script POSTs
+  BACKSTAGE_CLIENT_SECRET=$1 bash -c '
+    set -e
+    log_info() { :; }; log_error() { :; }
+    curl() { while [ $# -gt 0 ]; do [ "$1" = --data ] && { printf "%s" "$2" >"$OUT"; shift; }; shift; done; echo "{}"; }
+    source "$0"' "$b"
+}
+OUT=$tmp/posted.json; export OUT
+backstage Abc123xyz >/dev/null || fail "51-backstage-app.sh failed with a secret set"
+[ "$(jq -r '.inbound_auth_config[0].config | .client_id + ":" + .client_secret' "$OUT")" = openchoreo-backstage-client:Abc123xyz ] ||
+  fail "51-backstage-app.sh posts '$(jq -c '.inbound_auth_config[0].config.client_secret' "$OUT")', want the env secret"
+rm -f "$OUT"
+assert_fails backstage ""
+[ ! -e "$OUT" ] || fail "51-backstage-app.sh posted without a secret"
 # Argo CD / Kargo (#19): public PKCE clients, no secret anywhere; groups + email in the ID token
 for c in argocd:http://localhost:8090/pkce/verify kargo:http://localhost:8091/login; do
   j=$(app "${c%%:*}")
@@ -67,21 +97,3 @@ for c in argocd:http://localhost:8090/pkce/verify kargo:http://localhost:8091/lo
   [ "$(jq -c '.scope_claims.groups' <<<"$j")" = '["groups"]' ] || fail "${c%%:*}: no groups scope claim"
 done
 
-# Argo CD (hub umbrella): a Pending Helm-hook PVC is Healthy, so PreSync reaches the Job that binds it
-h=$(render argocd $charts/argo-cd -n argocd -f $config/addons/management/argo-cd/values.yaml)
-lua=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="argocd-cm") | .data["resource.customizations.health.PersistentVolumeClaim"]' "$h")
-grep -q 'helm.sh/hook' <<<"$lua" || fail "argocd-cm: no PVC health override for Helm hooks"
-# evaluate the Lua with the real Argo CD code when the CLI is around (CI may not have it)
-if command -v argocd >/dev/null; then
-  cm=$tmp/argocd-cm.yaml; yq 'select(.kind=="ConfigMap" and .metadata.name=="argocd-cm")' "$h" >"$cm"
-  pvc() {   # pvc <phase> <hook annotation or ""> -> STATUS reported by argocd admin
-    local f; f=$(mktemp "$tmp/pvc.XXXXXX")
-    yq -n ".apiVersion=\"v1\" | .kind=\"PersistentVolumeClaim\" | .metadata.name=\"p\" | .status.phase=\"$1\"" >"$f"
-    [ -z "$2" ] || yq -i ".metadata.annotations[\"helm.sh/hook\"]=\"$2\"" "$f"
-    argocd admin settings resource-overrides health "$f" --argocd-cm-path "$cm" 2>&1 | awk '/^STATUS:/ {print $2}'
-  }
-  [ "$(pvc Pending pre-install)" = Healthy ] || fail "hook PVC Pending: $(pvc Pending pre-install), want Healthy"
-  [ "$(pvc Pending "")" = Progressing ] || fail "plain PVC Pending: $(pvc Pending ""), want Progressing"
-  [ "$(pvc Bound "")" = Healthy ] || fail "PVC Bound: $(pvc Bound ""), want Healthy"
-  [ "$(pvc Lost "")" = Degraded ] || fail "PVC Lost: $(pvc Lost ""), want Degraded"
-fi
