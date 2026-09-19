@@ -31,7 +31,8 @@ spec:
     - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicyBinding }
     - { group: external-secrets.io, kind: ClusterSecretStore }       # openbao, hub-local in-cluster store
     - { group: kargo.akuity.io, kind: Project }                      # kargo-pipelines, kargo-addon-*
-    - { group: kargo.akuity.io, kind: ClusterPromotionTask }         # render-addon
+    - { group: kargo.akuity.io, kind: ClusterPromotionTask }         # render-addon, render-app
+    - { group: openchoreo.dev, kind: ClusterDataPlane }              # cluster chart: a worker registered in OpenChoreo
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject

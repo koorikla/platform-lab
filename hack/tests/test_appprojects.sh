@@ -35,15 +35,29 @@ add() {
 plain() { local out; out=$(mktemp "$tmp/plain.XXXXXX"); find "$@" -name '*.yaml' -exec sh -c 'cat "$1"; echo ---' _ {} \; >"$out"; echo "$out"; }
 
 # --- hub (platform-mgmt) ---------------------------------------------------------------------------------------------
+# Argo passes the hub's API versions to helm, and charts gate on them (the cluster chart registers workers in
+# OpenChoreo only while the hub serves openchoreo.dev). The hub serves every CRD its addons install: collect those
+# first, then render every hub app with them (--api-versions group/version and group/version/Kind).
+hubcrds=$tmp/hub-crds.yaml; : >"$hubcrds"
 for f in $config/addons/management/*/addon.yaml; do
   read -r n c ns rel < <(yq '.addon | [.name, .chart, .namespace, .releaseName] | join(" ")' "$f")
   r=$(render "$rel" "$charts/$c" -n "$ns" --include-crds -f "$(dirname "$f")/values.yaml")
+  yq 'select(.kind == "CustomResourceDefinition")' "$r" >>"$hubcrds"; echo --- >>"$hubcrds"
+done
+apiv=()
+while read -r gv; do apiv+=(--api-versions "$gv"); done < <(yq -N 'select(.kind == "CustomResourceDefinition")
+  | .spec.group as $g | .spec.names.kind as $k | .spec.versions[] | select(.served) | [$g + "/" + .name, $g + "/" + .name + "/" + $k] | .[]' \
+  "$hubcrds" | sort -u)
+[ ${#apiv[@]} -gt 100 ] || fail "hub API versions: only ${#apiv[@]} args"
+for f in $config/addons/management/*/addon.yaml; do
+  read -r n c ns rel < <(yq '.addon | [.name, .chart, .namespace, .releaseName] | join(" ")' "$f")
+  r=$(render "$rel" "$charts/$c" -n "$ns" --include-crds -f "$(dirname "$f")/values.yaml" "${apiv[@]}")
   add "mgmt-$n" platform-mgmt in-cluster "$ns" "$r"
 done
 add fleet-base platform-mgmt in-cluster fleet "$(plain $config/fleet/base)"
 add kargo-pipelines platform-mgmt in-cluster kargo "$(plain $config/kargo)"
 for f in $config/fleet/clusters/*/*.yaml; do
-  r=$(render "$(yq .name "$f")" $charts/cluster -n fleet -f "$f")
+  r=$(render "$(yq .name "$f")" $charts/cluster -n fleet -f "$f" "${apiv[@]}")
   add "cluster-$(yq .name "$f")" platform-mgmt in-cluster fleet "$r"
 done
 workers=()   # "<name> <env>" of every enabled worker cluster (role defaults to worker in the cluster chart)
