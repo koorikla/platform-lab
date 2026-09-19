@@ -1,0 +1,15 @@
+# commitizen: conventional commits -> next semver -> Chart.yaml `version`, CHANGELOG.md, tag v<version>.
+# Run by the release job on main; locally `cz bump --dry-run` shows what the next release would be.
+# TOML rather than YAML: commitizen rewrites this file on every bump and keeps TOML formatting and comments.
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "commitizen"
+version = "0.0.0"
+version_scheme = "semver2"
+# only the chart's own top-level `version:` line; not appVersion, not dependency versions
+version_files = ["Chart.yaml:^version"]
+tag_format = "v$version"
+bump_message = "bump: release $new_version"
+update_changelog_on_bump = true
+# while < 1.0.0 a breaking change bumps the minor version; set false to release 1.0.0
+major_version_zero = true

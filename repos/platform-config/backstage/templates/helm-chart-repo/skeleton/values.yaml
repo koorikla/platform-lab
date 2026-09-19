@@ -1,0 +1,35 @@
+{% if values.chartType == 'umbrella' -%}
+# Umbrella chart: settings for the upstream chart go under its name, Helm hands them to the dependency.
+# Put platform defaults here; own resources (NetworkPolicies, ExternalSecrets, ...) go into templates/.
+${{ values.upstreamChart }}: {}
+{% else -%}
+replicaCount: 1
+
+image:
+  # Replace with the application image; an empty tag falls back to the chart's appVersion.
+  repository: nginxinc/nginx-unprivileged
+  tag: "1.29-alpine"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 64Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+{% endif -%}

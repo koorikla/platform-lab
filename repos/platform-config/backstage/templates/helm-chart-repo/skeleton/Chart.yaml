@@ -1,0 +1,16 @@
+apiVersion: v2
+name: ${{ values.name }}
+description: ${{ values.description | dump }}
+type: application
+# Owned by the release job (`cz bump`, see .cz.toml): write feat:/fix: commits instead of editing it.
+version: 0.0.0
+{%- if values.chartType == 'umbrella' %}
+# The upstream release this chart wraps; bump it together with the dependency below.
+appVersion: ${{ values.upstreamVersion | dump }}
+dependencies:
+  - name: ${{ values.upstreamChart }}
+    version: ${{ values.upstreamVersion | dump }}
+    repository: ${{ values.upstreamRepository }}
+{%- else %}
+appVersion: "0.1.0"
+{%- endif %}

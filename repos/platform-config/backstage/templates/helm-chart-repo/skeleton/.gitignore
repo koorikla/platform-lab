@@ -1,0 +1,4 @@
+# dependencies are pinned by Chart.lock (commit it); the archives are rebuilt by `helm dependency build`
+charts/*.tgz
+dist/
+.cache/

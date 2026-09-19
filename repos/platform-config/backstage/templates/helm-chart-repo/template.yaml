@@ -1,0 +1,202 @@
+# New Helm chart repository: chart scaffold + pre-commit + conventional-commit releases + GitLab CI -> Artifactory.
+# Verified against Backstage 1.51 / scaffolder-backend 4.0.0, the version OpenChoreo 1.2.5's Backstage image ships.
+# That image bundles publish:github but NOT publish:gitlab (no @backstage/plugin-scaffolder-backend-module-gitlab):
+# pick "GitHub" as target there, or run an image with the GitLab module (see ../../README.md). Registered by #12.
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: helm-chart-repo
+  title: Helm chart repository
+  description: >-
+    A Helm chart (plain or umbrella around an upstream chart) in its own GitLab repository, with pre-commit
+    (helm lint/template, yamllint, conventional commits), semantic versioning from commit messages and a
+    GitLab CI pipeline that publishes every release to Artifactory.
+  tags: [helm, gitlab, artifactory]
+spec:
+  # openchoreo-users is the one Group OpenChoreo's image ships (catalog-entities/org.yaml)
+  owner: group:default/openchoreo-users
+  # any type outside OpenChoreo's own kinds is listed under "Other Templates"
+  type: helm-chart
+
+  parameters:
+    - title: Chart
+      required: [name, description, owner, chartType]
+      properties:
+        name:
+          title: Name
+          description: Chart name = repository name. Lowercase letters, digits and dashes.
+          type: string
+          pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+          maxLength: 53
+          ui:autofocus: true
+        description:
+          title: Description
+          type: string
+        owner:
+          title: Owner
+          description: Team owning the chart in the catalog
+          type: string
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: Group
+        chartType:
+          title: Chart type
+          type: string
+          enum: [plain, umbrella]
+          enumNames: ['Plain chart (own templates)', 'Umbrella chart (wraps one upstream chart)']
+          default: plain
+      dependencies:
+        chartType:
+          oneOf:
+            - properties:
+                chartType: { enum: [plain] }
+            - required: [upstreamChart, upstreamRepository, upstreamVersion]
+              properties:
+                chartType: { enum: [umbrella] }
+                upstreamChart:
+                  title: Upstream chart name
+                  type: string
+                upstreamRepository:
+                  title: Upstream chart repository
+                  description: https://… Helm repository or oci://… registry path
+                  type: string
+                  pattern: '^(https|oci)://'
+                upstreamVersion:
+                  title: Upstream chart version
+                  description: Exact version; later bumps are ordinary `feat`/`fix` commits
+                  type: string
+
+    - title: Repository and publishing
+      required: [publishTarget, artifactoryUrl]
+      properties:
+        publishTarget:
+          title: Git host
+          description: >-
+            GitLab is the intended target. GitHub is the fallback for Backstage images without
+            publish:gitlab (OpenChoreo 1.2.5); the generated pipeline is GitLab CI either way.
+          type: string
+          enum: [gitlab, github]
+          enumNames: [GitLab, 'GitHub (fallback)']
+          default: gitlab
+        artifactoryUrl:
+          title: Artifactory repository URL
+          description: >-
+            oci://<host>/<repo> for an OCI Helm repository (helm push), or
+            https://<host>/artifactory/<repo> for a classic Helm repository (HTTP upload).
+            Stored as the project's CI/CD variable ARTIFACTORY_URL; credentials are never asked for here.
+          type: string
+          pattern: '^(oci|https)://'
+      dependencies:
+        publishTarget:
+          oneOf:
+            - required: [gitlabHost, gitlabGroup]
+              properties:
+                publishTarget: { enum: [gitlab] }
+                gitlabHost:
+                  title: GitLab host
+                  description: Needs an integrations.gitlab entry with a token in app-config
+                  type: string
+                  default: gitlab.com
+                gitlabGroup:
+                  title: GitLab group
+                  description: Full group path, e.g. platform/helm-charts. Also the CODEOWNERS entry.
+                  type: string
+                visibility:
+                  title: Visibility
+                  type: string
+                  enum: [private, internal, public]
+                  default: private
+            - required: [githubOwner]
+              properties:
+                publishTarget: { enum: [github] }
+                githubOwner:
+                  title: GitHub owner
+                  description: Organization or user; also the CODEOWNERS entry
+                  type: string
+
+  steps:
+    - id: fetch
+      name: Render skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          name: ${{ parameters.name }}
+          description: ${{ parameters.description }}
+          owner: ${{ parameters.owner }}
+          chartType: ${{ parameters.chartType }}
+          # skeleton/${{ values.templatesDir }}/ holds the plain chart's objects. A path segment rendering to ''
+          # makes fetch:template skip the entry, so umbrella charts only get skeleton/templates/ (NOTES.txt).
+          templatesDir: ${{ 'templates' if parameters.chartType == 'plain' else '' }}
+          upstreamChart: ${{ parameters.upstreamChart }}
+          upstreamRepository: ${{ parameters.upstreamRepository }}
+          upstreamVersion: ${{ parameters.upstreamVersion }}
+          publishTarget: ${{ parameters.publishTarget }}
+          repoOwner: ${{ parameters.gitlabGroup if parameters.publishTarget == 'gitlab' else parameters.githubOwner }}
+
+    - id: publish-gitlab
+      name: Create GitLab project
+      if: ${{ parameters.publishTarget == 'gitlab' }}
+      action: publish:gitlab
+      input:
+        repoUrl: ${{ parameters.gitlabHost }}?owner=${{ parameters.gitlabGroup }}&repo=${{ parameters.name }}
+        defaultBranch: main
+        # a conventional `feat` commit: the first pipeline on main releases 0.0.0 -> 0.1.0
+        gitCommitMessage: 'feat: scaffold ${{ parameters.name }} from the helm-chart-repo template'
+        settings:
+          description: ${{ parameters.description }}
+          visibility: ${{ parameters.visibility }}
+          topics: [helm-chart]
+          only_allow_merge_if_pipeline_succeeds: true
+        projectVariables:
+          # not a secret; ARTIFACTORY_USER / ARTIFACTORY_TOKEN / RELEASE_TOKEN are set by an admin (README)
+          - key: ARTIFACTORY_URL
+            value: ${{ parameters.artifactoryUrl }}
+            description: Artifactory Helm repository the publish job pushes to (oci:// or https://)
+            masked: false
+            protected: false
+
+    - id: publish-github
+      name: Create GitHub repository (fallback)
+      if: ${{ parameters.publishTarget == 'github' }}
+      action: publish:github
+      input:
+        repoUrl: github.com?owner=${{ parameters.githubOwner }}&repo=${{ parameters.name }}
+        description: ${{ parameters.description }}
+        defaultBranch: main
+        repoVisibility: private
+        gitCommitMessage: 'feat: scaffold ${{ parameters.name }} from the helm-chart-repo template'
+
+    - id: register-gitlab
+      name: Register in catalog
+      if: ${{ parameters.publishTarget == 'gitlab' }}
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-gitlab'].output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+    - id: register-github
+      name: Register in catalog
+      if: ${{ parameters.publishTarget == 'github' }}
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-github'].output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+  output:
+    links:
+      - title: Repository
+        if: ${{ parameters.publishTarget == 'gitlab' }}
+        url: ${{ steps['publish-gitlab'].output.remoteUrl }}
+      - title: Repository
+        if: ${{ parameters.publishTarget == 'github' }}
+        url: ${{ steps['publish-github'].output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        if: ${{ parameters.publishTarget == 'gitlab' }}
+        entityRef: ${{ steps['register-gitlab'].output.entityRef }}
+      - title: Open in catalog
+        icon: catalog
+        if: ${{ parameters.publishTarget == 'github' }}
+        entityRef: ${{ steps['register-github'].output.entityRef }}

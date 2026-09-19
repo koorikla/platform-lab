@@ -1,0 +1,128 @@
+# lint (pre-commit) -> test (render + kubeconform) -> release (main: cz bump -> commit + tag)
+#   -> publish (tag: helm package -> Artifactory)
+#
+# CI/CD variables (Settings > CI/CD > Variables, or inherited from the group). Never put their values in this repo.
+#   ARTIFACTORY_URL    oci://<host>/<repo> (helm push) or https://<host>/artifactory/<repo> (HTTP upload);
+#                      created by the Backstage template, not secret
+#   ARTIFACTORY_USER   masked, protected: Artifactory user / service account with deploy permission
+#   ARTIFACTORY_TOKEN  masked, protected: its access or identity token
+#   RELEASE_TOKEN      masked, protected: project access token (role Maintainer, scope write_repository) that may
+#                      push to main; CI_JOB_TOKEN cannot push
+# Protected variables reach only protected refs: protect `main` and the tag pattern `v*`.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never   # the MR pipeline covers it
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+stages: [lint, test, release, publish]
+
+variables:
+  HELM_VERSION: "4.3.0"
+  KUBECONFORM_VERSION: "0.8.0"
+  KUBERNETES_VERSION: "1.34.0"
+  PRE_COMMIT_VERSION: "4.6.2"
+  COMMITIZEN_VERSION: "4.18.0"
+  PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
+  PRE_COMMIT_HOME: $CI_PROJECT_DIR/.cache/pre-commit
+
+default:
+  image: python:3.13-alpine
+  before_script:
+    - apk add --no-cache curl git
+    - |
+      case "$(uname -m)" in aarch64) ARCH=arm64 ;; *) ARCH=amd64 ;; esac
+      url="https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz"
+      curl -fsSLo /tmp/helm.tgz "$url"
+      echo "$(curl -fsSL "${url}.sha256sum" | cut -d' ' -f1)  /tmp/helm.tgz" | sha256sum -c -
+      tar -xzf /tmp/helm.tgz -C /usr/local/bin --strip-components 1 "linux-${ARCH}/helm"
+      helm version
+
+lint:
+  stage: lint
+  cache:
+    key:
+      files: [.pre-commit-config.yaml]
+    paths: [.cache/pip, .cache/pre-commit]
+  script:
+    - pip install "pre-commit==${PRE_COMMIT_VERSION}"
+    - pre-commit run --all-files --show-diff-on-failure
+
+test:
+  stage: test
+  script:
+    - |
+      base="https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}"
+      file="kubeconform-linux-${ARCH}.tar.gz"
+      curl -fsSLo /tmp/kubeconform.tgz "${base}/${file}"
+      echo "$(curl -fsSL "${base}/CHECKSUMS" | grep " ${file}$" | cut -d' ' -f1)  /tmp/kubeconform.tgz" | sha256sum -c -
+      tar -xzf /tmp/kubeconform.tgz -C /usr/local/bin kubeconform
+    - helm dependency build .
+    # default values plus every ci/*-values.yaml (add one per configuration worth guarding)
+    - |
+      for f in values.yaml ci/*-values.yaml; do
+        [ -f "$f" ] || continue
+        echo "--- helm template -f $f | kubeconform"
+        helm template ci . -f "$f" |
+          kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version "$KUBERNETES_VERSION"
+      done
+
+release:
+  stage: release
+  rules:
+    # the release commit itself is pushed with ci.skip; the message check guards against re-releasing anyway
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE !~ /^bump:/
+  resource_group: release
+  variables:
+    GIT_DEPTH: 0   # commitizen reads every commit since the last tag
+  script:
+    - |
+      : "${RELEASE_TOKEN:?is not set (see the top of .gitlab-ci.yml)}"
+    - pip install "commitizen==${COMMITIZEN_VERSION}"
+    - git config user.name "release-bot"
+    - git config user.email "release-bot@${CI_SERVER_HOST}"
+    - git checkout -B "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA"
+    # exit code 21 = no feat/fix/breaking commit since the last release: nothing to do
+    - cz --no-raise 21 bump --yes
+    - |
+      tag=$(git tag --points-at HEAD)
+      if [ -z "$tag" ]; then echo "no release"; exit 0; fi
+      remote="${CI_SERVER_PROTOCOL}://release-bot:${RELEASE_TOKEN}@${CI_SERVER_FQDN}/${CI_PROJECT_PATH}.git"
+      git push -o ci.skip "$remote" "HEAD:refs/heads/${CI_COMMIT_BRANCH}"
+      git push "$remote" "refs/tags/${tag}"   # separate push: the tag pipeline must run (publish)
+
+publish:
+  stage: publish
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  script:
+    - |
+      : "${ARTIFACTORY_URL:?is not set (see the top of .gitlab-ci.yml)}"
+      : "${ARTIFACTORY_USER:?is not set (see the top of .gitlab-ci.yml)}"
+      : "${ARTIFACTORY_TOKEN:?is not set (see the top of .gitlab-ci.yml)}"
+    - |
+      name=$(helm show chart . | sed -n 's/^name: //p')
+      version=$(helm show chart . | sed -n 's/^version: //p')
+      [ "v$version" = "$CI_COMMIT_TAG" ] || { echo "Chart.yaml version $version != tag $CI_COMMIT_TAG"; exit 1; }
+      helm dependency build .
+      helm package . --destination dist
+      pkg="dist/${name}-${version}.tgz"
+      case "$ARTIFACTORY_URL" in
+        oci://*)
+          registry=${ARTIFACTORY_URL#oci://}
+          printf '%s' "$ARTIFACTORY_TOKEN" |
+            helm registry login "${registry%%/*}" --username "$ARTIFACTORY_USER" --password-stdin
+          helm push "$pkg" "$ARTIFACTORY_URL"
+          ;;
+        https://*)
+          # Artifactory re-indexes local Helm repositories on upload
+          curl -fsS --user "${ARTIFACTORY_USER}:${ARTIFACTORY_TOKEN}" --upload-file "$pkg" \
+            "${ARTIFACTORY_URL%/}/${name}-${version}.tgz"
+          ;;
+        *) echo "ARTIFACTORY_URL must start with oci:// or https://"; exit 1 ;;
+      esac
+  artifacts:
+    paths: [dist/]

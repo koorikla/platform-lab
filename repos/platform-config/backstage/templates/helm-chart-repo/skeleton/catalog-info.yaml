@@ -1,0 +1,16 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{ values.name }}
+  description: ${{ values.description | dump }}
+  annotations:
+{%- if values.publishTarget == 'gitlab' %}
+    gitlab.com/project-slug: ${{ values.repoOwner }}/${{ values.name }}
+{%- else %}
+    github.com/project-slug: ${{ values.repoOwner }}/${{ values.name }}
+{%- endif %}
+  tags: [helm, helm-chart]
+spec:
+  type: helm-chart
+  lifecycle: experimental
+  owner: ${{ values.owner }}
