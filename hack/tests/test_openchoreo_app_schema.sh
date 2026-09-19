@@ -33,7 +33,7 @@ for f in "$cache"/crds/*.yaml; do
 done
 
 c=$charts/openchoreo-app
-a=hack/tests/fixtures/podinfo
+a=$c/tests/values/podinfo   # the chart's unit-test app (shaped like repos/apps/<app>/)
 kc() { kubeconform -strict -summary -schema-location "$schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" - <"$1"; }
 validate() {   # validate <what> <render file>; stdin: kubeconform skips files without a .yaml extension
   local n; n=$(yq eval-all '[select(.kind != null)] | length' "$2"); [ "$n" -gt 0 ] || fail "$1: empty render"

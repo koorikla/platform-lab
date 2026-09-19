@@ -1,0 +1,34 @@
+suite: mode=binding (hub appset, from main) - identity only, every input handed over from the rendered release
+templates:
+  - templates/binding.yaml
+set:
+  mode: binding
+  name: podinfo
+  project: lab
+  releaseName: podinfo-dev-6-15-0-ee034475
+  environment: dev1
+tests:
+  - it: binds the given release to the given environment, nothing else
+    asserts:
+      - hasDocuments: { count: 1 }
+      - isKind: { of: ReleaseBinding }
+      - equal: { path: metadata.name, value: podinfo-dev1 }
+      - equal: { path: 'metadata.labels["openchoreo.dev/environment"]', value: dev1 }
+      - equal:
+          path: spec
+          value:
+            owner: { projectName: lab, componentName: podinfo }
+            environment: dev1
+            releaseName: podinfo-dev-6-15-0-ee034475
+
+  # the release name is never recomputed here
+  - it: ignores app values (the same binding with app.yaml, env values and another tag)
+    values: [values/podinfo/app.yaml, values/podinfo/envs/dev/values.yaml]
+    set: { image.tag: 9.9.9 }
+    asserts:
+      - equal:
+          path: spec
+          value:
+            owner: { projectName: lab, componentName: podinfo }
+            environment: dev1
+            releaseName: podinfo-dev-6-15-0-ee034475

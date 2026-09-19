@@ -1,0 +1,107 @@
+suite: rejected renders - fail at render time, not at apply or in the controller
+templates:
+  - templates/types.yaml
+  - templates/component.yaml
+  - templates/release.yaml
+  - templates/binding.yaml
+values:
+  - values/podinfo/app.yaml
+tests:
+  - it: rejects an unknown mode
+    template: templates/types.yaml
+    set: { mode: bogus }
+    asserts:
+      - failedTemplate: { errorPattern: 'unknown mode "bogus"' }
+
+  - it: component - requires a name
+    template: templates/component.yaml
+    values: []
+    set: { mode: component, name: "" }
+    asserts:
+      - failedTemplate: { errorPattern: "name is required" }
+
+  - it: component - rejects a type the hub doesn't serve
+    template: templates/component.yaml
+    set: { mode: component, componentType: deployment/nope }
+    asserts:
+      - failedTemplate: { errorPattern: 'componentType "deployment/nope": no such ClusterComponentType' }
+
+  - it: component - rejects a type without workloadType
+    template: templates/component.yaml
+    set: { mode: component, componentType: service }
+    asserts:
+      - failedTemplate: { errorPattern: 'componentType "service": want <workloadType>/<name>' }
+
+  - it: component - rejects a name that is not a DNS-1123 label
+    template: templates/component.yaml
+    set: { mode: component, name: Pod_Info }
+    asserts:
+      - failedTemplate: { errorPattern: 'name "Pod_Info" is not a DNS-1123 label' }
+
+  - it: release - requires the stage (no fallback to env)
+    template: templates/release.yaml
+    set: { mode: release, env: dev, image.tag: "1" }
+    asserts:
+      - failedTemplate: { errorPattern: "stage is required" }
+
+  - it: release - rejects a stage that is not a DNS-1123 label
+    template: templates/release.yaml
+    set: { mode: release, stage: Dev_Canary, image.tag: "1" }
+    asserts:
+      - failedTemplate: { errorPattern: 'stage "Dev_Canary" is not a DNS-1123 label' }
+
+  - it: release - requires the tag
+    template: templates/release.yaml
+    set: { mode: release, stage: dev }
+    asserts:
+      - failedTemplate: { errorPattern: "image.repository and image.tag are required" }
+
+  - it: release - requires the repository
+    template: templates/release.yaml
+    set: { mode: release, stage: dev, image.tag: "1", image.repository: "" }
+    asserts:
+      - failedTemplate: { errorPattern: "image.repository and image.tag are required" }
+
+  - it: release - rejects container.image (the image is repository:tag)
+    template: templates/release.yaml
+    set: { mode: release, stage: dev, image.tag: "1", container.image: x }
+    asserts:
+      - failedTemplate: { errorPattern: "set image.repository/image.tag, not container.image" }
+
+  - it: release - rejects traits (not supported yet)
+    template: templates/release.yaml
+    set:
+      mode: release
+      stage: dev
+      image.tag: "1"
+      traits: [{ name: observability-alert-rule }]
+    asserts:
+      - failedTemplate: { errorPattern: "traits are not supported yet" }
+
+  - it: binding - requires the release name (never recomputed)
+    template: templates/binding.yaml
+    values: []
+    set: { mode: binding, name: podinfo, project: lab, environment: dev1 }
+    asserts:
+      - failedTemplate: { errorPattern: "releaseName is required" }
+
+  - it: binding - requires the release name even with app values at hand
+    template: templates/binding.yaml
+    values: [values/podinfo/app.yaml, values/podinfo/envs/dev/values.yaml]
+    set: { mode: binding, name: podinfo, project: lab, environment: dev1, image.tag: 6.15.0 }
+    asserts:
+      - failedTemplate: { errorPattern: "releaseName is required" }
+
+  - it: binding - requires the environment
+    template: templates/binding.yaml
+    values: []
+    set: { mode: binding, name: podinfo, project: lab, releaseName: podinfo-dev-6-15-0-ee034475 }
+    asserts:
+      - failedTemplate: { errorPattern: "environment is required" }
+
+  - it: binding - rejects an environment that is not a DNS-1123 label
+    template: templates/binding.yaml
+    values: []
+    set: { mode: binding, name: podinfo, project: lab, releaseName: podinfo-dev-6-15-0-ee034475, environment: __CLUSTER__ }
+    asserts:
+      - failedTemplate: { errorPattern: 'environment "__CLUSTER__" is not a DNS-1123 label' }
