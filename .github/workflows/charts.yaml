@@ -1,0 +1,43 @@
+# main: push every repos/platform-charts/<chart> whose Chart.yaml version isn't in GHCR yet to
+# oci://ghcr.io/<owner>/platform-charts/<chart> (CAAPH can only install charts from a registry).
+# Also runs when this workflow or the script changes (the first merge publishes everything) and on demand.
+name: charts
+on:
+  push:
+    branches: [main]
+    paths:
+      - repos/platform-charts/**
+      - hack/publish-charts.sh
+      - .github/workflows/charts.yaml
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: charts   # never two publishers racing on the same version
+  cancel-in-progress: false
+env:
+  HELM_VERSION: v4.3.0
+  YQ_VERSION: v4.53.6
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install yq
+        run: |
+          bin="$HOME/.local/bin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          curl -fsSLo "$bin/yq" "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          chmod +x "$bin/yq"
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      # GHCR names must be lowercase
+      - name: Publish new chart versions
+        run: hack/publish-charts.sh "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/platform-charts"

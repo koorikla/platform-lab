@@ -1,0 +1,56 @@
+# PRs and main: the same `make lint` + `make test` as locally, plus the chart version guard and a dry-run package of
+# every chart (what charts.yaml would push after merge).
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  # same majors as the lab laptops (helm 4, mikefarah yq v4); bump deliberately
+  HELM_VERSION: v4.3.0
+  YQ_VERSION: v4.53.6
+  KUBECONFORM_VERSION: v0.8.0
+  ACTIONLINT_VERSION: 1.7.12
+jobs:
+  lint-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the version guard diffs against the merge-base with the PR's base branch
+          persist-credentials: false
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+      # shellcheck and jq come with the runner image; the runner's yq is not pinned, ours goes first on PATH
+      - name: Install yq, kubeconform, actionlint
+        run: |
+          bin="$HOME/.local/bin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          curl -fsSLo "$bin/yq" "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          chmod +x "$bin/yq"
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" |
+            tar -xz -C "$bin" kubeconform
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" |
+            tar -xz -C "$bin" actionlint
+      - name: Tool versions
+        run: helm version && yq --version && kubeconform -v && shellcheck --version && jq --version && actionlint -version
+      - name: actionlint
+        run: actionlint
+      - name: Chart version guard
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: hack/check-chart-versions.sh "origin/$BASE_REF"
+      - name: make lint
+        run: make lint
+      - name: make test
+        run: make test
+      - name: Package charts (dry run of charts.yaml)
+        env:
+          DRY_RUN: "1"
+        run: hack/publish-charts.sh "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/platform-charts"
