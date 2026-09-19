@@ -504,6 +504,78 @@ Update `CLAUDE.md` (invariant 5 → "Kargo writes only `rendered/*` branches; ma
 things"; addon convention: `addons/workers/<name>/{addon.yaml,values.yaml,envs/<env>.values.yaml}`; rings) and README
 "How targeting works" table (rings replace pins). Commit + push.
 
+
+## Phase 1b — OpenBao + pull-model secrets + CAAPH birth kit (user decision 2026-09-19)
+
+Goal: workers **pull** their own secrets from OpenBao on the hub; nothing on the hub writes into workers with the
+CAPI admin kubeconfig. Identity-bound components are installed at cluster birth by CAAPH. Design: design doc addenda.
+
+### Task 1b.1: OpenBao on the hub (mgmt addon)
+- Umbrella `repos/platform-charts/openbao` (dep `openbao` from `oci://ghcr.io/openbao/charts`, pin latest 0.x that
+  matches upstream OpenChoreo 1.2.5's 0.25.6 unless newer is clearly compatible), addon
+  `repos/platform-config/addons/management/openbao/{addon.yaml,values.yaml}` (namespace `openbao`).
+- Lab mode: `server.dev.enabled: true` (in-memory, root token from a hub Secret generated in-cluster — no literal in
+  git if the chart allows `devRootToken` from env/secret; else the literal with a LAB ONLY comment), UI off.
+  Comment the prod path (raft on PVC, auto-unseal, TLS).
+- Hub-internal config at start (postStart or chart `server.postStart`): KV v2 at `secret/`, `auth/kubernetes` for
+  the hub itself with roles: `hub-writer` (hub ESO SA → write `secret/data/clusters/*`), `fleet-sync` (reconciler SA →
+  manage `sys/auth/k8s-*`, `auth/k8s-*`, `sys/policies/acl/cluster-*`).
+- NodePort `30820` for the API + `fleet/base/hub-lb.yaml` frontend/backend `:30820` (same pattern as 30443).
+- Hub `ClusterSecretStore openbao` (vault provider, `http://openbao.openbao.svc:8200`, KV v2, kubernetes auth role
+  `hub-writer`) in the umbrella chart.
+- Test: render contains the StatefulSet/Deployment, Service NodePort 30820, ClusterSecretStore `openbao`.
+
+### Task 1b.2: Fleet auth reconciler (hub CronJob, in the openbao umbrella)
+- CronJob every 2 min (image `alpine/k8s:<k8s 1.34.x>` — has kubectl, jq, curl), SA with RBAC to list CAPI
+  `clusters.cluster.x-k8s.io` and read `*-kubeconfig` secrets in `fleet`. Script (ConfigMap, `set -euo pipefail`,
+  idempotent): login to OpenBao with its SA JWT (`auth/kubernetes/login`, role `fleet-sync`); for each Cluster with
+  label `platform.lab/role=worker`: read server + CA from `<name>-kubeconfig`; ensure `auth/k8s-<name>` (type
+  kubernetes) with `kubernetes_host`, `kubernetes_ca_cert`, `disable_local_ca_jwt=true` (client JWT used as reviewer);
+  role `eso` (bound SA `external-secrets`, ns `external-secrets`, policy `cluster-<name>`, ttl 1h); policy
+  `cluster-<name>` = read `secret/data/clusters/<name>/*`. Remove `k8s-*` mounts + policies of clusters that no longer
+  exist. Log one line per cluster.
+- Test: script passes `shellcheck` (if available) and a dry-run mode (`DRY_RUN=1`) that prints intended calls.
+
+### Task 1b.3: Hub writes per-cluster material to OpenBao (`cluster` chart)
+- Keep the agent client Certificate + the hub Argo cluster secret ExternalSecret (in-cluster store) as-is.
+- Replace the two worker-facing PushSecrets + `ClusterSecretStore fleet-<n>-argocd` (kubeconfig authRef) with ONE
+  hub-local `PushSecret` to store `openbao` writing `clusters/<name>/argocd-agent` with properties `tls.crt`,
+  `tls.key`, `ca.crt`.
+- Update `hack/tests/test_cluster_identity.sh` (TDD first): worker render has 1 PushSecret targeting
+  `ClusterSecretStore/openbao`, remoteKey `clusters/dev1/argocd-agent`; no ClusterSecretStore rendered; hub (mgmt)
+  renders none.
+
+### Task 1b.4: Birth kit via CAAPH (`fleet/base/helmchartproxies.yaml`)
+- New HelmChartProxy `worker-external-secrets` (upstream `oci://ghcr.io/external-secrets/charts` external-secrets,
+  same version as the hub, `installCRDs: true`) → ESO exists at birth.
+- New HelmChartProxy `worker-secret-bootstrap` using a generic manifests chart (`bedag/raw` from
+  `https://bedag.github.io/helm-charts/`, pin latest) with `valuesTemplate` rendering, per cluster:
+  `ClusterSecretStore hub-openbao` (vault provider `http://mgmt-lb:30820`, KV v2 path `secret`, kubernetes auth
+  `mountPath: k8s-{{ .Cluster.metadata.name }}`, role `eso`, serviceAccountRef `external-secrets`/`external-secrets`);
+  `ClusterRoleBinding` system:auth-delegator for that SA (OpenBao reviews the client JWT);
+  ExternalSecrets in `argocd`: `argocd-agent-client-tls` (target template `type: kubernetes.io/tls`, tls.crt/tls.key
+  from `clusters/{{name}}/argocd-agent`) and `argocd-agent-ca` (Opaque, only `ca.crt`); worker `coredns-custom`
+  (same external.server block as the hub — worker repo-servers clone from GitHub too).
+  `refreshInterval: 5m`. The `argocd` namespace must exist (argo-cd HCP creates it; add `createNamespace`/ordering
+  notes; ExternalSecrets retry until CRDs/namespace exist — CAAPH installs are independent).
+- Remove `addons/workers/external-secrets` (ESO is birth kit now); its Kargo project/pipeline disappears with it.
+- Test (TDD): render the raw chart with a fake `.Cluster` context is not possible offline → instead a lint-style test
+  that `helmchartproxies.yaml` valuesTemplate for the bootstrap references `k8s-{{ .Cluster.metadata.name }}` and
+  `clusters/{{ .Cluster.metadata.name }}/argocd-agent`, and `helm template` of bedag/raw with a sample values file
+  (cluster name substituted by sed) renders the 4–5 expected objects.
+
+### Task 1.4 (folded in): ring label — as specified above in Phase 1.
+
+### Task 1b.5: E2E — rebirth dev1
+1. Push; wait `mgmt-openbao` Synced/Healthy; reconciler logs `ensured k8s-dev1`; `bao auth list` shows `k8s-dev1/`.
+2. Verify `secret/clusters/dev1/argocd-agent` exists (bao kv get, field names only — never print key material).
+3. Delete Cluster dev1 (`kubectl --context mgmt -n fleet delete cluster dev1`); Argo `cluster-dev1` (selfHeal)
+   re-creates it; new containers come up.
+4. On the new dev1: ESO (CAAPH) running; `ClusterSecretStore hub-openbao` Ready; agent secrets materialised by ESO;
+   argocd-agent connected; `cert-manager-dev1`, `podinfo-dev1` Synced/Healthy again; no PushSecret targeting workers
+   exists on the hub.
+5. Record timings (birth → agent connected) in CLAUDE.md verification status.
+
 ---
 
 ## Phase 2 — OpenChoreo on hub and workers; clusters appear in Backstage
