@@ -1,0 +1,61 @@
+{{- $p := include "kargo-pipeline.project" . }}
+{{- $roles := list }}{{ range .Values.promoters }}{{ $roles = append $roles .name }}{{ end }}
+{{- range $s := .Values.stages }}
+{{- range ($s.promotedBy | default list) }}
+{{- if not (has . $roles) }}{{ fail (printf "stages[%s].promotedBy: %s is not in promoters" $s.name .) }}{{ end }}
+{{- end }}
+{{- end }}
+{{- $first := true }}
+{{- range $r := .Values.promoters }}
+{{- if not $r.groups }}{{ fail (printf "promoters[%s].groups is empty: the role would map to nobody" $r.name) }}{{ end }}
+{{- if not $r.kinds }}{{ fail (printf "promoters[%s].kinds is empty: name the pipeline kinds (addon, app) it applies to" $r.name) }}{{ end }}
+{{- $stages := list }}
+{{- if has $.Values.kind $r.kinds }}
+{{- range $.Values.stages }}{{ if has $r.name (.promotedBy | default list) }}{{ $stages = append $stages .name }}{{ end }}{{ end }}
+{{- end }}
+{{- /* not this pipeline kind, or no stage names this role: render nothing (RBAC without resourceNames would mean every stage) */}}
+{{- if $stages }}
+{{- if not $first }}
+---
+{{- end }}
+{{- $first = false }}
+# Kargo role {{ $r.name }}: users whose OIDC groups claim contains one of these groups map to this ServiceAccount.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $r.name }}
+  namespace: {{ $p }}
+  annotations:
+    kargo.akuity.io/description: {{ printf "Promote into %s" (join ", " $stages) | quote }}
+    rbac.kargo.akuity.io/claims: {{ dict "groups" $r.groups | toJson | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $r.name }}
+  namespace: {{ $p }}
+rules:
+  - apiGroups: [kargo.akuity.io]
+    resources: [stages]
+    verbs: [promote]
+    resourceNames: {{ $stages | toJson }}
+  # kargo-api creates the Promotion only if the user may; which stage it targets is the promote check above
+  - apiGroups: [kargo.akuity.io]
+    resources: [promotions]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $r.name }}
+  namespace: {{ $p }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $r.name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $r.name }}
+    namespace: {{ $p }}
+{{- end }}
+{{- end }}

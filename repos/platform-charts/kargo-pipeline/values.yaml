@@ -12,9 +12,10 @@ image: ""                   # app (required): image repository (Warehouse subscr
 imageConstraint: ""         # app: semver constraint for new tags, e.g. ^6.0.0 (empty: highest semver)
 repoURL: git@github.com:koorikla/platform-lab.git   # SSH: Kargo's credential is the repo deploy key; passed to the task
 stages:                     # order = promotion order; the first stage takes Freight straight from the Warehouse
-  - { name: dev-canary, env: dev,  pr: false }   # name = stage + rendered/<name> branch; env = values overlay
-  - { name: dev,        env: dev,  pr: false }   # optional `soak: 15m`: minimum time in the previous stage (below)
-  - { name: nit,        env: nit,  pr: false }   # environments: dev, nit, sit, prod (#81), each with N clusters
+  # promotedBy: per-project Kargo roles (promoters below) that may promote into this stage, besides the global admins
+  - { name: dev-canary, env: dev,  pr: false, promotedBy: [developer] }   # name = stage + rendered/<name> branch; env = values overlay
+  - { name: dev,        env: dev,  pr: false, promotedBy: [developer] }   # optional `soak: 15m`: minimum time in the previous stage (below)
+  - { name: nit,        env: nit,  pr: false, promotedBy: [developer] }   # environments: dev, nit, sit, prod (#81), each with N clusters
   - { name: sit,        env: sit,  pr: false }
   - { name: prod,       env: prod, pr: false }   # pr: true needs a token that can open PRs (deploy key can't)
 # dev follows its canary ring automatically, but only with Freight that passed verification in dev-canary (below): the
@@ -43,3 +44,14 @@ verification:
   argocdNamespace: argocd   # where the worker-addons Applications live on the hub
   # what worker-addons syncs rendered/* from (https, anonymous: the Job only reads the branch's commit history)
   repoURL: https://github.com/koorikla/platform-lab.git
+# Per-project Kargo roles (#20), on top of the global ones (hub kargo values): kargo-admin = admins + platform-engineers
+# (promote every stage), kargo-viewer = developers + sres (read-only). A role renders, in projects of its `kinds`, a
+# ServiceAccount (OIDC group mapping) + Role + RoleBinding named <name> in the project namespace: `promote` into the
+# stages whose `promotedBy` names it (Kargo checks the verb per Stage; resourceNames come from `stages`, so renaming
+# stages needs no template change) and `create` promotions. A role no stage names renders nothing (never an empty
+# resourceNames: that would be every stage). No Freight approval (it also needs freights/status patch): approving skips
+# verification and soak, a platform decision. kargo-admin/-viewer/-promoter are taken: Kargo's controller manages them.
+promoters:
+  # app teams promote their apps up to nit; sit and prod stay with platform-engineers/admins. Addon pipelines
+  # (kind addon) are platform-owned: no per-project role there.
+  - { name: developer, groups: [developers], kinds: [app] }

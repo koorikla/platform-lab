@@ -67,7 +67,8 @@ general) and `go` (`hub-lb-reload.sh` renders the CAPD LB template with it).
 | Command | What it proves |
 |---|---|
 | `make lint` (`hack/lint.sh`) | every chart builds its deps and passes `helm lint`; every hub addon renders with its values; every worker addon renders for every stage env (dev/nit/sit/prod) with no nameless or duplicate resources (Kargo's flat layout would overwrite them); `addon.name` == folder name; fleet file `env` == its folder and a kargo-pipeline stage env; fleet `kubernetesVersion` minor == `render-addon` `kubeVersion` minor (enabled worker clusters); every cluster file renders, enabled or not |
-| `make test` (`hack/tests/run.sh`) | every chart's helm-unittest suites (`hack/tests/unittest.sh`), then the repo-level tests `hack/tests/test_*.sh`, each in its own process |
+| `make test` (`hack/tests/run.sh`) | every chart's helm-unittest suites (`hack/tests/unittest.sh`), then the repo-level tests `hack/tests/test_*.sh`, each in its own process (`jq` needed; the `argocd` CLI evaluates the RBAC policies, skipped without it) |
+| `hack/appproject-check.sh --live` | read-only against the hub: every live Application's sources, destination and synced resources are admitted by the AppProjects in your working tree. Run it before merging a `projects.yaml` change |
 
 CI (`.github/workflows/ci.yaml`) runs `make lint`, `make test` and the chart version guard
 (`hack/check-chart-versions.sh`) on every PR.
@@ -199,10 +200,15 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
    `apiVersions` listed in `render-addon.yaml`. Every resource needs a `metadata.name`.
 5. Anything bound to a cluster's identity (its name, its credentials) does not belong in a worker addon: it goes into
    the CAAPH birth kit (invariant 7).
-6. Hub and workers resolve a fixed list of registry/git domains through public resolvers (`coredns-custom`:
+6. **Project `platform-workers`** (`argocd/projects.yaml`) admits only the namespaces worker addons render into and
+   the cluster-scoped kinds they need. A new namespace (the addon's, or one its chart writes to, like cert-manager's
+   `kube-system` Roles) or a new cluster-scoped kind goes into that project in the same PR: `make test`
+   (`test_appprojects.sh` renders every addon for every worker) names what is missing. Without it the workers refuse
+   the sync ("namespace … is not permitted in project" / "resource … is not permitted").
+7. Hub and workers resolve a fixed list of registry/git domains through public resolvers (`coredns-custom`:
    `fleet/base/hub-coredns.yaml` for the hub, its copy in the birth kit for workers; a test keeps them equal), because
    the Docker Desktop resolver times out now and then. A new chart or image registry goes into both lists.
-7. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled`: its Applications and Kargo pipeline go, but
+8. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled`: its Applications and Kargo pipeline go, but
    what it deployed stays on the workers (`worker-addons` sets `preserveResourcesOnDeletion`); delete that by hand if
    it must go, consumers of its CRDs first. Once project `addon-<name>` is gone, `make rendered-prune` (dry run) /
    `make rendered-prune APPLY=1` removes the stale `addons/<name>` from every `rendered/*` branch.
@@ -213,7 +219,8 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
    `values.yaml` (hub overrides).
 3. The `mgmt-addons` appset creates `mgmt-<name>` (project `platform-mgmt`, `CreateNamespace`, server-side apply;
    CRD ordering between addons settles by retries). Hub addons are not promoted through Kargo: **merge = deploy to
-   the hub**, so merge under the lab lock.
+   the hub**, so merge under the lab lock. A cluster-scoped kind not yet in `platform-mgmt`'s
+   `clusterResourceWhitelist` (`argocd/projects.yaml`) is added there in the same PR (`make test` names it).
 4. cert-manager, capi-operator and capi-providers are also applied by `bootstrap/bootstrap.sh` from the same chart
    and values before Argo CD exists, with `helm template --no-hooks | kubectl apply`: they must work without hooks.
 5. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled`, under the lab lock. `mgmt-addons` sets
@@ -249,11 +256,15 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
 
 - **Worker addons** (project `addon-<name>`): Freight = a `main` commit touching the addon. `dev-canary`
   auto-promotes, `dev` after verification in `dev-canary` (see canary ring); `nit`, `sit` and `prod` are promoted by hand
-  (UI: pick the Freight on the stage → Promote). Each promotion
+  (UI: pick the Freight on the stage → Promote). Who may promote: `admins` and `platform-engineers`, every stage
+  (global Kargo admin); `developers` and `sres` are read-only on addon pipelines (platform-owned). Each promotion
   commits plain YAML to `rendered/<stage>`; the diff of that commit is the change. Prod through a PR (`pr: true`)
   needs a token that can open PRs (#6).
 - **Apps** (project `app-<name>`, e.g. `app-podinfo`): Freight = the newest image tag (`image.constraint` in
   `app.yaml`, podinfo `^6.0.0`) x the newest `main` commit touching `repos/apps/<app>/` or the `openchoreo-app` chart.
+  Who may promote: `admins` and `platform-engineers` every stage; `developers` the stages marked `promotedBy:
+  [developer]` in `repos/platform-charts/kargo-pipeline/values.yaml` (`dev-canary`, `dev`, `nit`; per-project Kargo
+  role `developer`, app projects only); `sres` read-only.
   Same stages and auto-promotion as addons, but **no verification yet**: nothing deploys app releases until #17, so
   there is no health to check; `dev` instead follows Freight that soaked 15 min in `dev-canary` (`appSoak` in the
   kargo-pipeline values). App verification (ReleaseBindings/Components on the hub) comes with #17/#18. Each promotion
@@ -325,6 +336,8 @@ example):
 Until #17 retires it, the `workloads` appset still deploys every `repos/apps/<app>/chart` from `main` (Application
 `<app>-<cluster>`, project `workloads`), with `envs/<env>/values.yaml` as values: podinfo keeps a `podinfo:` block
 there for that path and runs the legacy chart's default image tag. New apps don't need a `chart/`.
+Project `workloads` admits one namespace per app (`argocd/projects.yaml`, `{ name: "*", namespace: <app> }`; `make
+test` fails until it is there), and its role `developer` lets group `developers` sync those Applications.
 
 ### Add a CAPI provider or ClusterClass
 A cluster file picks `clusterClass`, `provider`, `region` and `variables`; everything provider-specific lives in the
