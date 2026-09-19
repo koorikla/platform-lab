@@ -47,10 +47,14 @@ data:
       {{- end }}
       default_backend kube-apiservers
 
+    # CAPD's default checks every 2 s with a 2 s timeout and fall 3: on a CPU-starved hub /healthz (which includes
+    # etcd) answers slower than that, the only apiserver goes DOWN and every client through this LB gets EOF (#76).
+    # Now: DOWN only after ~45 s of failed checks (5 s apart, 10 s read timeout), back UP after one good check.
     backend kube-apiservers
       option httpchk GET /healthz
+      timeout check 10s
       {{range $server, $backend := .BackendServers}}
-      server {{ $server }} {{ JoinHostPort $backend.Address $.BackendControlPlanePort }} weight {{ $backend.Weight }} check check-ssl verify none resolvers docker resolve-prefer {{ if $.IPv6 -}} ipv6 {{- else -}} ipv4 {{- end }}
+      server {{ $server }} {{ JoinHostPort $backend.Address $.BackendControlPlanePort }} weight {{ $backend.Weight }} check inter 5s fall 3 rise 1 check-ssl verify none resolvers docker resolve-prefer {{ if $.IPv6 -}} ipv6 {{- else -}} ipv4 {{- end }}
       {{- end}}
 
     frontend argocd-agent-principal

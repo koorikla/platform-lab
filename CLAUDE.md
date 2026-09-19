@@ -92,6 +92,9 @@ webhook `Ignore`.)
 
 ## Known lab constraints
 - All CAPD nodes share the Docker VM disk: >90% used → DiskPressure evictions everywhere. Keep ≥25 GB free.
+- ...and its CPUs: full lab = 12 CPUs / 16 GB minimum (`make doctor`). At load ≫ 2×CPUs the hub's embedded
+  controllers lost leader election and k3s exited (#76); ClusterClass variable `slowHostTolerance` (per fleet file,
+  default off: turning it on REPLACES the control-plane machine) relaxes their lease timings.
 - CAPD nodes publish no host ports and the LB maps only 6443/8404 (hard-coded in CAPD, no API field): `make ui`
   port-forwards; hub API via `mgmt-lb`'s published 6443 (context `mgmt`). Hub pods resolve `*.openchoreo.localhost` to
   `openchoreo-control-plane/gateway-default:8080` (CoreDNS rewrite, `fleet/base/hub-coredns.yaml`): same URLs as browsers.
