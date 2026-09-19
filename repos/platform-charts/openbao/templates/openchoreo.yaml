@@ -1,9 +1,11 @@
 # OpenChoreo's secrets (#9). Upstream seeds literals in postStart (values-openbao.yaml); here nothing is in git.
 # Per key in .Values.openchoreo.generated (one chain each, so adding or rotating one key leaves the others alone):
-#   Password generator -> Secret openchoreo-<key>, key `value` (generated ONCE; the source of truth, because OpenBao
-#   dev mode is in-memory) -> PushSecret -> secret/openchoreo/<key> (property `value`) -> ClusterSecretStore `default`
-#   (read-only) -> ExternalSecrets in the OpenChoreo namespaces (backstage-secrets: openchoreo-control-plane chart).
-# Roles/policies `openchoreo-seeder` / `openchoreo-reader`: server.postStart (values.yaml).
+#   Password generator -> Secret openchoreo-<key>, key `value` (generated ONCE; the source of truth) -> PushSecret
+#   (every minute, Replace: OpenBao always follows the Secret, also after a PVC reset) -> secret/openchoreo/<key>
+#   (property `value`) -> ClusterSecretStore `default` (read-only) -> ExternalSecrets in the OpenChoreo namespaces
+#   (backstage-secrets: openchoreo-control-plane chart). OpenBao is persistent (#30), but never the source: a value
+#   written there by hand is overwritten within a minute.
+# Roles/policies `openchoreo-seeder` / `openchoreo-reader`: files/configure.sh, files/policies/.
 #
 # CreatedOnce: a refresh never mints a new value. ESO still regenerates a key whenever its Secret is invalid:
 #   - Secret openbao/openchoreo-<key> deleted (the rotation procedure, see below)
@@ -51,7 +53,7 @@ metadata:
   name: openchoreo-{{ . }}
   namespace: {{ $.Release.Namespace }}
 spec:
-  refreshInterval: 1m             # dev mode forgets everything on restart: refill quickly
+  refreshInterval: 1m             # keeps OpenBao in line with the Secret (rotation, PVC reset) within a minute
   updatePolicy: Replace
   # None: this PushSecret goes away together with OpenBao (same chart), a Delete finalizer would wait on a gone server;
   # and a prune/rename must not wipe a value consumers depend on

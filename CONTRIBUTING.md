@@ -311,8 +311,8 @@ class and in the provider toggle. Where things are:
    (OpenStack: a Secret in `fleet` with key `clouds.yaml`, named by the `identityRef` variable; AWS: `capa-system/capa-variables`
    with `AWS_B64ENCODED_CREDENTIALS`, plus the Secret of the `AWSClusterStaticIdentity` the cluster names; that
    identity's `spec.allowedNamespaces.list` must include `fleet`, where the Clusters live, because an unset
-   `allowedNamespaces` allows no namespace). Today's OpenBao is in-memory dev mode, so cloud credentials need a
-   durable store first (#30).
+   `allowedNamespaces` allows no namespace). Write the credentials by hand with `make bao` under `secret/hub/<item>`
+   (durable since #30; role `operator`); the ExternalSecret needs its own read-only store + policy for that path.
 3. `infrastructure.<provider>.enabled: true` in `addons/management/capi-providers/values.yaml`.
 4. Rename the class file to `.yaml`. `make test` fails if an enabled cluster file names a disabled class.
 5. Copy the example cluster file, set its variables, rename it to `.yaml`.
@@ -373,9 +373,15 @@ need internet egress.
   consumer namespace. Nothing on the hub writes into a worker with the CAPI admin kubeconfig. Example:
   `repos/platform-charts/cluster/templates/argocd-identity.yaml` (push) and
   `repos/platform-charts/worker-birth-kit/templates/` (pull).
-- OpenBao runs in dev mode (in-memory): anything in it must be re-creatable from the hub (PushSecrets refill it
-  within minutes). Don't hand-write secrets into it and expect them to survive a restart. Production shape: #30.
-  OpenChoreo's secrets and `ClusterSecretStore default`: #9.
+- OpenBao (#30) keeps its data on a PVC (raft), unseals itself (static key in Secret `openbao/openbao-unseal-key`,
+  a lab stand-in for KMS: back it up with `make openbao-key-backup`) and is configured from git: new policies go in
+  `repos/platform-charts/openbao/files/policies/<name>.hcl`, roles in `files/configure.sh` (the `configure` sidecar
+  applies both within ~5 min, no restart). Hub-owned material still comes from PushSecrets (source of truth stays in
+  the cluster; an emptied OpenBao refills itself). Only material with no cluster source is hand-written, under
+  `secret/hub/*` via `make bao`. OpenChoreo's secrets and `ClusterSecretStore default`: #9. TLS/routable name: #56.
+  Recovery, last resort (unseal key lost, self-init failed, storage broken): `kubectl -n openbao delete pvc
+  data-openbao-0 pod/openbao-0` (and Secret `openbao-unseal-key` if the key is the problem). OpenBao comes back empty
+  and configured; hub data refills within minutes; hand-written `secret/hub/*` is lost (restore it with `make bao`).
 - Kargo pushes with a deploy key (`hack/kargo-deploy-key.sh` puts it straight into a hub Secret); a PR-capable token
   comes via OpenBao/ESO (#6).
 

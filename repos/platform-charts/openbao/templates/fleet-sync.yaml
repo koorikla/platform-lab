@@ -1,7 +1,11 @@
 # fleet-sync: keeps one OpenBao kubernetes auth mount per worker cluster (auth/k8s-<name>) in line with the CAPI
 # Clusters in the fleet namespace. Pull model: the worker's ESO logs in there with its own ServiceAccount and may read
-# only secret/data/clusters/<name>/*. Script: files/fleet-sync.sh. Role/policy `fleet-sync`: server.postStart.
-# Hub RBAC: list CAPI Clusters in fleet, get Secrets in this namespace - nothing else.
+# only secret/data/clusters/<name>/*. Script: files/fleet-sync.sh. Role/policy `fleet-sync`: files/configure.sh, templates/configure.yaml.
+# A CronJob rather than a watch loop (#30): the reconcile is level-based and idempotent, and <= 2 min is well inside a
+# worker's birth (its ESO retries); a controller would add a Deployment and watch code for no gain in correctness.
+# Hub RBAC: list CAPI Clusters in fleet - nothing else here. `get` on exactly <name>-ca-public in this namespace comes
+# per worker from the cluster chart (templates/openbao-ca.yaml): this namespace also holds openbao-unseal-key and the
+# openchoreo-* sources, which fleet-sync must not read.
 {{- $fs := .Values.fleetSync }}
 apiVersion: v1
 kind: ServiceAccount
@@ -25,26 +29,6 @@ kind: RoleBinding
 metadata:
   name: openbao-fleet-sync
   namespace: {{ $fs.fleetNamespace }}
-roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: openbao-fleet-sync }
-subjects:
-  - { kind: ServiceAccount, name: openbao-fleet-sync, namespace: {{ .Release.Namespace }} }
----
-# CA: <name>-ca-public in this namespace (public cert only, projected by the cluster chart via SecretStore fleet-ca)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: openbao-fleet-sync
-  namespace: {{ .Release.Namespace }}
-rules:
-  - apiGroups: [""]
-    resources: [secrets]
-    verbs: [get]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: openbao-fleet-sync
-  namespace: {{ .Release.Namespace }}
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: openbao-fleet-sync }
 subjects:
   - { kind: ServiceAccount, name: openbao-fleet-sync, namespace: {{ .Release.Namespace }} }

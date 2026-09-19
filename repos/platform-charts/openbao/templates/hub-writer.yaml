@@ -1,5 +1,5 @@
 # The hub's write path into OpenBao. PushSecrets (cluster chart) use this store to put per-cluster material under
-# secret/clusters/<name>/*. Role/policy `hub-writer` are seeded by server.postStart (values.yaml).
+# secret/clusters/<name>/*. Role/policy `hub-writer`: files/configure.sh, files/policies/.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

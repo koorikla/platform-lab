@@ -40,4 +40,26 @@ spec:
     name: {{ $n }}-ca-public
   data:
     - { secretKey: ca.crt, remoteRef: { key: {{ $n }}-ca, property: tls.crt } }
+---
+# ... and fleet-sync may `get` exactly that projection (#30): the OpenBao namespace also holds the unseal key and other
+# generated sources. Same pattern as eso-in-cluster-<name> in argocd-identity.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fleet-sync-{{ $n }}
+  namespace: {{ $ob.namespace }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $n }}-ca-public]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fleet-sync-{{ $n }}
+  namespace: {{ $ob.namespace }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: fleet-sync-{{ $n }} }
+subjects:
+  - { kind: ServiceAccount, name: {{ $ob.fleetSync }}, namespace: {{ $ob.namespace }} }
 {{- end }}

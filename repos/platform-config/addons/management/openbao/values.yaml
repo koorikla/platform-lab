@@ -1,1 +1,2 @@
-# Hub overrides for openbao (layered on top of the umbrella chart's values.yaml). Lab mode: dev server, see the chart.
+# Hub overrides for openbao (layered on top of the umbrella chart's values.yaml). Shape (raft PVC, static-key
+# auto-unseal, self-init + configure sidecar), backup and recovery: see the chart's values.yaml header.

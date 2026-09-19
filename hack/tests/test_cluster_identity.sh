@@ -24,5 +24,20 @@ assert_yq "$w" "$es | .spec.data[0].remoteRef.key + \"#\" + .spec.data[0].remote
 # the source (OnChange = ExternalSecret spec changes only, CreatedOnce = never).
 assert_yq "$w" "$es | .spec.refreshInterval" 1m
 assert_yq "$w" "$es | .spec.refreshPolicy // \"Periodic\"" Periodic
+# #30: fleet-sync may get exactly this projection in openbao (the namespace also holds the unseal key): one name-scoped
+# Role per worker, bound to its SA; the name is the ExternalSecret's target
+fs='select(.kind=="Role" and .metadata.namespace=="openbao")'
+assert_yq "$w" "[$fs] | length" 1
+assert_yq "$w" "$fs | .rules | length" 1
+assert_yq "$w" "$fs | .rules[0] | (.resources | join(\",\")) + \":\" + (.verbs | join(\",\")) + \":\" + (.resourceNames | join(\",\"))" \
+  "secrets:get:$(yq "$es | .spec.target.name" "$w")"
+fsb='select(.kind=="RoleBinding" and .metadata.namespace=="openbao")'
+assert_yq "$w" "$fsb | .roleRef.name" "$(yq "$fs | .metadata.name" "$w")"
+assert_yq "$w" "$fsb | .subjects | map(.namespace + \"/\" + .name) | join(\",\")" openbao/openbao-fleet-sync
+# the SA name is the openbao chart's (its CronJob runs as it)
+ob=$(render openbao $charts/openbao -n openbao -f $config/addons/management/openbao/values.yaml)
+assert_yq "$ob" \
+  'select(.kind=="CronJob" and .metadata.name=="openbao-fleet-sync") | .spec.jobTemplate.spec.template.spec.serviceAccountName' \
+  "$(yq "$fsb | .subjects[0].name" "$w")"
 h=$(render mgmt $charts/cluster -f $config/fleet/clusters/mgmt/mgmt.yaml)
 assert_yq "$h" '[select(.kind=="PushSecret" or .kind=="Role" or .kind=="RoleBinding")] | length' 0

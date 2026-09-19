@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # #9: OpenChoreo's secrets in OpenBao + hub ClusterSecretStore `default`.
 # Each value is generated once in-cluster (ESO Password, CreatedOnce) into its own Secret openbao/openchoreo-<key>
-# (source of truth: it outlives OpenBao's in-memory dev mode) and pushed to secret/openchoreo/<key> through a seeder
+# (source of truth: OpenBao follows it, PushSecret every minute) and pushed to secret/openchoreo/<key> through a seeder
 # store. The `default` store reads that prefix only, from the OpenChoreo namespaces only. Every path the PushSecrets and
-# the backstage-secrets ExternalSecret touch must be granted by the matching policy that server.postStart writes.
+# the backstage-secrets ExternalSecret touch must be granted by the matching policy (ConfigMap openbao-configure,
+# applied with the roles in its configure.sh by the configure sidecar).
 source "$(dirname "$0")/lib.sh"
 o=$(render openbao $charts/openbao -n openbao -f $config/addons/management/openbao/values.yaml)
-post=$(yq 'select(.kind=="StatefulSet") | .spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]' "$o")
+conf='select(.kind=="ConfigMap" and .metadata.name=="openbao-configure") | .data'
+post=$(yq "$conf | .[\"configure.sh\"]" "$o")
 keys=backstage-backend-secret,backstage-client-secret,backstage-jenkins-api-key
 
-# --- no literal secret values in git: postStart seeds config only, never KV data
-! grep -qE 'kv put|kv patch|/v1/secret/data' <<<"$post" || fail "postStart writes KV data (values belong in the generator)"
+# --- no literal secret values in git: configure writes config only, never KV data
+! grep -qE 'kv put|kv patch|/v1/secret/data' <<<"$post" || fail "configure writes KV data (values belong in the generator)"
 
 # --- one chain per key: CreatedOnce regenerates a whole Secret, so adding or rotating one key must not touch the
 #     others -> every generator, Secret and PushSecret carries exactly one value
@@ -62,14 +64,14 @@ done
 # --- OpenBao roles: each bound to exactly its store's ServiceAccount in the openbao namespace
 role() { grep -A1 "auth/kubernetes/role/$1 " <<<"$post" | tr -d '\\\n' | tr -s ' '; }
 for r in openchoreo-reader:openbao-openchoreo-reader openchoreo-seeder:openbao-openchoreo-seeder; do
-  line=$(role "${r%%:*}"); [ -n "$line" ] || fail "postStart: no role ${r%%:*}"
+  line=$(role "${r%%:*}"); [ -n "$line" ] || fail "configure.sh: no role ${r%%:*}"
   grep -q "token_policies=${r%%:*} " <<<"$line" || fail "role ${r%%:*}: token_policies must be exactly ${r%%:*}: $line"
   grep -q "bound_service_account_names=${r#*:} " <<<"$line" || fail "role ${r%%:*}: must bind SA ${r#*:}: $line"
   grep -q 'bound_service_account_namespaces="$BAO_K8S_NAMESPACE"' <<<"$line" || fail "role ${r%%:*}: must bind the openbao namespace only: $line"
 done
 
 # --- policy coverage. caps <policy> <path>: capabilities of the policy paths matching <path> (vault: trailing * = prefix)
-policy() { awk -v p="bao policy write $1 -" 'index($0, p) {f=1; next} /^ *EOP/ {f=0} f' <<<"$post"; }
+policy() { yq "$conf | .[\"$1.hcl\"] // \"\"" "$o" | grep -vE '^ *(#|$)' || true; }   # rules only, no comments
 caps() {
   local line p out=""
   while read -r line; do
@@ -83,8 +85,8 @@ need() {  # need <policy> <path> <cap...>
   local c got; got=$(caps "$1" "$2")
   for c in "${@:3}"; do [[ ",$got" == *",$c,"* ]] || fail "policy $1: no '$c' on $2 (has '$got')"; done
 }
-[ -n "$(policy openchoreo-reader)" ] || fail "postStart: no policy openchoreo-reader"
-[ -n "$(policy openchoreo-seeder)" ] || fail "postStart: no policy openchoreo-seeder"
+[ -n "$(policy openchoreo-reader)" ] || fail "ConfigMap openbao-configure: no policy openchoreo-reader"
+[ -n "$(policy openchoreo-seeder)" ] || fail "ConfigMap openbao-configure: no policy openchoreo-seeder"
 for k in ${keys//,/ }; do
   # ESO vault v2 PushSecret: reads data + metadata (managed-by check, CAS version), writes both
   need openchoreo-seeder "secret/data/openchoreo/$k" create read update

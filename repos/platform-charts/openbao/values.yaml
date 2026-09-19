@@ -1,83 +1,187 @@
 # OpenBao on the hub: the pull-model secret store. The hub writes per-cluster material to secret/clusters/<name>/*
 # (PushSecrets through ClusterSecretStore `openbao`), each worker's ESO reads only its own path (auth/k8s-<name>).
 #
-# LAB MODE: dev server = in-memory, unsealed, plain HTTP, root token generated per start (never in git; only the pod's
-# ~/.vault-token has it: `kubectl -n openbao exec openbao-0 -- bao ...`). A restart wipes everything; postStart re-seeds
-# the hub config, fleet-sync re-creates the per-cluster auth mounts (<= 2 min) and PushSecrets refill the KV
-# (refreshInterval). Prod path: server.standalone/ha with raft on a PVC (server.dataStorage), auto-unseal (transit or
-# a cloud KMS seal stanza), TLS from cert-manager (global.tlsDisable=false + server.extraVolumes), and no NodePort
-# (workers reach it through an ingress/gateway with a real hostname).
+# Shape (#30): one server, integrated storage (raft) on a PVC, auto-unsealed, initialised by itself, configured by a
+# sidecar. Nobody holds a root token or unseal/recovery keys; everything below is reproducible from git.
+#   - Storage: raft on PVC data-openbao-0 (hub default StorageClass, local-path: node-local, fine for one replica).
+#     Survives restarts and pod moves on the same node. Deleting the PVC = empty OpenBao: PushSecrets and fleet-sync
+#     refill everything the hub owns within minutes; only hand-written material (secret/hub/*) is lost.
+#   - Unseal: `seal "static"` with a 32-byte key that the unseal-key init container generates ONCE into Secret
+#     openbao/openbao-unseal-key (create-only; not managed by Argo CD, so no prune/cascade can remove it) and copies to
+#     an in-memory volume at every start. LAB STAND-IN for KMS/transit auto-unseal: whoever can read that Secret and
+#     the PVC can decrypt the data. Back it up off-cluster (`make openbao-key-backup`: 0600 file, never printed;
+#     restore = `kubectl create -f` it before the pod starts); losing it makes the PVC unreadable (the init container then
+#     refuses to mint a new key over existing data). Prod: replace the stanza with awskms/gcpckms/azurekeyvault/
+#     transit/pkcs11 and drop the init container.
+#   - Init: declarative self-init (`initialize` below) runs once, on empty storage: kubernetes auth + the openbao-config
+#     policy/role for the configure sidecar, nothing else. Its root token is revoked right after, no recovery keys
+#     exist. A failed self-init makes OpenBao refuse to unseal (delete the PVC to retry), hence the minimal content.
+#   - Config: the `configure` sidecar (files/configure.sh via ConfigMap openbao-configure) logs in with the server's
+#     SA (role openbao-config) every 5 min and idempotently applies the kv mount, every policy (files/policies) and
+#     the hub roles. A chart change lands without a restart; a mistake there never takes the API down.
+#   - Humans: `make bao` = a shell in openbao-0 logged in as role `operator` (secret/hub/*: hand-written hub material,
+#     e.g. cloud provider credentials). Break-glass admin: a token of SA openbao (`kubectl -n openbao create token
+#     openbao`) logs in as openbao-config, which may write any policy/role.
+#   - Recovery, last resort (unseal key lost, self-init failed, raft corrupt): `kubectl -n openbao delete pvc
+#     data-openbao-0 pod/openbao-0` (plus Secret openbao-unseal-key if the key is the problem). The pod starts empty,
+#     self-inits and the sidecar configures it; hub data refills by itself (PushSecrets <= 1 min, fleet-sync <= 2 min,
+#     workers keep their synced secrets meanwhile). Hand-written secret/hub/* is lost: re-enter it with `make bao`.
+#   - Still lab: plain HTTP (TLS + a routable name: #56), NodePort 30820 for workers, one replica (HA = ha.raft with
+#     3 replicas + retry_join; self-init needs a single voter at first start).
 openbao:
   injector:
     enabled: false
   ui:
     enabled: false
   server:
-    dev:
-      enabled: true
-      devRootToken: ""            # empty -> random per start (chart default is the literal "root")
-    # chart default OnDelete suits manual unseal; dev mode re-seeds itself, so let config changes (postStart) roll
+    # auto-unseal: a restart needs no human, so config changes may roll the pod (checksum below)
     updateStrategyType: RollingUpdate
-    # chart Service stays ClusterIP (8200 + 8201 cluster port); workers get only 8200 via templates/nodeport.yaml
-    # Hub-side config, re-applied on every start (dev mode forgets it). Names must match templates/*.yaml.
-    postStart:
-      - /bin/sh
-      - -c
-      - |
-        set -e
-        until bao status >/dev/null 2>&1; do sleep 1; done
-        bao kv enable-versioning secret/ >/dev/null        # dev mode mounts kv v2 at secret/ already; no-op then
-        bao auth list | grep -q '^kubernetes/' || bao auth enable kubernetes >/dev/null
-        # the hub's own API; OpenBao reviews tokens with its pod SA (chart binds system:auth-delegator)
-        bao write auth/kubernetes/config kubernetes_host="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}" >/dev/null
-        bao policy write hub-writer - >/dev/null <<'EOP'
-        path "secret/data/clusters/*"     { capabilities = ["create", "read", "update", "delete"] }
-        path "secret/metadata/clusters/*" { capabilities = ["create", "read", "update", "delete", "list"] }
-        EOP
-        # fleet-sync can only create kubernetes mounts named k8s-*, point them at a worker API, and bind ONE role shape:
-        # external-secrets/external-secrets -> a single cluster-* policy (plain strings only: OpenBao compares list
-        # values as a whole, and "a,b" would pass the cluster-* glob -> commas/spaces denied). Residual risk: the body
-        # of sys/policies/acl/cluster-* can't be constrained (allowed_parameters globs are prefix/suffix only), so this
-        # role can still write a broad cluster-* policy and attach it to a k8s-* role. Treat openbao-fleet-sync as
-        # sensitive; prod: a controller with a fixed policy template, or Sentinel/EGP-style checks. Its hub Role also
-        # has `get` on every Secret in this namespace (names <cluster>-ca-public are dynamic), which includes the
-        # generated openchoreo-* sources: nothing it couldn't already reach through the policy escalation above.
-        bao policy write fleet-sync - >/dev/null <<'EOP'
-        path "sys/auth"                   { capabilities = ["read", "sudo"] }
-        path "sys/auth/k8s-*" {
-          capabilities = ["create", "update", "delete", "sudo"]
-          allowed_parameters = { "type" = ["kubernetes"], "description" = [] }
+    configAnnotation: true
+    # modest share on a hub that runs CPU-starved at times (#76); raft + a few dozen logins/min stay far below this.
+    # No CPU limit (throttling only slows logins down); memory limit catches a leak before it hurts the node.
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 512Mi }
+    dataStorage:
+      enabled: true
+      size: 1Gi
+      storageClass: null          # hub default: local-path
+    standalone:
+      enabled: true
+      # tpl'd by the chart. The chart's start script sed-replaces HOST_IP/POD_IP/HOSTNAME/*_ADDR: never write those.
+      config: |
+        ui = false
+
+        listener "tcp" {
+          tls_disable     = 1
+          address         = "[::]:8200"
+          cluster_address = "[::]:8201"
         }
-        path "auth/k8s-*" {
-          capabilities = ["create", "read", "update", "delete"]
-          allowed_parameters = {
-            "kubernetes_host" = [], "kubernetes_ca_cert" = [], "disable_local_ca_jwt" = [true],
-            "bound_service_account_names" = ["external-secrets"], "bound_service_account_namespaces" = ["external-secrets"],
-            "token_policies" = ["cluster-*"], "token_ttl" = []
+
+        storage "raft" {
+          path = "/openbao/data"
+        }
+
+        # lab stand-in for KMS/transit auto-unseal: see the header. 44 base64 chars = 32 bytes (AES-256-GCM).
+        # Rotation: new key + id as current_*, the old pair as previous_key/previous_key_id, then restart.
+        seal "static" {
+          current_key_id = "lab-1"
+          current_key    = "file:///openbao/unseal/key"
+        }
+
+        # Runs once on empty storage with the (then revoked) root token. Bootstrap only: the configure sidecar applies
+        # everything else. The policy file is the same one the sidecar keeps applying (ConfigMap openbao-configure).
+        initialize "bootstrap" {
+          request "enable-kubernetes-auth" {
+            operation = "update"
+            path      = "sys/auth/kubernetes"
+            data = {
+              type = "kubernetes"
+            }
           }
-          denied_parameters = { "token_policies" = ["*,*", "* *"] }
+          request "kubernetes-auth-config" {
+            operation = "update"
+            path      = "auth/kubernetes/config"
+            data = {
+              kubernetes_host = "https://kubernetes.default.svc"
+            }
+          }
+          request "configure-policy" {
+            operation = "update"
+            path      = "sys/policies/acl/openbao-config"
+            data = {
+              policy = {
+                eval_source = "file"
+                eval_type   = "string"
+                path        = "/openbao/configure/openbao-config.hcl"
+              }
+            }
+          }
+          request "configure-role" {
+            operation = "update"
+            path      = "auth/kubernetes/role/openbao-config"
+            data = {
+              bound_service_account_names      = "{{ include "openbao.serviceAccount.name" . }}"
+              bound_service_account_namespaces = "{{ .Release.Namespace }}"
+              token_policies                   = "openbao-config"
+              token_ttl                        = "10m"
+            }
+          }
         }
-        path "sys/policies/acl"           { capabilities = ["list"] }
-        path "sys/policies/acl/cluster-*" { capabilities = ["create", "read", "update", "delete"] }
-        EOP
-        bao write auth/kubernetes/role/hub-writer token_policies=hub-writer token_ttl=1h \
-          bound_service_account_names=openbao-hub-writer bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
-        bao write auth/kubernetes/role/fleet-sync token_policies=fleet-sync token_ttl=10m \
-          bound_service_account_names=openbao-fleet-sync bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
-        # OpenChoreo (templates/openchoreo.yaml): the seeder PushSecret writes secret/openchoreo/*, ClusterSecretStore
-        # `default` only reads it. No KV values here: they are generated in-cluster and re-pushed after every restart.
-        # No delete: the PushSecrets use deletionPolicy None (delete on metadata/ would destroy every version).
-        bao policy write openchoreo-seeder - >/dev/null <<'EOP'
-        path "secret/data/openchoreo/*"     { capabilities = ["create", "read", "update"] }
-        path "secret/metadata/openchoreo/*" { capabilities = ["create", "read", "update"] }
-        EOP
-        bao policy write openchoreo-reader - >/dev/null <<'EOP'
-        path "secret/data/openchoreo/*"     { capabilities = ["read"] }
-        EOP
-        bao write auth/kubernetes/role/openchoreo-seeder token_policies=openchoreo-seeder token_ttl=10m \
-          bound_service_account_names=openbao-openchoreo-seeder bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
-        bao write auth/kubernetes/role/openchoreo-reader token_policies=openchoreo-reader token_ttl=1h \
-          bound_service_account_names=openbao-openchoreo-reader bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
+    volumes:
+      - name: unseal
+        emptyDir: { medium: Memory, sizeLimit: 1Mi }
+      - name: configure
+        configMap: { name: openbao-configure }
+    volumeMounts:
+      - { name: unseal, mountPath: /openbao/unseal, readOnly: true }
+      - { name: configure, mountPath: /openbao/configure, readOnly: true }   # self-init reads openbao-config.hcl
+    # Get-or-create the unseal key (RBAC: templates/unseal-key.yaml). Image = fleetSync.image (kubectl).
+    extraInitContainers:
+      - name: unseal-key
+        image: alpine/k8s:1.34.11@sha256:0382123ab8ae17d8da5d43cc299242933eb012cfbe56787b43731c942c3eed80
+        command: [/bin/sh, -ec]
+        args:
+          - |
+            # never overwrites: an existing Secret is the key; `create` fails if one appeared meanwhile (pod retries)
+            rm -f "$KEY_FILE"
+            enc=$(kubectl get secret "$SECRET" -n "$NAMESPACE" --ignore-not-found -o jsonpath='{.data.key}')
+            umask 077
+            if [ -n "$enc" ]; then
+              printf '%s' "$enc" | base64 -d > "$KEY_FILE"
+            elif [ -e "$DATA_DIR/vault.db" ]; then
+              echo "Secret $NAMESPACE/$SECRET is missing but $DATA_DIR holds data sealed with the old key: restore the" \
+                "Secret from its backup, or delete PVC data-openbao-0 to start empty (hub material refills itself," \
+                "hand-written secret/hub/* is lost)" >&2
+              exit 1
+            else
+              head -c 32 /dev/urandom | base64 | tr -d '\n' > "$KEY_FILE"
+              kubectl create secret generic "$SECRET" -n "$NAMESPACE" --from-file=key="$KEY_FILE" >/dev/null
+              echo "generated a new unseal key into Secret $NAMESPACE/$SECRET: back it up, it is the only way to read this PVC"
+            fi
+            chmod 400 "$KEY_FILE"
+        env:
+          - { name: SECRET, value: openbao-unseal-key }
+          - name: NAMESPACE
+            valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          - { name: KEY_FILE, value: /openbao/unseal/key }
+          - { name: DATA_DIR, value: /openbao/data }
+          - { name: HOME, value: /tmp }            # kubectl cache
+        securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+        resources:
+          requests: { cpu: 10m, memory: 32Mi }
+          limits: { memory: 128Mi }
+        volumeMounts:
+          - { name: unseal, mountPath: /openbao/unseal }
+          - { name: data, mountPath: /openbao/data, readOnly: true }
+          - { name: home, mountPath: /tmp }
+    # Reconciles the hub config (files/configure.sh). Same image as the server (bao CLI); tpl'd by the chart.
+    # No readiness probe: a failing run only logs, the API stays in the Service.
+    extraContainers:
+      - name: configure
+        image: '{{ .Values.server.image.registry }}/{{ .Values.server.image.repository }}:{{ .Values.server.image.tag | default (trimPrefix "v" .Chart.AppVersion) }}'
+        command: [/bin/sh, -c]
+        args:
+          - |
+            # the script is re-read every run: a ConfigMap change lands within ~kubelet sync + 5 min, no restart
+            trap 'exit 0' TERM INT
+            while :; do
+              if sh /openbao/configure/configure.sh; then s=300; else s=20; fi
+              sleep "$s" & wait $!
+            done
+        env:
+          - { name: BAO_ADDR, value: "http://127.0.0.1:8200" }
+          - { name: BAO_SA, value: '{{ include "openbao.serviceAccount.name" . }}' }
+          - name: BAO_K8S_NAMESPACE
+            valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          - { name: HOME, value: /tmp }
+        securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+        resources:
+          requests: { cpu: 5m, memory: 16Mi }
+          limits: { memory: 64Mi }
+        volumeMounts:
+          - { name: configure, mountPath: /openbao/configure, readOnly: true }
+          - { name: home, mountPath: /tmp }
 
 # ClusterSecretStore `openbao` (hub-writer): only these namespaces may push through it
 hubWriter:
@@ -104,10 +208,11 @@ openchoreo:
 # API for workers: http://mgmt-lb:30820 (fleet/base/hub-lb.yaml frontend -> this NodePort)
 nodePort: 30820
 
-# fleet-sync: per worker cluster, auth/k8s-<name> + role eso + policy cluster-<name>
+# fleet-sync: per worker cluster, auth/k8s-<name> + role eso (policy cluster-reader) + entity cluster-<name>
 fleetSync:
   schedule: "*/2 * * * *"
-  # kubectl + curl + jq + bash; tag follows the fleet's Kubernetes minor, digest = multi-arch index of that tag
+  # kubectl + curl + jq + bash; tag follows the fleet's Kubernetes minor, digest = multi-arch index of that tag.
+  # Keep openbao.server.extraInitContainers[unseal-key].image equal (make test checks).
   image: alpine/k8s:1.34.11@sha256:0382123ab8ae17d8da5d43cc299242933eb012cfbe56787b43731c942c3eed80
   fleetNamespace: fleet           # reads only CAPI Clusters there (endpoint); CAs come from <name>-ca-public below
   caProjector: fleet-ca-projector # SA + SecretStore fleet-ca: the cluster chart grants it get on <name>-ca only

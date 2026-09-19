@@ -101,12 +101,14 @@ webhook `Ignore`.)
 - k3s is downloaded at node boot (get.k3s.io) → workers need internet.
 - CAPD renders the hub LB template (`fleet/base/hub-lb.yaml`) only on control-plane machine create/delete: after
   editing it on a running hub run `hack/hub-lb-reload.sh`.
-- OpenBao is in-memory (dev mode): a pod restart empties it; postStart, fleet-sync (≤2 min) and PushSecrets (1 min)
-  refill it. Workers keep their already-synced secrets meanwhile. Generated sources (`openbao/openchoreo-*`) are k8s
-  Secrets and survive a restart.
-- Hardening gap: `openbao-fleet-sync` may `get` every Secret in `openbao` (its CA names are dynamic), including the
-  generated `openchoreo-*` sources. It can already escalate inside OpenBao (`cluster-*` policy bodies), so treat that
-  SA as sensitive.
+- OpenBao (#30): raft on PVC `data-openbao-0` (local-path), auto-unseal with a static key in Secret
+  `openbao/openbao-unseal-key` (lab stand-in for KMS; created once by an init container, not tracked by Argo; lose it
+  and the PVC is unreadable), self-init bootstrap + `configure` sidecar (policies/roles from git, every 5 min). No root
+  token or recovery keys exist; humans: `make bao` (role `operator`, `secret/hub/*`). Deleting the PVC empties it:
+  PushSecrets (1 min) and fleet-sync (≤2 min) refill everything hub-owned; workers keep synced secrets meanwhile.
+- `openbao-fleet-sync` gets exactly `openbao/<name>-ca-public` per worker (Role `fleet-sync-<name>` from the cluster
+  chart), never the unseal key or `openchoreo-*`. Inside OpenBao it writes no policy; worst case if compromised: one
+  worker reads another's `secret/clusters/*`.
 
 ## Backlog
 Lives in **GitHub issues** (koorikla/platform-lab, labels `status:*`, `phase:*`, `area:*`, `needs-lab`). Work them with
