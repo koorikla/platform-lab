@@ -55,8 +55,8 @@ func main() {
 EOF
 (cd "$tmp" && go run main.go template backends) > "$tmp/haproxy.cfg"
 # 4. validate with the LB's own haproxy, then swap in and reload
-docker cp "$tmp/haproxy.cfg" "$lb:/tmp/haproxy.cfg.new"
-docker exec "$lb" haproxy -c -f /tmp/haproxy.cfg.new >/dev/null
+docker cp "$tmp/haproxy.cfg" "$lb:$cfg.new"
+docker exec "$lb" haproxy -c -f "$cfg.new" >/dev/null
 docker cp "$tmp/haproxy.cfg" "$lb:$cfg"
 docker kill -s HUP "$lb" >/dev/null
 echo "reloaded $lb: $(grep -c '^frontend' "$tmp/haproxy.cfg") frontends ($(awk '/^frontend/ {printf "%s ", $2}' "$tmp/haproxy.cfg"))"
