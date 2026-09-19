@@ -11,7 +11,7 @@ argo-cd:
       # Built-in PVC health + one exception: a Pending PVC that is a Helm hook (Argo: PreSync) counts as Healthy.
       # Thunder's sqlite PVC is a pre-install hook, the hub StorageClass (local-path) binds on first consumer, and that
       # consumer is a later hook (the setup Job): with Pending = Progressing the sync would wait forever.
-      # Core kinds take no "<group>_" prefix. Tested with `argocd admin settings resource-overrides health`.
+      # Core kinds take no "<group>_" prefix. Evaluated by hack/tests/test_argocd_pvc_health.sh (argocd CLI).
       resource.customizations.health.PersistentVolumeClaim: |
         hs = {}
         local phase = obj.status and obj.status.phase or "Pending"
