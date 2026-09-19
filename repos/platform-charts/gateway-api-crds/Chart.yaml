@@ -1,0 +1,9 @@
+apiVersion: v2
+name: gateway-api-crds
+description: Umbrella chart for the Gateway API standard-channel CRDs (hub + workers)
+type: application
+version: 0.1.0
+dependencies:
+  - name: gateway-crds-helm
+    version: 1.8.2          # bundles Gateway API v1.5.1 (1.9.x jumps to v1.6.1); the OCI tag has no "v"
+    repository: oci://docker.io/envoyproxy
