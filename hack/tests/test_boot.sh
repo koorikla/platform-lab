@@ -24,7 +24,7 @@ stage_is "boot"                                                    "bootstrap-st
 stage_is "boot containers/mgmt hub_up hub_cluster"                 "bootstrap-stopped: start-bootstrap"
 stage_is "boot boot_up boot_cluster"                               "hub-requested: hub-capi pivot drop-bootstrap argo root-app post"
 stage_is "boot boot_up boot_cluster containers/mgmt"               "hub-requested: hub-capi pivot drop-bootstrap argo root-app post"
-stage_is "boot boot_up boot_cluster containers/mgmt hub_up"        "hub-unpivoted: hub-capi pivot drop-bootstrap argo root-app post"
+stage_is "boot boot_up boot_cluster containers/mgmt hub_up"        "hub-requested: hub-capi pivot drop-bootstrap argo root-app post"
 # clusterctl move was interrupted: objects on both sides; move is safe to re-run (it updates what already exists)
 stage_is "boot boot_up boot_cluster containers/mgmt hub_up hub_cluster" "pivot-partial: pivot drop-bootstrap argo root-app post"
 stage_is "boot boot_up containers/mgmt hub_up hub_cluster"         "pivoted: drop-bootstrap argo root-app post"
@@ -36,17 +36,34 @@ stage_is "containers/mgmt"                                         "orphan: -"
 stage_is "containers/mgmt hub_up"                                  "orphan: -"
 stage_is "boot boot_up containers/mgmt hub_up"                     "orphan: -"
 
-# up refuses to build a second hub next to orphaned hub containers
+# up refuses to build a second hub next to orphaned hub containers, and doesn't send people to `make down` first
+# (after a Docker restart the hub API just needs a moment)
 new_fakes; state containers/mgmt
-assert_fails fenv bootstrap/bootstrap.sh up
+fenv bootstrap/bootstrap.sh up > "$FAKE_STATE/out" 2>&1 && fail "up accepted orphaned hub containers"
 ! calls | grep -qE '^k3d cluster create' || fail "up created a bootstrap cluster next to an orphaned hub"
+grep -q 'Docker just restarted, wait' "$FAKE_STATE/out" || fail "orphan message: $(cat "$FAKE_STATE/out")"
+
+# a read that errors (timeout, 5xx) is not "absent": abort instead of re-installing Argo CD, moving, deleting the
+# bootstrap cluster or rotating the Kargo deploy key
+up_errs() {  # state files...
+  new_fakes; state "$@"
+  assert_fails fenv bootstrap/bootstrap.sh up
+  ! calls | grep -qE '^(helm (upgrade|install)|clusterctl move|k3d cluster (create|delete))' ||
+    fail "line ${BASH_LINENO[0]}: acted on a failed read: $(calls | grep -E '^(helm|clusterctl|k3d)')"
+  [ ! -e "$FAKE_STATE/ran_kargo-deploy-key.sh" ] || fail "line ${BASH_LINENO[0]}: deploy key rotated on a failed read"
+}
+up_errs containers/mgmt hub_up hub_cluster argo err_helm
+up_errs boot boot_up boot_cluster containers/mgmt hub_up hub_cluster err_boot_cluster
+up_errs boot boot_up containers/mgmt hub_up hub_cluster err_hub_cluster
+up_errs containers/mgmt hub_up hub_cluster argo kargo_ns gh_auth err_kargo_secret
+new_fakes; state boot boot_up containers/mgmt hub_up hub_cluster err_boot_cluster
+assert_fails fenv bootstrap/bootstrap.sh stage
 
 # up on an installed hub: no helm/clusterctl, root app ensured, rendered branches initialised, deploy key only when the
 # Kargo secret is missing (never rotated on a re-run) and gh is authenticated
 up_argo() {  # extra state files...
   new_fakes; state containers/mgmt hub_up hub_cluster argo kargo_ns "$@"
-  fenv INIT_BRANCHES=init-rendered-branches.sh DEPLOY_KEY=kargo-deploy-key.sh KARGO_WAIT=0 \
-    bootstrap/bootstrap.sh up > "$FAKE_STATE/out" 2>&1 || { cat "$FAKE_STATE/out" >&2; fail "line ${BASH_LINENO[0]}: up failed"; }
+  fenv KARGO_WAIT=0 bootstrap/bootstrap.sh up > "$FAKE_STATE/out" 2>&1 || { cat "$FAKE_STATE/out" >&2; fail "line ${BASH_LINENO[0]}: up failed"; }
   ! calls | grep -qE '^(helm (upgrade|install)|clusterctl move|k3d cluster create)' || fail "up redid finished stages"
   [ -e "$FAKE_STATE/root_app" ] || fail "root app not applied"
   [ -e "$FAKE_STATE/ran_init-rendered-branches.sh" ] || fail "rendered branches not initialised"
@@ -77,7 +94,7 @@ calls | grep -q '^kubectl config delete-context mgmt' || fail "mgmt context not 
 
 # workers stuck in CAPI deletion: time out and keep the hub (removing it would leak the workers' containers)
 new_fakes; state containers/mgmt hub_up hub_cluster capi/dev1 containers/dev1 stuck
-assert_fails fenv DOWN_TIMEOUT=1 bootstrap/bootstrap.sh down
+assert_fails fenv DOWN_TIMEOUT=0 bootstrap/bootstrap.sh down
 [ -e "$FAKE_STATE/containers/mgmt" ] || fail "hub removed while workers still exist"
 
 # hub unreachable, worker containers left: refuse (they can't go through CAPI) unless FORCE=1, and keep the hub
@@ -100,6 +117,6 @@ fenv bootstrap/bootstrap.sh down >/dev/null 2>&1 || fail "down on an empty machi
 
 # a stopped bootstrap is started, then the stage is detected again (here: it held the hub request)
 new_fakes; state boot boot_cluster
-fenv HUB_TIMEOUT=1 bootstrap/bootstrap.sh up >/dev/null 2>&1 || true   # fails at hub-capi: no machines in a fake
+fenv HUB_TIMEOUT=0 bootstrap/bootstrap.sh up >/dev/null 2>&1 || true   # fails at hub-capi: no machines in a fake
 calls | grep -q '^k3d cluster start bootstrap' || fail "stopped bootstrap not started"
 ! calls | grep -qE '^k3d cluster create|^helm ' || fail "restarted bootstrap re-ran the bootstrap steps"

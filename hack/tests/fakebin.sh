@@ -7,6 +7,7 @@
 #   containers/<cluster>           docker containers labelled io.x-k8s.kind.cluster=<cluster> exist
 #   capi/<cluster>                 worker Cluster object on the hub; `kubectl delete clusters` removes it and, unless
 #                                  `stuck` exists, its containers (CAPD's job)
+#   err_hub_cluster, err_boot_cluster, err_helm, err_kargo_secret: that read fails with a timeout (not NotFound)
 #   kargo_ns, kargo_secret, gh_auth, docker_down, uname, df, inotify_*, <tool>_version: see the cases below
 set -u
 S=${FAKE_STATE:?}
@@ -15,6 +16,8 @@ echo "$cmd $*" >> "$S/calls"
 has() { [ -e "$S/$1" ]; }
 out() { if has "$1"; then cat "$S/$1"; else printf '%s\n' "$2"; fi; }   # out <state-file> <default>
 a=" $* "
+nf()      { echo "Error from server (NotFound): $1 not found" >&2; exit 1; }
+apierr() { echo "Unable to connect to the server: net/http: request canceled (Client.Timeout exceeded)" >&2; exit 1; }
 
 # the word after <word> in the arguments
 after() { local w=$1 prev=; shift; for x in "$@"; do [ "$prev" = "$w" ] && { echo "$x"; return; }; prev=$x; done; }
@@ -24,16 +27,18 @@ kubectl)
   case $a in
     *" version --client "*) out kubectl_version "Client Version: v1.37.0"; exit 0 ;;
     " config "*) exit 0 ;;
-    *" --context mgmt "*) has hub_up || exit 1; side=hub ;;
-    *" --context k3d-bootstrap "*) has boot_up || exit 1; side=boot ;;
+    *" --context mgmt "*) has hub_up || apierr; side=hub ;;
+    *" --context k3d-bootstrap "*) has boot_up || apierr; side=boot ;;
     *) exit 1 ;;
   esac
   case $a in
     *" get --raw /readyz "*) echo ok ;;
-    *" get clusters.cluster.x-k8s.io mgmt "*) has "${side}_cluster" ;;
-    *" get secret -l owner=helm,name=argocd,status=deployed "*) ! has argo || echo secret/sh.helm.release.v1.argocd.v1 ;;
+    *" get clusters.cluster.x-k8s.io mgmt "*) ! has "err_${side}_cluster" || apierr; has "${side}_cluster" || nf mgmt ;;
+    *" get secret -l owner=helm,name=argocd,status=deployed "*)
+      ! has err_helm || apierr; ! has argo || echo secret/sh.helm.release.v1.argocd.v1 ;;
+    *" get crd clusters.cluster.x-k8s.io "*) has hub_cluster || nf clusters.cluster.x-k8s.io ;;
     *" get clusters.cluster.x-k8s.io -l platform.lab/role=worker "*) ls "$S/capi" 2>/dev/null | tr '\n' ' ' ;;
-    *" get clusters.cluster.x-k8s.io "*) has "capi/$(after clusters.cluster.x-k8s.io "$@")" ;;
+    *" get clusters.cluster.x-k8s.io "*) w=$(after clusters.cluster.x-k8s.io "$@"); has "capi/$w" || nf "$w" ;;
     *" delete clusters.cluster.x-k8s.io "*)
       for f in "$S"/capi/*; do
         [ -e "$f" ] || continue
@@ -41,7 +46,7 @@ kubectl)
       done ;;
     *" scale "*) ;;
     *" get namespace kargo-shared-resources "*) has kargo_ns ;;
-    *" get secret git-platform-lab "*) has kargo_secret ;;
+    *" get secret git-platform-lab "*) ! has err_kargo_secret || apierr; has kargo_secret || nf secret ;;
     *" apply -f bootstrap/root-app.yaml "*) touch "$S/root_app" ;;
     *" get lease "*) exit 1 ;;
     *) echo "fake kubectl: unhandled: $*" >&2; exit 1 ;;
@@ -84,5 +89,6 @@ shellcheck) printf 'ShellCheck - shell script analysis tool\nversion: 0.11.0\n' 
 uname)      out uname Darwin ;;
 df)         out hostdf "$(printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 131787236 85747372 39312648 69%% /')" ;;
 init-rendered-branches.sh|kargo-deploy-key.sh) touch "$S/ran_$cmd" ;;
+git|ssh)    echo "fake $cmd: tests never talk to a git remote" >&2; exit 1 ;;
 *) echo "fakebin: no fake for $cmd" >&2; exit 1 ;;
 esac

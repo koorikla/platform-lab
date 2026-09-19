@@ -3,7 +3,7 @@ OLD  := $(shell grep -m1 -oE 'https://github.com/[^ ]+\.git' bootstrap/root-app.
 CTX  := --context mgmt
 
 .PHONY: up down status ui argocd-password kargo-password set-repo kubeconfig lint test rendered-prune
-up:              ## bootstrap k3d -> CAPI builds hub "mgmt" -> clusterctl move -> Argo CD + root app
+up:              ## resumable: bootstrap k3d -> CAPI builds hub "mgmt" -> clusterctl move -> Argo CD + root app
 	./bootstrap/bootstrap.sh
 down:            ## workers via CAPI (waits for their containers), then the hub's containers by CAPD label (FORCE=1: see bootstrap.sh)
 	./bootstrap/bootstrap.sh down

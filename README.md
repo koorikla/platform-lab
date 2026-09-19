@@ -83,6 +83,9 @@ Linux hosts running several CAPD clusters usually need
 `sysctl fs.inotify.max_user_watches=1048576 fs.inotify.max_user_instances=8192`.
 
 Kargo needs git push credentials: `hack/kargo-deploy-key.sh` (repo-scoped deploy key, straight into a hub Secret).
+`make up` runs it when `gh` is logged in and the hub has no such Secret yet. It **replaces** the repo's
+`kargo-platform-lab` key, so on a shared repo (e.g. without `make set-repo` to your fork) it cuts off every other lab's
+Kargo: log out of `gh` or skip it if that isn't yours to rotate.
 
 ## Working on this repo
 

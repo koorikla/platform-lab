@@ -22,12 +22,16 @@ INIT_BRANCHES=${INIT_BRANCHES:-hack/init-rendered-branches.sh} DEPLOY_KEY=${DEPL
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33mWARN: %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
-# poll <seconds> <cmd...>: true once cmd succeeds, false after ~seconds
+# poll <seconds> <cmd...>: true once cmd succeeds, false when the seconds are up
 poll() {
-  local tries=$(( $1 / (POLL > 0 ? POLL : 1) )); shift
-  [ "$tries" -ge 1 ] || tries=1
-  while [ "$tries" -gt 0 ]; do "$@" && return 0; tries=$((tries - 1)); [ "$tries" -eq 0 ] || sleep "$POLL"; done
-  return 1
+  local end=$((SECONDS + $1)); shift
+  until "$@"; do [ "$SECONDS" -lt "$end" ] || return 1; sleep "$POLL"; done
+}
+# found <kubectl get ...>: 0 = exists, 1 = NotFound / CRD not installed. Any other error (timeout, 5xx) aborts: these
+# answers decide about helm upgrade, clusterctl move and deleting the bootstrap cluster, so never guess.
+found() {
+  local err; err=$("$@" 2>&1 >/dev/null) && return 0
+  case $err in *NotFound*|*"doesn't have a resource type"*) return 1 ;; *) die "can't tell ($*): $err" ;; esac
 }
 
 # --- state probes (read-only) ------------------------------------------------------------------------------------
@@ -41,11 +45,14 @@ kh() {  # kubectl against the hub
 }
 kb() { kubectl --context $BOOT --request-timeout=10s "$@"; }   # kubectl against the k3d bootstrap cluster
 hub_up()          { kh get --raw /readyz >/dev/null 2>&1; }
-hub_self_hosted() { kh -n fleet get clusters.cluster.x-k8s.io $HUB >/dev/null 2>&1; }
-argo_installed()  { [ -n "$(kh -n argocd get secret -l owner=helm,name=argocd,status=deployed -o name 2>/dev/null)" ]; }
+hub_self_hosted() { found kh -n fleet get clusters.cluster.x-k8s.io $HUB; }
+argo_installed() {  # the helm release, not the pods: after the first install Argo CD manages itself
+  local o; o=$(kh -n argocd get secret -l owner=helm,name=argocd,status=deployed -o name) || die "hub API error"
+  [ -n "$o" ]
+}
 boot_exists()     { k3d cluster list bootstrap >/dev/null 2>&1; }
 boot_up()         { kb get --raw /readyz >/dev/null 2>&1; }
-boot_has_hub()    { kb -n fleet get clusters.cluster.x-k8s.io $HUB >/dev/null 2>&1; }
+boot_has_hub()    { found kb -n fleet get clusters.cluster.x-k8s.io $HUB; }
 containers()      { docker ps -aq --filter "label=io.x-k8s.kind.cluster=$1"; }   # CAPD labels every node and LB
 
 # detect_stage: where a previous (partial) run left the machine. Order matters: the most advanced evidence wins.
@@ -57,7 +64,7 @@ detect_stage() {
     elif argo_installed; then echo argo
     else echo pivoted; fi
   elif [ $bhub = 1 ]; then
-    if hub_up; then echo hub-unpivoted; else echo hub-requested; fi
+    echo hub-requested   # whether or not the hub answers yet: the remaining steps are the same
   elif [ -n "$(containers $HUB)" ]; then echo orphan   # hub containers nobody manages: never build a second hub
   elif [ $boot = 1 ]; then echo bootstrap
   else echo fresh; fi
@@ -68,7 +75,7 @@ steps_for() {
   case $1 in
     fresh|bootstrap)             echo "bootstrap-cluster bootstrap-capi hub-capi pivot drop-bootstrap argo root-app post" ;;
     bootstrap-stopped)           echo "start-bootstrap" ;;
-    hub-requested|hub-unpivoted) echo "hub-capi pivot drop-bootstrap argo root-app post" ;;
+    hub-requested)               echo "hub-capi pivot drop-bootstrap argo root-app post" ;;
     pivot-partial)               echo "pivot drop-bootstrap argo root-app post" ;;
     pivoted)                     echo "${drop:+$drop }argo root-app post" ;;
     argo)                        echo "${drop:+$drop }root-app post" ;;
@@ -176,9 +183,10 @@ step_post() {
   "$INIT_BRANCHES" || { warn "$INIT_BRANCHES failed"; notes+=("rendered/* branches: fix git push access, then run $INIT_BRANCHES"); }
   if ! gh auth status >/dev/null 2>&1; then
     notes+=("Kargo deploy key: gh auth login && $DEPLOY_KEY")
-  elif kh -n kargo-shared-resources get secret git-platform-lab >/dev/null 2>&1; then
+  elif found kh -n kargo-shared-resources get secret git-platform-lab; then   # an API error must not rotate the key
     echo "Kargo git credential present: keeping it (run $DEPLOY_KEY to rotate)"
   elif poll "$KARGO_WAIT" kh get namespace kargo-shared-resources >/dev/null 2>&1; then
+    warn "$DEPLOY_KEY replaces the repo's 'kargo-platform-lab' deploy key: any other lab using this repo loses Kargo's git access"
     "$DEPLOY_KEY" || notes+=("Kargo deploy key failed: re-run $DEPLOY_KEY")
   else
     notes+=("Kargo not installed yet (namespace kargo-shared-resources): run $DEPLOY_KEY once it is")
@@ -198,8 +206,9 @@ up() {
   hub_server
   stage=$(detect_stage)
   if [ "$stage" = bootstrap-stopped ]; then step_start_bootstrap; stage=$(detect_stage); fi
-  [ "$stage" != orphan ] || die "containers of '$HUB' exist but neither the hub API nor a bootstrap cluster holding \
-Cluster $HUB answers. Nothing can resume that: run 'make down' (FORCE=1 if it asks), then 'make up'."
+  [ "$stage" != orphan ] || die "containers of '$HUB' exist but its API doesn't answer. If Docker just restarted, \
+wait a minute and re-run; start stopped ones (docker ps -a --filter label=io.x-k8s.kind.cluster=$HUB). \
+Only if you want to rebuild the lab from scratch: make down, then make up."
   steps=$(steps_for "$stage")
   log "stage: $stage -> $steps"
   for s in $steps; do "step_${s//-/_}"; done
@@ -209,7 +218,10 @@ down() {
   local workers='' w leftover='' names
   hub_server
   if hub_up; then
-    workers=$(kh -n fleet get clusters.cluster.x-k8s.io -l platform.lab/role=worker -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    if found kh get crd clusters.cluster.x-k8s.io; then   # no CAPI on the hub yet: no workers either
+      workers=$(kh -n fleet get clusters.cluster.x-k8s.io -l platform.lab/role=worker -o jsonpath='{.items[*].metadata.name}') ||
+        die "can't list the worker Clusters on the hub"
+    fi
     if [ -n "$workers" ]; then
       log "stopping Argo CD (it would recreate the worker Clusters), deleting workers via CAPI: $workers"
       kh -n argocd scale statefulset,deployment --all --replicas=0 >/dev/null 2>&1 || true
@@ -236,11 +248,10 @@ Re-run with FORCE=1 to remove them by label io.x-k8s.kind.cluster=<name>."
   # before the hub: an unpivoted hub is owned by the bootstrap cluster's CAPD, which would recreate its machines
   if boot_exists; then log "deleting the bootstrap cluster"; k3d cluster delete bootstrap; fi
   # never `kind delete cluster`: kind would also list CAPD clusters; the label selects exactly the hub's containers
-  for _ in 1 2 3; do
-    [ -n "$(containers $HUB)" ] || break
+  if [ -n "$(containers $HUB)" ]; then
     log "removing the hub's containers (label io.x-k8s.kind.cluster=$HUB)"
     containers $HUB | xargs docker rm -f -v >/dev/null
-  done
+  fi
   [ -z "$(containers $HUB)" ] || die "containers of $HUB remain: docker ps -a --filter label=io.x-k8s.kind.cluster=$HUB"
   kubectl config delete-context $HUB >/dev/null 2>&1 || true
   kubectl config delete-cluster $HUB >/dev/null 2>&1 || true
