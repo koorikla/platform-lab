@@ -11,6 +11,10 @@
 {{- define "kargo-pipeline.namespace" -}}{{ .Values.namespace | default .Values.name }}{{- end }}
 {{- define "kargo-pipeline.releaseName" -}}{{ .Values.releaseName | default .Values.name }}{{- end }}
 
+{{/* Ring whose clusters a stage (dict name/env) serves: same rule as the worker-addons appset, where a cluster with
+     ring canary follows rendered/<env>-canary and every other cluster rendered/<env>. */}}
+{{- define "kargo-pipeline.ring" -}}{{ if eq .name (printf "%s-canary" .env) }}canary{{ else }}stable{{ end }}{{- end }}
+
 {{/* Kind-specific vars for the render-<kind> ClusterPromotionTask (names must match its spec.vars: contract test). */}}
 {{- define "kargo-pipeline.vars.addon" -}}
 - { name: addon, value: {{ .Values.name | quote }} }

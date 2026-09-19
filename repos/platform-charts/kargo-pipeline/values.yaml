@@ -10,12 +10,26 @@ image: ""                   # app: image repository (Warehouse subscription)
 repoURL: git@github.com:koorikla/platform-lab.git   # SSH: Kargo's credential is the repo deploy key; passed to the task
 stages:                     # order = promotion order; the first stage takes Freight straight from the Warehouse
   - { name: dev-canary, env: dev,  pr: false }   # name = stage + rendered/<name> branch; env = values overlay
-  - { name: dev,        env: dev,  pr: false, soak: 15m }   # soak: minimum time in the previous stage (below)
+  - { name: dev,        env: dev,  pr: false }   # optional `soak: 15m`: minimum time in the previous stage (below)
   - { name: test,       env: test, pr: false }
   - { name: prod,       env: prod, pr: false }   # pr: true needs a token that can open PRs (deploy key can't)
-# dev follows its canary ring automatically, but only with Freight that has run in dev-canary for `soak` (Kargo
-# requiredSoakTime; no verification is configured, so without a soak dev would follow within seconds and the ring
-# would show nothing). Stop a bad canary inside that window by promoting the previous Freight to dev-canary: that
-# Freight leaves the stage before it soaked, and the manual promotion holds dev-canary's auto-promotion. Skip the wait
-# by approving the Freight for dev (manual approval supersedes soak). test and prod stay manual.
+# dev follows its canary ring automatically, but only with Freight that passed verification in dev-canary (below): the
+# canary's Applications Synced + Healthy at the promoted commit for `consecutiveSuccesses` measurements in a row. A
+# canary that doesn't get there within `count` measurements fails verification, and dev never takes that Freight.
+# No soak by default: `soak` (Kargo requiredSoakTime) only adds a minimum dwell counted from the promotion, without
+# looking at health; Argo's ~3 min repo poll on the worker plus the healthy streak already keep dev minutes behind.
+# Skip the gate by approving the Freight for dev (a manual approval supersedes verification and soak). test and prod
+# stay manual.
 autoPromote: [dev-canary, dev]
+# Verification after every promotion, every stage (AnalysisTemplate argocd-apps; Argo Rollouts runs it in the project
+# namespace). One measurement = one Job (files/verify-apps.sh) reading the hub Applications of this addon on the
+# stage's clusters; a stage without clusters passes. Gives up after count x (interval + Job runtime), ~12 min here.
+verification:
+  interval: 30s
+  count: 20                 # measurements before giving up: covers Argo's ~3 min poll + the rollout on the worker
+  consecutiveSuccesses: 4   # healthy streak required (~2 min): a canary that flaps or crashes after start doesn't pass
+  # kubectl + git + jq + bash; same pin as openbao fleetSync.image (Renovate group kubernetes; a test keeps them equal)
+  image: alpine/k8s:1.34.11@sha256:0382123ab8ae17d8da5d43cc299242933eb012cfbe56787b43731c942c3eed80
+  argocdNamespace: argocd   # where the worker-addons Applications live on the hub
+  # what worker-addons syncs rendered/* from (https, anonymous: the Job only reads the branch's commit history)
+  repoURL: https://github.com/koorikla/platform-lab.git

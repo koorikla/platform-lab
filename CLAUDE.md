@@ -116,7 +116,8 @@ go). Once Kargo project `addon-<addon>` is gone (a running promotion could re-pu
 (dry run) / `make rendered-prune APPLY=1` removes the stale `addons/<addon>` from every `rendered/*` branch — the one
 documented cleanup besides Kargo that writes those branches (it pushes directly, so prod needs a PR once PR-gated).
 A `ring: canary` cluster needs a `<env>-canary` stage in kargo-pipeline (`hack/lint.sh` checks). dev2 is dev's canary
-ring; stage `dev` auto-promotes only Freight that soaked 15 min in `dev-canary` (`stages[].soak`, `requiredSoakTime`).
+ring; stage `dev` auto-promotes only Freight verified in `dev-canary`: every stage runs AnalysisTemplate `argocd-apps`
+(its Applications Synced + Healthy at the promoted rendered commit for a streak; no clusters = passes; CONTRIBUTING.md).
 Worker-addon apps carry `platform.lab/ring` but stay auto-sync: RollingSync works through the agent but is off by
 decision (costs selfHeal) — why and how to enable: design doc addendum "progressive sync" (#27).
 Disabling (`.disabled`) leaves an addon's/cluster's resources running; removal is manual: CONTRIBUTING.md "Disabling".
