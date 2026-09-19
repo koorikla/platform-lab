@@ -1,0 +1,18 @@
+# Same as the hub's (platform-config fleet/base/hub-coredns.yaml; hack/tests/test_birth_kit.sh keeps them equal):
+# worker repo-servers clone from GitHub too. k3s imports *.server keys as extra CoreDNS server blocks.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+  labels:
+    {{- include "birth-kit.labels" . | nindent 4 }}
+data:
+  external.server: |
+    github.com github.io githubusercontent.com ghcr.io quay.io docker.io docker.com k8s.io googleapis.com pkg.dev kgateway.dev {
+      errors
+      cache 30
+      forward . 1.1.1.1 8.8.8.8 /etc/resolv.conf {
+        policy sequential   # public resolvers first; Docker's resolver only when both fail
+      }
+    }

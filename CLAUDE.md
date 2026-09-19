@@ -19,6 +19,8 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
 4. Addons are **umbrella charts** in `repos/platform-charts/<addon>` (upstream chart as dependency, extra templates
    allowed; more than one upstream dependency only when they must land in the same sync — e.g. kargo + argo-rollouts).
    Config repo never contains templates, only `addon.yaml` + values.
+   Not an addon, same chart rules: `worker-birth-kit` (CAAPH birth kit) bundles argo-cd + argocd-agent-agent +
+   external-secrets because each worker gets exactly one release at birth, before any addon can reach it.
 5. **Kargo writes only `rendered/*` branches; `main` holds no versions for promoted things.** A worker addon's version
    is the Freight (a `main` commit of its chart + config) rendered into `rendered/<stage>`; values: fleet < env, nothing
    per cluster. Anything per-cluster is identity only (cluster name), stamped by the CAAPH birth kit. Rings replace

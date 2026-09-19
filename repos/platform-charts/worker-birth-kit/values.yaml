@@ -1,0 +1,57 @@
+# The only per-cluster value: CAAPH renders it from the CAPI Cluster (invariant 1: cluster name == agent name ==
+# client-cert CN). Required, a DNS-1123 label: it becomes the OpenBao auth mount k8s-<name> and path clusters/<name>/.
+clusterName: ""
+
+# The hub as workers reach it: its CAPD load balancer (platform-config fleet/base/hub-lb.yaml) on the docker network.
+# Keep in sync with hub.host / hub.principalNodePort of argocd-agent-principal and the openbao NodePort.
+hub:
+  host: mgmt-lb
+  openbaoPort: 30820                   # lab: plain HTTP, see platform-charts/openbao
+
+# Per-cluster OpenBao pull wiring (templates/). OpenBao side: auth/k8s-<name> + role eso + policy cluster-<name>
+# (openbao-fleet-sync CronJob, platform-charts/openbao); data: secret/clusters/<name>/* (hub PushSecrets).
+hubOpenbao:
+  namespaces: [argocd]                 # who may use store hub-openbao; widen per consumer (e.g. openchoreo-data-plane)
+
+# Workload-cluster profile: application-controller + repo-server + redis only.
+argo-cd:
+  fullnameOverride: argocd             # -> argocd-redis / argocd-repo-server, which the agent expects
+  dex:
+    enabled: false
+  notifications:
+    enabled: false
+  server:
+    replicas: 0                        # chart has no server.enabled switch (same as upstream agent-managed profile)
+  applicationSet:
+    replicas: 0                        # managed mode: ApplicationSets live on the hub
+  # the redis NetworkPolicy for the agent: templates/argocd-redis-networkpolicy.yaml
+
+argocd-agent-agent:
+  fullnameOverride: argocd-agent-agent-helm   # = the names of the former standalone release "argocd-agent"
+  image:                               # chart default (ghcr, v0.8.1 tag) does not exist; releases live on quay
+    repository: quay.io/argoprojlabs/argocd-agent
+    tag: v0.10.0
+  agentMode: managed
+  auth: "mtls:any"                     # identity = CN of argocd-agent-client-tls (= clusterName, pulled from OpenBao)
+  server: mgmt-lb                      # = hub.host (subchart values can't reference it; the test keeps them equal)
+  serverPort: "30443"
+  destinationBasedMapping: true
+  createNamespace: true
+  allowedNamespaces: "*"
+  labelSelector: "argocd-agent=true"
+  tlsSecretName: argocd-agent-client-tls
+  tlsRootCASecretName: argocd-agent-ca
+  redisAddress: argocd-redis:6379
+  heartbeatInterval: 30s               # < hub LB haproxy idle timeout (50s), keeps the gRPC stream open
+
+# Pull model: the worker fetches its own secrets from the hub's OpenBao (store hub-openbao, templates/).
+external-secrets:
+  fullnameOverride: external-secrets   # SA external-secrets/external-secrets, bound in OpenBao role eso (fleet-sync)
+  namespaceOverride: external-secrets  # one release has one namespace (argocd): templates/namespace.yaml creates this one
+  installCRDs: true                    # templated CRDs own upgrades; crds/ only bootstraps the first install
+  webhook:
+    # The store and ExternalSecrets are created in the same install as the webhook, before its pod and CA bundle are
+    # ready: with Fail every birth would fail its first installs until the webhook serves. Ignore = no validation
+    # while the webhook is down (only this chart and Argo write these objects on a worker; the controller still
+    # reports invalid specs in status). Hub ESO keeps Fail.
+    failurePolicy: Ignore

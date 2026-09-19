@@ -1,0 +1,8 @@
+# ESO runs in its own namespace (external-secrets.namespaceOverride), but a release has one namespace (argocd) and
+# CAAPH's createNamespace covers only that one. Helm creates Namespaces first.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "birth-kit.esoNamespace" . }}
+  labels:
+    {{- include "birth-kit.labels" . | nindent 4 }}

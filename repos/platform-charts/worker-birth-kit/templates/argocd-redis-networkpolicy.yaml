@@ -1,0 +1,19 @@
+# argo-helm's default redis NetworkPolicy only admits Argo's own components; the agent needs redis too
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-redis-allow-agent
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-redis
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-agent-agent
+      ports:
+        - port: 6379
+          protocol: TCP

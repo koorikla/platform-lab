@@ -1,0 +1,20 @@
+apiVersion: v2
+name: worker-birth-kit
+description: What CAPI (CAAPH) installs on every worker at birth - Argo CD worker profile, argocd-agent, ESO and the per-cluster OpenBao pull wiring
+type: application
+version: 0.1.0
+# Invariant 4 exception (CLAUDE.md): three upstream charts in one umbrella because they must land together, as one
+# CAAPH release per worker (HelmChartProxy worker-birth-kit, valuesTemplate `clusterName: {{ .Cluster.metadata.name }}`):
+# the agent needs argo-cd's redis and the secrets ESO pulls from the hub; ESO needs its CRDs before the store and
+# ExternalSecrets in templates/ can even be mapped (crds/ + external-secrets.webhook in values.yaml explain how).
+# Everything after birth comes from the hub through the agent (worker-addons ApplicationSet).
+dependencies:
+  - name: argo-cd
+    version: 10.9.2                    # = hub (platform-charts/argo-cd); hack/tests/test_birth_kit.sh checks it
+    repository: oci://ghcr.io/argoproj/argo-helm
+  - name: argocd-agent-agent
+    version: 0.2.7                     # identical to the v0.10.0 chart; image pinned in values.yaml
+    repository: oci://ghcr.io/argoproj-labs/argocd-agent
+  - name: external-secrets
+    version: 2.10.0                    # = hub (platform-charts/external-secrets); bump -> hack/birth-kit-crds.sh
+    repository: oci://ghcr.io/external-secrets/charts
