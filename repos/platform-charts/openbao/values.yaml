@@ -50,3 +50,13 @@ openbao:
 hubWriter:
   namespaces: [argocd]            # cluster chart: PushSecret <name>-argocd-agent
 
+# fleet-sync: per worker cluster, auth/k8s-<name> + role eso + policy cluster-<name>
+fleetSync:
+  schedule: "*/2 * * * *"
+  image: alpine/k8s:1.34.11      # kubectl + curl + jq + bash; tag follows the fleet's Kubernetes minor
+  fleetNamespace: fleet
+  workerSelector: platform.lab/role=worker
+  # the worker's ESO (CAAPH birth kit, fleet/base/helmchartproxies.yaml worker-external-secrets)
+  esoServiceAccount: external-secrets
+  esoNamespace: external-secrets
+  tokenTTL: 1h
