@@ -7,7 +7,7 @@
 # once Gateway openchoreo-control-plane/gateway-default exists (#8 kgateway, #12 control plane). Until then Thunder runs
 # but is reachable only in-cluster (thunder-service.thunder.svc:8090) and Argo shows the HTTPRoute as Progressing.
 #
-# Under Argo CD every Helm hook of the chart is a PreSync hook (exact list: hack/tests/test_thunder.sh):
+# Under Argo CD every Helm hook of the chart is a PreSync hook (exact list: tests/hooks_test.yaml):
 # - PVC thunder-database-pvc (sqlite): Pending until its first consumer (local-path is WaitForFirstConsumer), and that
 #   consumer is the later setup Job -> needs the argocd-cm PVC health override (argo-cd umbrella) to not deadlock, and
 #   hook-delete-policy hook-failed (below): successful syncs re-apply the PVC instead of deleting the in-use one

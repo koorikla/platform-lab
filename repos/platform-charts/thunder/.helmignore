@@ -1,0 +1,2 @@
+# helm-unittest suites and their fixtures stay out of the published chart
+tests/

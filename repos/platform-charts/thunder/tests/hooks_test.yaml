@@ -1,0 +1,101 @@
+suite: Thunder's Helm hooks (= Argo sync hooks) and the Backstage client secret (#9 contract)
+# hook-failed (Argo: HookFailed) on the PVC and the ExternalSecret keeps them across SUCCESSFUL syncs (BeforeHookCreation
+# would re-create them every sync = an empty PVC). Caveat: a FAILED sync deletes every HookFailed hook (see values.yaml).
+# The setup Job has no delete policy: Argo's default BeforeHookCreation re-creates it every sync, so a failed Job can't
+# block later syncs, and the finished Job and its logs stay until the next sync.
+release:
+  name: thunder
+  namespace: thunder
+templates:
+  - charts/thunder/templates/*.yaml
+  - templates/backstage-client-secret.yaml
+tests:
+  - it: seeds the Backstage client secret first (weight -20), kept across successful syncs
+    template: templates/backstage-client-secret.yaml
+    asserts:
+      - equal: { path: metadata.name, value: thunder-backstage-client }
+      - isSubset:
+          path: metadata.annotations
+          content: { helm.sh/hook: pre-install, helm.sh/hook-weight: "-20", helm.sh/hook-delete-policy: hook-failed }
+
+  - it: creates the sqlite PVC next (weight -15), kept across successful syncs
+    template: charts/thunder/templates/pvc.yaml
+    asserts:
+      - equal: { path: metadata.name, value: thunder-database-pvc }
+      - isSubset:
+          path: metadata.annotations
+          content: { helm.sh/hook: pre-install, helm.sh/hook-weight: "-15", helm.sh/hook-delete-policy: hook-failed }
+
+  - it: then the Job's ConfigMaps and ServiceAccount (weight -10, Argo's default delete policy)
+    asserts:
+      - equal: { path: metadata.name, value: thunder-bootstrap }
+        template: charts/thunder/templates/bootstrap-configmap.yaml
+      - equal: { path: metadata.name, value: thunder-setup-config-map }
+        template: charts/thunder/templates/setup-config-map.yaml
+      - equal: { path: metadata.name, value: thunder-service-account }
+        template: charts/thunder/templates/service-account.yaml
+      - equal: { path: 'metadata.annotations["helm.sh/hook"]', value: pre-install }
+        template: charts/thunder/templates/bootstrap-configmap.yaml
+      - equal: { path: 'metadata.annotations["helm.sh/hook"]', value: pre-install }
+        template: charts/thunder/templates/setup-config-map.yaml
+      - equal: { path: 'metadata.annotations["helm.sh/hook"]', value: pre-install }
+        template: charts/thunder/templates/service-account.yaml
+      - equal: { path: 'metadata.annotations["helm.sh/hook-weight"]', value: "-10" }
+        template: charts/thunder/templates/bootstrap-configmap.yaml
+      - equal: { path: 'metadata.annotations["helm.sh/hook-weight"]', value: "-10" }
+        template: charts/thunder/templates/setup-config-map.yaml
+      - equal: { path: 'metadata.annotations["helm.sh/hook-weight"]', value: "-10" }
+        template: charts/thunder/templates/service-account.yaml
+      - notExists: { path: 'metadata.annotations["helm.sh/hook-delete-policy"]' }
+        template: charts/thunder/templates/bootstrap-configmap.yaml
+      - notExists: { path: 'metadata.annotations["helm.sh/hook-delete-policy"]' }
+        template: charts/thunder/templates/setup-config-map.yaml
+      - notExists: { path: 'metadata.annotations["helm.sh/hook-delete-policy"]' }
+        template: charts/thunder/templates/service-account.yaml
+
+  - it: runs the setup Job last (weight -5), re-created every sync and kept until then
+    template: charts/thunder/templates/setup-job.yaml
+    asserts:
+      - equal: { path: metadata.name, value: thunder-setup }
+      - equal: { path: 'metadata.annotations["helm.sh/hook"]', value: pre-install }
+      - equal: { path: 'metadata.annotations["helm.sh/hook-weight"]', value: "-5" }
+      - notExists: { path: 'metadata.annotations["helm.sh/hook-delete-policy"]' }
+      - notExists: { path: spec.ttlSecondsAfterFinished }
+
+  - it: makes nothing else a hook
+    documentSelector: { path: 'metadata.annotations["helm.sh/hook"]', matchMany: true, skipEmptyTemplates: true }
+    asserts:
+      - matchRegex:
+          path: metadata.name
+          pattern: ^(thunder-backstage-client|thunder-database-pvc|thunder-bootstrap|thunder-setup-config-map|thunder-service-account|thunder-setup)$
+
+  - it: uses no Argo-native hooks
+    asserts:
+      - notExists: { path: 'metadata.annotations["argocd.argoproj.io/hook"]' }
+
+  # local-path is WaitForFirstConsumer: the setup Job is the PVC's first consumer
+  - it: mounts the PVC in the setup Job
+    template: charts/thunder/templates/setup-job.yaml
+    asserts:
+      - equal: { path: 'spec.template.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName', value: thunder-database-pvc }
+
+  # generated in-cluster by the openbao chart, OpenBao secret/openchoreo/backstage-client-secret (property value)
+  - it: reads the Backstage client secret from OpenBao through ClusterSecretStore default
+    template: templates/backstage-client-secret.yaml
+    asserts:
+      - equal: { path: spec.secretStoreRef, value: { kind: ClusterSecretStore, name: default } }
+      - equal: { path: spec.data, value: [{ secretKey: client-secret, remoteRef: { key: openchoreo/backstage-client-secret, property: value } }] }
+      - equal: { path: spec.target.name, value: thunder-backstage-client }
+
+  - it: hands it to the setup Job, which registers Thunder's Backstage app with it
+    template: charts/thunder/templates/setup-job.yaml
+    asserts:
+      - equal:
+          path: 'spec.template.spec.containers[0].env[?(@.name == "BACKSTAGE_CLIENT_SECRET")].valueFrom.secretKeyRef'
+          value: { name: thunder-backstage-client, key: client-secret }
+
+  # else the Job would wait forever on a Secret nobody creates
+  - it: refuses to render without the client secret config
+    set: { backstageClientSecret: null }
+    asserts:
+      - failedTemplate: { errorPattern: "backstageClientSecret is required" }

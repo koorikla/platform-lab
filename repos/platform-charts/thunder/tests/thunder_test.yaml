@@ -1,0 +1,55 @@
+suite: Thunder IdP on the hub (upstream OpenChoreo 1.2.5 k3d values) - sqlite, one URL for browsers and pods
+release:
+  name: thunder
+  namespace: thunder
+templates:
+  - charts/thunder/templates/*.yaml
+  - templates/backstage-client-secret.yaml
+tests:
+  # sqlite = one writer: single replica, no HPA/PDB, no nginx Ingress, no chart-owned Gateway
+  - it: runs a single replica and nothing that would scale or expose it on its own
+    asserts:
+      - hasDocuments: { count: 1 }
+        template: charts/thunder/templates/thunder-deployment.yaml
+      - equal: { path: spec.replicas, value: 1 }
+        template: charts/thunder/templates/thunder-deployment.yaml
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: HorizontalPodAutoscaler, matchMany: true, skipEmptyTemplates: true }
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: PodDisruptionBudget, matchMany: true, skipEmptyTemplates: true }
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: Ingress, matchMany: true, skipEmptyTemplates: true }
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: Gateway, matchMany: true, skipEmptyTemplates: true }
+
+  # #11: CoreDNS rewrite (pods) + make ui port-forward (browsers) reach the control-plane Gateway on 8080
+  - it: routes thunder.openchoreo.localhost through the OpenChoreo control-plane Gateway
+    template: charts/thunder/templates/httproute.yaml
+    asserts:
+      - equal: { path: spec.hostnames, value: [thunder.openchoreo.localhost] }
+      - equal: { path: 'spec.parentRefs[0]', value: { name: gateway-default, namespace: openchoreo-control-plane } }
+      - equal: { path: 'spec.rules[0].backendRefs[0]', value: { name: thunder-service, port: 8090 } }
+
+  - it: issues tokens for http://thunder.openchoreo.localhost:8080 (the issuer every client checks)
+    template: charts/thunder/templates/config-map.yaml
+    asserts:
+      - equal: { path: metadata.name, value: thunder-config-map }
+      - matchRegex:
+          path: 'data["deployment.yaml"]'
+          pattern: '(?m)^server:\n(  .*\n)*  public_url: "http://thunder\.openchoreo\.localhost:8080"$'
+
+  - it: keeps all three databases in sqlite
+    template: charts/thunder/templates/config-map.yaml
+    asserts:
+      - matchRegex: { path: 'data["deployment.yaml"]', pattern: '(?m)^  config:\n    type: "sqlite"$' }
+      - matchRegex: { path: 'data["deployment.yaml"]', pattern: '(?m)^  runtime:\n    type: "sqlite"$' }
+      - matchRegex: { path: 'data["deployment.yaml"]', pattern: '(?m)^  user:\n    type: "sqlite"$' }
+
+  # browser-side PKCE needs CORS for Backstage + the Kargo UI port of `make ui` (#19); Argo CD exchanges its code
+  # server-side (v3.5), so no origin for it
+  - it: allows CORS from Backstage and the Kargo UI only
+    template: charts/thunder/templates/config-map.yaml
+    asserts:
+      - matchRegex:
+          path: 'data["deployment.yaml"]'
+          pattern: '(?m)^cors:\n  allowed_origins:\n    - "http://openchoreo\.localhost:8080"\n    - "http://localhost:7007"\n    - "http://localhost:8091"\n\n'
