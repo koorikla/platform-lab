@@ -1,0 +1,1 @@
+# Hub overrides for openbao (layered on top of the umbrella chart's values.yaml). Lab mode: dev server, see the chart.

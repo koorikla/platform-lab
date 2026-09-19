@@ -1,0 +1,27 @@
+# The hub's write path into OpenBao. PushSecrets (cluster chart) use this store to put per-cluster material under
+# secret/clusters/<name>/*. Role/policy `hub-writer` are seeded by server.postStart (values.yaml).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-hub-writer
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: openbao
+spec:
+  {{- with .Values.hubWriter.namespaces }}
+  conditions:
+    - namespaces: {{ toYaml . | nindent 8 }}
+  {{- end }}
+  provider:
+    vault:
+      server: http://{{ .Release.Name }}.{{ .Release.Namespace }}.svc:8200
+      path: secret
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: hub-writer
+          serviceAccountRef: { name: openbao-hub-writer, namespace: {{ .Release.Namespace }} }

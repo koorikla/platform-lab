@@ -1,0 +1,52 @@
+# OpenBao on the hub: the pull-model secret store. The hub writes per-cluster material to secret/clusters/<name>/*
+# (PushSecrets through ClusterSecretStore `openbao`), each worker's ESO reads only its own path (auth/k8s-<name>).
+#
+# LAB MODE: dev server = in-memory, unsealed, plain HTTP, root token generated per start (never in git; only the pod's
+# ~/.vault-token has it: `kubectl -n openbao exec openbao-0 -- bao ...`). A restart wipes everything; postStart re-seeds
+# the hub config, fleet-sync re-creates the per-cluster auth mounts (<= 2 min) and PushSecrets refill the KV
+# (refreshInterval). Prod path: server.standalone/ha with raft on a PVC (server.dataStorage), auto-unseal (transit or
+# a cloud KMS seal stanza), TLS from cert-manager (global.tlsDisable=false + server.extraVolumes), and no NodePort
+# (workers reach it through an ingress/gateway with a real hostname).
+openbao:
+  injector:
+    enabled: false
+  ui:
+    enabled: false
+  server:
+    dev:
+      enabled: true
+      devRootToken: ""            # empty -> random per start (chart default is the literal "root")
+    service:
+      type: NodePort
+      nodePort: 30820             # workers: http://mgmt-lb:30820 (fleet/base/hub-lb.yaml frontend)
+    # Hub-side config, re-applied on every start (dev mode forgets it). Names must match templates/*.yaml.
+    postStart:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        until bao status >/dev/null 2>&1; do sleep 1; done
+        bao kv enable-versioning secret/ >/dev/null        # dev mode mounts kv v2 at secret/ already; no-op then
+        bao auth list | grep -q '^kubernetes/' || bao auth enable kubernetes >/dev/null
+        # the hub's own API; OpenBao reviews tokens with its pod SA (chart binds system:auth-delegator)
+        bao write auth/kubernetes/config kubernetes_host="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}" >/dev/null
+        bao policy write hub-writer - >/dev/null <<'EOP'
+        path "secret/data/clusters/*"     { capabilities = ["create", "read", "update", "delete"] }
+        path "secret/metadata/clusters/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+        EOP
+        bao policy write fleet-sync - >/dev/null <<'EOP'
+        path "sys/auth"                   { capabilities = ["read", "sudo"] }
+        path "sys/auth/k8s-*"             { capabilities = ["create", "read", "update", "delete", "sudo"] }
+        path "auth/k8s-*"                 { capabilities = ["create", "read", "update", "delete", "list"] }
+        path "sys/policies/acl"           { capabilities = ["list"] }
+        path "sys/policies/acl/cluster-*" { capabilities = ["create", "read", "update", "delete"] }
+        EOP
+        bao write auth/kubernetes/role/hub-writer token_policies=hub-writer token_ttl=1h \
+          bound_service_account_names=openbao-hub-writer bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
+        bao write auth/kubernetes/role/fleet-sync token_policies=fleet-sync token_ttl=10m \
+          bound_service_account_names=openbao-fleet-sync bound_service_account_namespaces="$BAO_K8S_NAMESPACE" >/dev/null
+
+# ClusterSecretStore `openbao` (hub-writer): only these namespaces may push through it
+hubWriter:
+  namespaces: [argocd]            # cluster chart: PushSecret <name>-argocd-agent
+

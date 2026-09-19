@@ -1,0 +1,10 @@
+apiVersion: v2
+name: openbao
+description: Umbrella chart for OpenBao on the hub + the pull-model glue (hub-writer store, fleet-sync auth reconciler)
+type: application
+version: 0.1.0
+dependencies:
+  - name: openbao
+    # upstream OpenChoreo 1.2.5 pins 0.25.6; 0.29.x keeps the same values (dev, postStart, service) -> server 2.6.x
+    version: 0.29.5
+    repository: oci://ghcr.io/openbao/charts

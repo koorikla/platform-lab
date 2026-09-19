@@ -1,0 +1,6 @@
+addon:
+  name: openbao
+  chart: openbao
+  namespace: openbao
+  releaseName: openbao
+  chartRevision: main

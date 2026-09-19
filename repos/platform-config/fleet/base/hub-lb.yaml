@@ -1,6 +1,9 @@
-# HAProxy config for the hub's CAPD load balancer (container `<hub>-lb`): CAPD's default template plus a TCP frontend
-# for the argocd-agent principal NodePort. Backends = control-plane nodes (kept current by CAPD).
-# Labelled for `clusterctl move`, because the hub's DockerCluster references it during the pivot.
+# HAProxy config for the hub's CAPD load balancer (container `<hub>-lb`): CAPD's default template plus TCP frontends
+# for hub NodePorts that workers dial: argocd-agent principal (30443) and OpenBao (30820, plain HTTP in lab mode).
+# Backends = control-plane nodes. Labelled for `clusterctl move`, because the hub's DockerCluster references it.
+# CAPD renders this template ONLY when a control-plane machine is created or deleted (DockerMachine
+# status.loadBalancerConfigured), not when the ConfigMap changes. A fresh `make up` picks edits up; on a running hub
+# re-render by hand once (what CAPD does itself: write haproxy.cfg, SIGHUP):  hack/hub-lb-reload.sh
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -56,4 +59,13 @@ data:
     backend argocd-agent-principal
       {{range $server, $backend := .BackendServers}}
       server {{ $server }} {{ JoinHostPort $backend.Address "30443" }} check resolvers docker resolve-prefer ipv4
+      {{- end}}
+
+    frontend openbao
+      bind *:30820
+      default_backend openbao
+
+    backend openbao
+      {{range $server, $backend := .BackendServers}}
+      server {{ $server }} {{ JoinHostPort $backend.Address "30820" }} check resolvers docker resolve-prefer ipv4
       {{- end}}
