@@ -35,13 +35,13 @@ gotpl() {
   helm template tpl "$tmp/tpl" -f "$tmp/ctx.yaml" --set-file t="$tmp/t.txt" | yq -N '.out' ||
     fail "gotpl: $1"
 }
-# app <addon folder> <cluster labels as k=v,...> [addon.yaml] -> file with the generated Application for that pair
+# [CLUSTER=<name>] app <addon folder> <cluster labels as k=v,...> [addon.yaml] -> the generated Application (file)
 app() {
   local dir=$config/addons/workers/$1 c="$tmp/cluster.yaml" p="$tmp/params.yaml" k out
   local f=${3:-$config/addons/workers/$1/addon.yaml}
   out=$(mktemp "$tmp/app.XXXXXX")
   # clusters generator: name + metadata.labels of the Argo cluster secret, then its templated `values`
-  yq -n '.name = "dev9" | .metadata.labels = {}' > "$c"
+  n=${CLUSTER:-dev9} yq -n '.name = strenv(n) | .metadata.labels = {}' > "$c"
   for kv in ${2//,/ }; do yq -i ".metadata.labels[\"${kv%%=*}\"] = \"${kv#*=}\"" "$c"; done
   for k in $(yq "${g}[1].clusters.values | keys | .[]" "$a"); do
     v=$(gotpl "$(yq "${g}[1].clusters.values.$k" "$a")" "$c") yq -i ".values.$k = strenv(v)" "$c"
@@ -89,3 +89,25 @@ printf 'addon:\n  name: foo\n' > "$tmp/foo.yaml"
 o=$(app foo platform.lab/role=worker,platform.lab/env=dev "$tmp/foo.yaml")
 assert_yq "$o" '.spec.destination.namespace' foo
 assert_yq "$o" '.spec.source.path' addons/foo
+
+# shipped fleet, end to end offline: fleet file -> Argo cluster secret labels (cluster chart) -> Application branch
+fleet_app() {   # <fleet file> -> the cert-manager Application generated for that cluster
+  local n r l
+  n=$(yq .name "$1")
+  r=$(render "$n" $charts/cluster -f "$1")
+  l=$(yq eval-all "select(.kind==\"ExternalSecret\" and .metadata.name==\"cluster-$n\") | .spec.target.template
+    .metadata.labels | to_entries | map(.key + \"=\" + .value) | join(\",\")" "$r")
+  [ -n "$l" ] || fail "$1: no Argo cluster secret labels"
+  CLUSTER=$n app cert-manager "$l"
+}
+for f in $config/fleet/clusters/*/*.yaml; do
+  [ "$(yq '.role // "worker"' "$f")" = worker ] || continue
+  o=$(fleet_app "$f")
+  want=$(yq '.env' "$f"); [ "$(yq '.ring // "stable"' "$f")" != canary ] || want=$want-canary
+  branch "$o" "$want"
+  assert_yq "$o" '.spec.destination.name' "$(yq .name "$f")"
+done
+# canary ring of dev (#5): dev2 runs ahead on rendered/dev-canary, dev1 (the rest of dev) follows rendered/dev
+[ -f $config/fleet/clusters/dev/dev2.yaml ] || fail "dev2 must be enabled as dev's canary ring (#5)"
+o=$(fleet_app $config/fleet/clusters/dev/dev2.yaml); branch "$o" dev-canary
+o=$(fleet_app $config/fleet/clusters/dev/dev1.yaml); branch "$o" dev
