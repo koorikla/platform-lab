@@ -1,3 +1,8 @@
 # OpenChoreo prerequisite. Gateway API CRDs (v1.5.1 standard) come from the gateway-api-crds addon (hub + workers);
 # kgateway-crds only carries gateway.kgateway.dev CRDs, so nothing here fights that addon's safe-upgrades VAP.
+# v2.3.1 = what OpenChoreo v1.2.5 installs (install/k3d/k3d-prerequisites.sh), built against Gateway API v1.5.1.
+# Upstream installs both charts with default values, so do we. GatewayClass `kgateway` (`kgateway-waypoint` only with
+# waypoint.enabled, off) is created by the controller at startup, not rendered here: Argo does not own it.
+# The kgateway-crds chart has no knob for CRD annotations (no Delete=false): a CRD that drops out of the render is
+# pruned, which deletes every object of that kind (e.g. OpenChoreo's HTTPListenerPolicy/TrafficPolicies).
 kgateway: {}

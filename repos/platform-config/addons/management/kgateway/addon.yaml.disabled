@@ -1,6 +1,0 @@
-addon:
-  name: kgateway
-  chart: kgateway
-  namespace: openchoreo-control-plane
-  releaseName: kgateway
-  chartRevision: main

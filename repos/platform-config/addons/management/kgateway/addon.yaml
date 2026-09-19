@@ -1,0 +1,8 @@
+addon:
+  name: kgateway
+  chart: kgateway
+  # as OpenChoreo v1.2.5 installs it (install/k3d/k3d-prerequisites.sh): next to the control plane. Only the controller
+  # lives here; each Gateway's envoy proxy is deployed into that Gateway's own namespace.
+  namespace: openchoreo-control-plane
+  releaseName: kgateway
+  chartRevision: main
