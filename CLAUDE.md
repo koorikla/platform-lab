@@ -32,7 +32,8 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
    OpenBao (`secret/clusters/<name>/*`, hub-local `PushSecret` → `ClusterSecretStore openbao`) and **pulled** by the
    worker's ESO (`ClusterSecretStore hub-openbao`, auth `k8s-<name>`: a worker can read only its own path). Nothing on
    the hub writes into a worker with the CAPI admin kubeconfig. Identity-bound worker components (agent, ESO, the
-   OpenBao store + ExternalSecrets) are the CAAPH birth kit (`fleet/base/helmchartproxies.yaml`), not worker-addons.
+   OpenBao store + ExternalSecrets) are the CAAPH birth kit (chart `worker-birth-kit`, one HelmChartProxy in
+   `fleet/base/helmchartproxies.yaml`), not worker-addons.
 8. Enable/disable by file extension (`.yaml.disabled`), never by commenting blocks.
 
 ## Flow
@@ -44,8 +45,8 @@ variable `managementCluster=true`: docker.sock in nodes + LB frontends :30443, :
 `platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, OpenBao, principal, capi-operator,
 capi-providers, kargo + argo-rollouts, argo-cd itself) + `fleet-base` (ClusterClass, HelmChartProxies) + `fleet-clusters` appset →
 `cluster` chart per file (agent client cert → hub PushSecret → OpenBao `secret/clusters/<name>/argocd-agent`) → CAPI
-builds k3s cluster → `openbao-fleet-sync` CronJob adds `auth/k8s-<name>` → CAAPH birth kit installs argo-cd
-(controller/repo/redis), argocd-agent, ESO and `secret-bootstrap` (store `hub-openbao` + agent ExternalSecrets) →
+builds k3s cluster → `openbao-fleet-sync` CronJob adds `auth/k8s-<name>` → CAAPH installs the birth kit (one release
+`worker-birth-kit`: argo-cd controller/repo/redis, argocd-agent, ESO, store `hub-openbao` + agent ExternalSecrets) →
 worker ESO pulls the cert via `mgmt-lb:30820` → agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) →
 ESO-rendered cluster secret makes the cluster selectable → `worker-addons` / `workloads` appsets generate labelled Applications → principal
 ships them → worker reconciles. Worker addon content: a `main` commit touching the addon → Freight of Kargo project
@@ -77,6 +78,8 @@ Pull model (Phase 1b, 2026-09-19, dev1 reborn by deleting `Cluster/dev1`): OpenB
 principal +89s, first workload pod (podinfo) +4m. Worker ESO token: reads `clusters/dev1/*` (200), `clusters/dev2/*`
 and `clusters/mgmt/*` 403, write 403; other SAs can't log in. CAAPH retries `secret-bootstrap` (failed install →
 upgrade) until ESO CRDs/webhook exist: ~40 revisions within a minute at birth, history capped at 10 — harmless.
+(That was the 4-HCP kit; the `worker-birth-kit` umbrella (#2) installs in one pass: crds/ bootstrap copies + ESO
+webhook `Ignore`.)
 
 ## Known lab constraints
 - All CAPD nodes share the Docker VM disk: >90% used → DiskPressure evictions everywhere. Keep ≥25 GB free.
