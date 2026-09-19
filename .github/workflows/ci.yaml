@@ -1,0 +1,68 @@
+# PRs and main: the same `make lint` + `make test` as locally, plus the chart version guard and a dry-run package of
+# every chart (what charts.yaml would push after merge).
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  # superseded PR pushes may be cancelled; every commit on main keeps its own check (version guard per push)
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  # same majors as the lab laptops (helm 4, mikefarah yq v4); bump version and sha256 together
+  HELM_VERSION: v4.3.0
+  YQ_VERSION: v4.53.6
+  YQ_SHA256: c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+  # the runner image ships shellcheck 0.9, whose false SC2317 on trap handlers fails test_fleet_sync.sh
+  SHELLCHECK_VERSION: v0.11.0
+  SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+jobs:
+  lint-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the version guard diffs against the merge-base with the base (PR) or the previous tip (push)
+          persist-credentials: false
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+      # jq comes with the runner image; the runner's yq/shellcheck are not pinned, ours go first on PATH
+      - name: Install yq, kubeconform, actionlint, shellcheck
+        run: |
+          bin="$HOME/.local/bin"; dl=$(mktemp -d); mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          fetch() { curl -fsSLo "$dl/$3" "$1" && echo "$2  $dl/$3" | sha256sum -c --quiet -; }   # <url> <sha256> <file>
+          gh=https://github.com
+          fetch "$gh/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_amd64" "$YQ_SHA256" yq
+          install -m 0755 "$dl/yq" "$bin/yq"
+          fetch "$gh/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION/kubeconform-linux-amd64.tar.gz" "$KUBECONFORM_SHA256" kc.tgz
+          tar -xzf "$dl/kc.tgz" -C "$bin" kubeconform
+          fetch "$gh/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "$ACTIONLINT_SHA256" al.tgz
+          tar -xzf "$dl/al.tgz" -C "$bin" actionlint
+          fetch "$gh/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256" sc.txz
+          tar -xJf "$dl/sc.txz" -C "$bin" --strip-components=1 "shellcheck-$SHELLCHECK_VERSION/shellcheck"
+      - name: Tool versions
+        run: helm version && yq --version && kubeconform -v && shellcheck --version && jq --version && actionlint -version
+      - name: actionlint
+        run: actionlint
+      # PR: vs the base branch. Push to main: vs the previous tip, so a stale-green PR merge or a direct push that
+      # changes a chart without a bump turns main red (charts.yaml would silently skip that version).
+      - name: Chart version guard
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: hack/check-chart-versions.sh "$BASE"
+      - name: make lint
+        run: make lint
+      - name: make test
+        run: make test
+      - name: Package charts (dry run of charts.yaml)
+        env:
+          DRY_RUN: "1"
+        run: hack/publish-charts.sh "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/platform-charts"

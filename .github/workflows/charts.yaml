@@ -1,0 +1,51 @@
+# main: push every repos/platform-charts/<chart> whose Chart.yaml version isn't in GHCR yet to
+# oci://ghcr.io/<owner>/platform-charts/<chart> (CAAPH can only install charts from a registry).
+# Also runs when this workflow or the script changes (the first merge publishes everything) and on demand; a run
+# always works through every chart, so a rerun (`gh workflow run charts.yaml`) catches up on anything missed.
+name: charts
+on:
+  push:
+    branches: [main]
+    paths:
+      - repos/platform-charts/**
+      - hack/publish-charts.sh
+      - .github/workflows/charts.yaml
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  # never two publishers racing on the same version. GitHub keeps only the newest *pending* run per group: a version
+  # bumped and bumped again while a publish runs is skipped (main no longer has it); the newer one is published.
+  group: charts
+  cancel-in-progress: false
+env:
+  HELM_VERSION: v4.3.0
+  YQ_VERSION: v4.53.6
+  YQ_SHA256: c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385
+jobs:
+  publish:
+    # workflow_dispatch can name any ref: only reviewed main content may become an (immutable) chart version
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      # this job holds a packages:write token: actions pinned by commit, downloads by sha256
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install yq
+        run: |
+          bin="$HOME/.local/bin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          curl -fsSLo "$RUNNER_TEMP/yq" "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_amd64"
+          echo "$YQ_SHA256  $RUNNER_TEMP/yq" | sha256sum -c --quiet -
+          install -m 0755 "$RUNNER_TEMP/yq" "$bin/yq"
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      # GHCR names must be lowercase. The log shows the registry's answer for every pushed chart ("registry said").
+      - name: Publish new chart versions
+        run: hack/publish-charts.sh "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/platform-charts"

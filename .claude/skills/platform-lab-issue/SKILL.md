@@ -30,7 +30,8 @@ the live environment.
 5. **TDD**: add/extend `hack/tests/test_*.sh` first (see `hack/tests/lib.sh`: `render`, `assert_yq`, `assert_fails`),
    watch it fail, implement, watch it pass. `make lint && make test` must be green. Commit small; message ends with a
    `Co-Authored-By:` trailer when an agent co-wrote it.
-6. **Charts**: bump `version` in `Chart.yaml` of every chart you change (CI enforces it once #1 lands).
+6. **Charts**: bump `version` in `Chart.yaml` of every chart you change. CI enforces it
+   (`hack/check-chart-versions.sh origin/main`); `charts.yaml` publishes only versions GHCR doesn't have yet.
 7. **PR**: `gh pr create --fill --body "Closes #<n> …"` with: what changed, how it was tested, what needs live
    verification, risks. Keep PRs to one issue. Rebase on `origin/main` if it moved; resolve conflicts yourself.
 8. **Report** to the coordinator (PR link, test output, open questions). Address review findings on the same branch.
