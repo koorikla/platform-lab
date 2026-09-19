@@ -1,0 +1,23 @@
+suite: CAPI providers (#23) - cloud infrastructure providers are opt-in
+templates:
+  - templates/providers.yaml
+tests:
+  - it: installs only the docker infrastructure provider by default
+    asserts:
+      - hasDocuments: { count: 1, filterAware: true }
+        documentSelector: { path: kind, value: InfrastructureProvider, matchMany: true }
+      - equal: { path: metadata.name, value: docker }
+        documentSelector: { path: kind, value: InfrastructureProvider }
+
+  - it: adds OpenStack when enabled
+    set: { infrastructure.openstack.enabled: true }
+    asserts:
+      - containsDocument: { kind: InfrastructureProvider, apiVersion: operator.cluster.x-k8s.io/v1alpha2, name: openstack, any: true }
+
+  # clusterctl variables (AWS_B64ENCODED_CREDENTIALS, ...) come from a Secret, never from git
+  - it: gives CAPA its clusterctl variables from configSecret capa-variables
+    set: { infrastructure.aws.enabled: true }
+    documentSelector: { path: metadata.name, value: aws }
+    asserts:
+      - isKind: { of: InfrastructureProvider }
+      - equal: { path: spec.configSecret.name, value: capa-variables }
