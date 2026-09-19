@@ -1,0 +1,100 @@
+{{- if eq .Values.mode "types" }}
+{{- $ps := .Values.pipelineSync }}
+{{- $stages := $ps.stages }}
+{{- if not $stages }}{{ fail "openchoreo-app (mode types): pipelineSync.stages is required (the Kargo stage order)" }}{{ end }}
+{{- range $stages }}{{ if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString .)) }}{{ fail (printf "openchoreo-app: pipelineSync.stages: %q is not a stage name" .) }}{{ end }}{{ end }}
+# The shared Project's pipeline. OpenChoreo Environments are per cluster (Environment.spec.dataPlaneRef names one
+# plane), promotion is per Kargo stage: promotionPaths come from the CronJob below (files/pipeline-sync.sh), which
+# groups the worker Environments the cluster chart renders by their fleet labels. No spec here on purpose: Argo's
+# server-side apply then never owns promotionPaths, so it neither resets nor diffs them.
+apiVersion: openchoreo.dev/v1alpha1
+kind: DeploymentPipeline
+metadata:
+  name: {{ .Values.deploymentPipeline }}
+  namespace: {{ .Values.namespace }}
+  labels: { openchoreo.dev/name: {{ .Values.deploymentPipeline }} }
+  annotations:
+    openchoreo.dev/display-name: Fleet
+    openchoreo.dev/description: {{ printf "Kargo stages %s; each stage's clusters promote to the next stage's (written by %s/openchoreo-pipeline-sync)" (join " -> " $stages) .Release.Namespace | quote }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openchoreo-pipeline-sync
+  namespace: {{ .Release.Namespace }}
+---
+# list Environments (labels only), write this one pipeline; nothing else in the org namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openchoreo-pipeline-sync
+  namespace: {{ .Values.namespace }}
+rules:
+  - { apiGroups: [openchoreo.dev], resources: [environments], verbs: [list] }
+  - { apiGroups: [openchoreo.dev], resources: [deploymentpipelines], resourceNames: [{{ .Values.deploymentPipeline }}], verbs: [get, patch] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openchoreo-pipeline-sync
+  namespace: {{ .Values.namespace }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: openchoreo-pipeline-sync }
+subjects:
+  - { kind: ServiceAccount, name: openchoreo-pipeline-sync, namespace: {{ .Release.Namespace }} }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openchoreo-pipeline-sync
+  namespace: {{ .Release.Namespace }}
+data:
+  pipeline-sync.sh: |
+    {{- .Files.Get "files/pipeline-sync.sh" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openchoreo-pipeline-sync
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: {{ $ps.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 120   # after a hub stall: one run, not a catch-up burst
+  jobTemplate:
+    spec:
+      backoffLimit: 0                 # the next run is the retry
+      activeDeadlineSeconds: 100
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          annotations:
+            checksum/script: {{ .Files.Get "files/pipeline-sync.sh" | sha256sum }}
+        spec:
+          serviceAccountName: openchoreo-pipeline-sync
+          restartPolicy: Never
+          securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: pipeline-sync
+              image: {{ $ps.image }}
+              command: [bash, /scripts/pipeline-sync.sh]
+              env:
+                - { name: HOME, value: /tmp }   # kubectl cache; root fs is read-only
+                - { name: NAMESPACE, value: {{ .Values.namespace | quote }} }
+                - { name: PIPELINE, value: {{ .Values.deploymentPipeline | quote }} }
+                - { name: STAGES, value: {{ join " " $stages | quote }} }
+                - { name: SELECTOR, value: {{ $ps.selector | quote }} }
+              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { memory: 128Mi }
+              volumeMounts:
+                - { name: script, mountPath: /scripts }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: script
+              configMap: { name: openchoreo-pipeline-sync }
+            - name: tmp
+              emptyDir: {}
+{{- end }}

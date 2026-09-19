@@ -2,18 +2,6 @@
 {{- include "oc.required" (list . "name" "project") }}
 {{- include "oc.dns1123" (list . "name" "project") }}
 {{- $_ := include "oc.componentTypeSpec" . }}{{/* fail early on a type the hub doesn't serve */}}
-{{- if .Values.createProject }}
-apiVersion: openchoreo.dev/v1alpha1
-kind: Project
-metadata:
-  name: {{ .Values.project }}
-  namespace: {{ .Values.namespace }}
-  labels: { openchoreo.dev/name: {{ .Values.project }} }
-spec:
-  deploymentPipelineRef: { name: {{ .Values.deploymentPipeline }} }
-  type: { kind: ClusterProjectType, name: {{ .Values.projectType }} }
----
-{{- end }}
 apiVersion: openchoreo.dev/v1alpha1
 kind: Component
 metadata:

@@ -40,8 +40,10 @@ validate() {   # validate <what> <render file>; stdin: kubeconform skips files w
   kc "$2" >"$tmp/kc.out" 2>&1 || fail "$1: $(cat "$tmp/kc.out")"
   grep -q "Valid: $n, Invalid: 0, Errors: 0, Skipped: 0" "$tmp/kc.out" || fail "$1: $(cat "$tmp/kc.out")"
 }
-o=$(render types $c --set mode=types);                                               validate types "$o"
-o=$(render podinfo $c -f $a/app.yaml --set mode=component --set createProject=true); validate component "$o"
+# types: only the OpenChoreo objects (the pipeline-sync CronJob and its RBAC are core kinds, not in these schemas)
+o=$(render types $c --set mode=types --set 'pipelineSync.stages={dev,prod}'); yq -i 'select(.apiVersion | test("^openchoreo.dev/"))' "$o"; validate types "$o"
+assert_yq "$o" '[select(.kind=="Project" or .kind=="DeploymentPipeline")] | length' 2
+o=$(render podinfo $c -f $a/app.yaml --set mode=component);                        validate component "$o"
 o=$(render podinfo $c -f $a/app.yaml -f $a/envs/dev/values.yaml --set env=dev --set stage=dev --set mode=release \
       --set image.tag=6.15.0 --set parameters.foo=bar);                             validate release "$o"
 o=$(render podinfo $c --set mode=binding --set name=podinfo --set project=lab --set releaseName=podinfo-dev-1-0-0-abcdef12 \

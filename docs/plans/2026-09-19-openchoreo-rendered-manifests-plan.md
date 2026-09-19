@@ -1067,6 +1067,13 @@ Commit.
   `mode: types`; values also create `Project lab` + `DeploymentPipeline default` (`promotionPaths: []` first).
 - E2E: Backstage shows System `lab`. Commit.
 
+**As built (#78):** addon `addons/management/openchoreo-types` (chart `openchoreo-app`, `mode: types`, namespace
+`openchoreo-control-plane`). Types mode renders `files/types` + `Project lab` (component mode's `createProject` option is
+dropped: one shared Project) + `DeploymentPipeline default` **without spec** + CronJob `openchoreo-pipeline-sync`
+(`files/pipeline-sync.sh`), which writes `promotionPaths` from the worker Environments' labels in Kargo stage order
+(`pipelineSync.stages`, required; the addon values copy kargo-pipeline's stage names, a test keeps them equal). Replaces Task 3.7's generated file: design doc addendum "OpenChoreo platform defaults and the
+DeploymentPipeline". Tests: `openchoreo-app/tests/types_test.yaml` (helm-unittest), `hack/tests/test_openchoreo_pipeline.sh`.
+
 ### Task 3.6: End to end — podinfo through OpenChoreo
 
 1. Push; `kargo-app-pipelines` creates `app-podinfo`; freight appears (latest 6.x semver).
@@ -1081,6 +1088,8 @@ If Backstage's component view needs the DeploymentPipeline to show environments 
 do Task 3.7; otherwise skip it.
 
 ### Task 3.7 (conditional): DeploymentPipeline from the fleet
+**Superseded by #78** (Task 3.5 "As built"): the paths are derived at runtime from the Environments' fleet labels, no
+generated file.
 
 Generate `repos/platform-config/fleet/pipeline.yaml` (promotionPaths `dev* → test* → prod*` from fleet file names)
 with `hack/gen-pipeline.sh`; `make lint` fails if it's stale (`hack/gen-pipeline.sh --check`). Rendered by

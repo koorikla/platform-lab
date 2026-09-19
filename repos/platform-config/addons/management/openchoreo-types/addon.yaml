@@ -1,0 +1,10 @@
+# OpenChoreo platform defaults on the hub (#78): the component/project types every ComponentRelease freezes, the shared
+# Project `lab` and its DeploymentPipeline (paths from the fleet's Environments, written by a CronJob). Same chart that
+# Kargo renders releases from, so the types the hub serves are the ones releases freeze.
+# Namespace: the pipeline-sync CronJob; the OpenChoreo objects go to the org namespace (chart value `namespace`).
+addon:
+  name: openchoreo-types
+  chart: openchoreo-app
+  namespace: openchoreo-control-plane
+  releaseName: openchoreo-types
+  chartRevision: main

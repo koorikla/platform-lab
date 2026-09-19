@@ -1,14 +1,16 @@
-suite: mode=types (hub addon) - upstream v1.2.5 getting-started types, vendored verbatim
+suite: mode=types (hub addon) - upstream v1.2.5 getting-started types, vendored verbatim, + the shared Project
 # Vendored from the tag the control plane runs, and frozen into releases equal to these files:
 # hack/tests/test_openchoreo_app.sh (compares against the openchoreo-control-plane chart and the release render).
+# The DeploymentPipeline and its CronJob (templates/pipeline.yaml): pipeline_test.yaml.
 templates:
   - templates/types.yaml
 set:
   mode: types
+  pipelineSync: { stages: [dev-canary, dev, nit, sit, prod] }
 tests:
-  - it: renders the four ClusterComponentTypes and the default ClusterProjectType, nothing else
+  - it: renders the four ClusterComponentTypes, the default ClusterProjectType and the Project, nothing else
     asserts:
-      - hasDocuments: { count: 5 }
+      - hasDocuments: { count: 6 }
       - equal: { path: metadata.name, value: scheduled-task }
         documentIndex: 0
       - equal: { path: spec.workloadType, value: cronjob }
@@ -29,6 +31,8 @@ tests:
         documentSelector: { path: kind, value: ClusterComponentType, matchMany: true }
       - equal: { path: metadata.name, value: default }
         documentSelector: { path: kind, value: ClusterProjectType }
+      - equal: { path: metadata.name, value: lab }
+        documentSelector: { path: kind, value: Project }
 
   # the frozen spec equals what the apiserver stores only if refs carry an explicit kind (CRD defaults would differ)
   - it: gives every trait/workflow ref an explicit kind
@@ -37,3 +41,23 @@ tests:
       - notExists: { path: 'spec.allowedTraits[?(!@.kind)]' }
       - notExists: { path: 'spec.allowedWorkflows[?(!@.kind)]' }
       - notExists: { path: 'spec.traits[?(!@.kind)]' }
+
+  - it: renders the one shared Project every Component is owned by, in the OpenChoreo org namespace
+    documentSelector: { path: kind, value: Project }
+    asserts:
+      - equal: { path: metadata.name, value: lab }
+      - equal: { path: metadata.namespace, value: default }
+      - equal: { path: spec.deploymentPipelineRef.name, value: default }
+      - equal: { path: spec.type, value: { kind: ClusterProjectType, name: default } }
+
+  - it: project and pipeline names follow the values
+    set: { project: team-a, deploymentPipeline: fleet }
+    documentSelector: { path: kind, value: Project }
+    asserts:
+      - equal: { path: metadata.name, value: team-a }
+      - equal: { path: spec.deploymentPipelineRef.name, value: fleet }
+
+  - it: rejects a project name that isn't a DNS-1123 label
+    set: { project: Team_A }
+    asserts:
+      - failedTemplate: { errorPattern: 'project "Team_A" is not a DNS-1123 label' }

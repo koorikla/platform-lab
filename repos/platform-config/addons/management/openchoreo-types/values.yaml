@@ -1,0 +1,6 @@
+# Hub overrides for openchoreo-app in types mode (chart defaults: Project `lab`, DeploymentPipeline `default`).
+mode: types
+pipelineSync:
+  # The Kargo stage order, = kargo-pipeline `stages[].name` in order (hack/tests/test_openchoreo_pipeline.sh fails on
+  # drift): a new or renamed stage goes here too.
+  stages: [dev-canary, dev, nit, sit, prod]

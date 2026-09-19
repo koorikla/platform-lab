@@ -59,6 +59,9 @@ ships them → worker reconciles. Worker addon content: a `main` commit touching
 `repos/apps/<app>/app.yaml` → Kargo project `app-<app>` (`kargo-app-pipelines` appset), Freight = image tag x `main`
 commit → same stages, task `render-app` renders `openchoreo-app` (mode=release) into
 `rendered/<stage>:apps/<app>/release/` (branch/folder/file-name contract: header of `kargo/shared/render-app.yaml`).
+Hub addon `openchoreo-types` (`openchoreo-app` mode=types): the ClusterComponentTypes releases freeze, `Project lab`
+and `DeploymentPipeline default`, whose paths CronJob `openchoreo-pipeline-sync` derives every 5 min from the worker
+Environments' env/ring labels in Kargo stage order (no cluster names in git; design doc addendum #78).
 Nothing syncs `apps/` until #17 (hub components/releases/bindings); meanwhile `workloads` still deploys the legacy
 `repos/apps/<app>/chart` from `main` (image = that chart's default tag).
 
