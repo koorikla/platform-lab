@@ -21,9 +21,11 @@ render() { helm template "$@" >/dev/null || { echo "FAIL: helm template $*"; exi
 for a in $config/addons/management/*/; do
   chart=$(awk '/chart:/ {print $2}' "$a"/addon.yaml*); render "$chart" "$charts/$chart" -f "$a/values.yaml"
 done
+# the environments are the envs of kargo-pipeline's stages (dev, nit, sit, prod): the one list, used below too
+envs=$(yq '[.stages[].env] | unique | .[]' $charts/kargo-pipeline/values.yaml)
 for a in $config/addons/workers/*/; do
   chart=$(awk '/chart:/ {print $2}' "$a"/addon.yaml*)
-  for env in dev test prod; do
+  for env in $envs; do
     f=(-f "$a/values.yaml"); [ -f "$a/envs/$env.values.yaml" ] && f+=(-f "$a/envs/$env.values.yaml")
     render "$chart" "$charts/$chart" "${f[@]}"
     # Kargo's flat layout writes one file per <group>-<kind>-<namespace>-<name>: nameless or duplicate resources
@@ -65,6 +67,14 @@ done
 # worker-addons points a canary cluster at rendered/<env>-canary: Kargo must render that branch (a stage of that name),
 # else the Applications only show a ComparisonError at runtime
 stages=" $(yq '.stages[].name' $charts/kargo-pipeline/values.yaml | paste -sd' ' -) "
+# a worker's env picks rendered/<env> and the env values: an env without a stage has neither, and its Applications only
+# show a ComparisonError at runtime. The file lives in clusters/<env>/ (enabled or not; the hub is env mgmt).
+for f in $config/fleet/clusters/*/*.yaml*; do
+  e=$(yq '.env' "$f")
+  [ "$e" = "$(basename "$(dirname "$f")")" ] || { echo "FAIL: $f: env $e, but the file is in clusters/$(basename "$(dirname "$f")")/"; exit 1; }
+  [ "$(yq '.role // "worker"' "$f")" = management ] && continue
+  grep -qx -- "$e" <<<"$envs" || { echo "FAIL: $f: env $e is not a kargo-pipeline stage env ($(paste -sd' ' - <<<"$envs"))"; exit 1; }
+done
 for f in $config/fleet/clusters/*/*.yaml*; do
   [ "$(yq '.ring // "stable"' "$f")" = canary ] || continue
   s="$(yq '.env' "$f")-canary"

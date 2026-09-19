@@ -246,3 +246,6 @@ Supersedes "Clusters → OpenChoreo" above; details in the plan, Task 2.7 "As bu
   (`internal/cluster-agent/agent.go:83`) and never reloads, so #14 must restart the agent when the pulled Secret
   changes (reloader/checksum annotation). The agent's own CA is not pushed: the worker verifies the gateway with
   `openchoreo-gateway-ca` only.
+
+## Addendum: environments are dev, nit, sit, prod (maintainer decision 2026-09-19, #81)
+Every `dev/test/prod` above means dev → nit → sit → prod (stages `dev-canary → dev → nit → sit → prod`, `rendered/<stage>`; nit, sit, prod manual; OpenChoreo `isProduction` only for prod).

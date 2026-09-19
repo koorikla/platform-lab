@@ -12,13 +12,13 @@ job="$at | .spec.metrics[0].provider.job.spec"
 # every stage verifies with the project's template; args say which Applications and which commit
 assert_yq "$o" '[select(.kind=="Stage") | .spec.verification.analysisTemplates | map(.name) | join(",")] | unique | join(";")' argocd-apps
 assert_yq "$o" "$at | .metadata.namespace" addon-cert-manager
-for s in dev-canary dev test prod; do
+for s in dev-canary dev nit sit prod; do
   assert_yq "$o" "$(arg $s branch)" "$s"
   assert_yq "$o" "$(arg $s env)" "$(yq ".stages[] | select(.name==\"$s\") | .env" $charts/kargo-pipeline/values.yaml)"
 done
 # ring: same rule as the worker-addons appset (a <env>-canary branch <=> ring canary)
 assert_yq "$o" "$(arg dev-canary ring)" canary
-assert_yq "$o" "[$(arg dev ring), $(arg test ring), $(arg prod ring)] | join(\",\")" stable,stable,stable
+assert_yq "$o" "[$(arg dev ring), $(arg nit ring), $(arg sit ring), $(arg prod ring)] | join(\",\")" stable,stable,stable,stable
 # the promoted rendered commit: the render task's output, recorded on the Stage by the step after it (verification
 # can't read promotion outputs, only Stage metadata)
 assert_yq "$o" "[select(.kind==\"Stage\") | .spec.promotionTemplate.spec.steps[1]] | map(.uses) | unique | join(\",\")" set-metadata
@@ -30,7 +30,8 @@ done
 assert_yq "$o" "$(arg dev revision)" '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}'
 # an empty canary ring must not open the gate for the next stage; other empty stages pass
 assert_yq "$o" "$(arg dev-canary requireApps)" true
-assert_yq "$o" "[$(arg dev requireApps), $(arg test requireApps), $(arg prod requireApps)] | join(\",\")" false,false,false
+assert_yq "$o" "[$(arg dev requireApps), $(arg nit requireApps), $(arg sit requireApps), $(arg prod requireApps)]
+  | join(\",\")" false,false,false,false
 # Kargo v1.11.4 silently drops a Stage arg the template doesn't declare, and fails the run for a declared arg without
 # a value: both lists must be equal
 assert_yq "$o" "$at | .spec.args | map(.name) | sort | join(\",\")" \
@@ -129,7 +130,7 @@ nogit() { ! grep -q '^git' "$tmp/calls" || fail "line ${BASH_LINENO[0]}: git cal
 mkdir -p "$tmp/home"; : > "$tmp/ancestry"
 R=aaaaaaa1111111111111111111111111111111a
 
-# no clusters in the stage (test/prod today): nothing to verify, passes
+# no clusters in the stage (nit/sit/prod today): nothing to verify, passes
 run "$R"
 ok; has 'no Applications'; nogit
 # ...also before any promotion recorded a commit (the stage's first verification after this change)

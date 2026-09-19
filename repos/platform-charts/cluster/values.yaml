@@ -1,6 +1,6 @@
 # Filled from repos/platform-config/fleet/clusters/<env>/<name>.yaml
 name: ""                       # cluster name == argocd-agent name == Argo CD destination name
-env: ""                        # dev | test | prod
+env: ""                        # dev | nit | sit | prod (a kargo-pipeline stage env; hack/lint.sh checks)
 role: worker                   # worker | management (the self-hosted hub, see fleet/clusters/mgmt)
 provider: docker
 region: local

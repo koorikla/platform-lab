@@ -4,7 +4,7 @@
 # Project shares one definition. Output (compose-output "result"): commit = SHA now at the head of rendered/<branch>.
 #
 # Contract for the hub ApplicationSets (#17; until then nothing syncs apps/):
-#   branch  rendered/<stage> for every kargo-pipeline stage (dev-canary, dev, test, prod). A cluster binds from its
+#   branch  rendered/<stage> for every kargo-pipeline stage (dev-canary, dev, nit, sit, prod). A cluster binds from its
 #           env's branch, or <env>-canary in the canary ring: the same rule as worker-addons.
 #   folder  apps/<app>/release/, <app> = folder under repos/apps = Component name. The pipeline owns apps/<app>/ on
 #           its branch: every promotion deletes it and renders it again.

@@ -1,0 +1,12 @@
+# One file = one cluster. Values for repos/platform-charts/cluster. Labels derived from here drive every ApplicationSet.
+name: sit1
+env: sit
+provider: docker
+region: local
+clusterClass: k3s-docker
+kubernetesVersion: v1.34.11+k3s1
+controlPlaneReplicas: 1
+workerReplicas: 1
+variables:                      # the chart default list is replaced, so kindImageVersion is repeated
+  - { name: kindImageVersion, value: v1.34.0 }
+  - { name: slowHostTolerance, value: true }   # born tolerant: no control-plane rollout needed later (#76)

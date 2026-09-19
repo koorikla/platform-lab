@@ -20,10 +20,12 @@ for a in $config/addons/workers/*/; do
 done
 assert_yq "$o" 'select(.kind=="ProjectConfig") | .spec.promotionPolicies | map(.stageSelector.name) | join(",")' 'dev-canary,dev'
 # stage chain: first takes Freight from the Warehouse, each next one from its predecessor
-assert_yq "$o" '[select(.kind=="Stage")] | map(.metadata.name) | join(",")' 'dev-canary,dev,test,prod'
+assert_yq "$o" '[select(.kind=="Stage")] | map(.metadata.name) | join(",")' 'dev-canary,dev,nit,sit,prod'
 assert_yq "$o" "$(stage dev-canary) | .spec.requestedFreight[0].sources.direct" true
 assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.stages[0]" dev-canary
-assert_yq "$o" "$(stage prod) | .spec.requestedFreight[0].sources.stages[0]" test
+assert_yq "$o" "$(stage nit) | .spec.requestedFreight[0].sources.stages[0]" dev
+assert_yq "$o" "$(stage sit) | .spec.requestedFreight[0].sources.stages[0]" nit
+assert_yq "$o" "$(stage prod) | .spec.requestedFreight[0].sources.stages[0]" sit
 # canary ring (#5, #26): dev auto-promotes, but only Freight verified in dev-canary (its Applications Synced + Healthy
 # at the promoted commit, test_kargo_verification.sh). Without that gate dev follows the canary within seconds and the
 # ring shows nothing. No soak by default (a timer that ignores health); `soak` stays available per stage.

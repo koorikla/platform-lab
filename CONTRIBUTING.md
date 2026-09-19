@@ -65,7 +65,7 @@ general) and `go` (`hub-lb-reload.sh` renders the CAPD LB template with it).
 
 | Command | What it proves |
 |---|---|
-| `make lint` (`hack/lint.sh`) | every chart builds its deps and passes `helm lint`; every hub addon renders with its values; every worker addon renders for dev/test/prod with no nameless or duplicate resources (Kargo's flat layout would overwrite them); `addon.name` == folder name; fleet `kubernetesVersion` minor == `render-addon` `kubeVersion` minor (enabled worker clusters); every cluster file renders, enabled or not |
+| `make lint` (`hack/lint.sh`) | every chart builds its deps and passes `helm lint`; every hub addon renders with its values; every worker addon renders for every stage env (dev/nit/sit/prod) with no nameless or duplicate resources (Kargo's flat layout would overwrite them); `addon.name` == folder name; fleet file `env` == its folder and a kargo-pipeline stage env; fleet `kubernetesVersion` minor == `render-addon` `kubeVersion` minor (enabled worker clusters); every cluster file renders, enabled or not |
 | `make test` (`hack/tests/run.sh`) | render assertions in `hack/tests/test_*.sh`, each in its own process |
 
 Writing a test: `source "$(dirname "$0")/lib.sh"`, then `o=$(render <release> <chart> [helm args])` and
@@ -83,11 +83,13 @@ with `repos/`.
 
 ### Add a worker cluster
 1. Create `fleet/clusters/<env>/<name>.yaml`. Copy `fleet/clusters/dev/dev1.yaml`, or enable a shipped one by
-   renaming `test1.yaml.disabled` → `test1.yaml`. Keys are values of the `cluster` chart (defaults and comments in
-   `repos/platform-charts/cluster/values.yaml`):
+   renaming `nit1.yaml.disabled` → `nit1.yaml` (or `sit1`, `prod1`). Keys are values of the `cluster` chart (defaults
+   and comments in `repos/platform-charts/cluster/values.yaml`):
    - `name`: unique, DNS-safe. It becomes the CAPI Cluster, agent name, cert CN and Argo destination (invariant 1).
      Never rename a running cluster; create a new one.
-   - `env`: `dev` | `test` | `prod`. Selects the `rendered/<env>` branch for addons and the env values for apps.
+   - `env`: `dev` | `nit` | `sit` | `prod` (== the folder; `make lint` checks both). Selects the `rendered/<env>` branch
+     for addons and the env values for apps. An env is a kargo-pipeline stage env: a new env = a new stage + its
+     branch in `hack/init-rendered-branches.sh` (`make test` checks) + a fleet folder.
    - `provider`, `region`, `clusterClass`: `docker`, `local`, `k3s-docker` on the lab. Other providers:
      [Add a CAPI provider or ClusterClass](#add-a-capi-provider-or-clusterclass).
    - `kubernetesVersion`: a k3s version (EKS: the minor as semver, `v1.34.0`). Keep the minor equal to the fleet's
@@ -157,10 +159,10 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
      cluster is cluster identity and belongs in the birth kit (step 5).
 3. **What appears automatically** on merge:
    - Kargo project `addon-<name>` (`kargo-addon-pipelines` appset → `repos/platform-charts/kargo-pipeline`): a
-     Warehouse on commits touching the chart or the addon's config, and stages `dev-canary → dev → test → prod` that
+     Warehouse on commits touching the chart or the addon's config, and stages `dev-canary → dev → nit → sit → prod` that
      `helm template` fleet + env values into `rendered/<stage>:addons/<name>/` (`kargo/shared/render-addon.yaml`).
      `dev-canary` auto-promotes the new Freight, `dev` too once it passed verification in `dev-canary` (canary
-     Applications Synced + Healthy at the promoted commit); `test` and `prod` wait for a manual promotion.
+     Applications Synced + Healthy at the promoted commit); `nit`, `sit` and `prod` wait for a manual promotion.
    - Argo CD Application `<name>-<cluster>` for every worker (`worker-addons` appset, project `platform-workers`,
      label `argocd-agent: "true"`), shipped to the cluster by the principal. It syncs `addons/<name>/` of
      `rendered/<env>` (`rendered/<env>-canary` for `ring: canary` clusters) as plain YAML. Until the first promotion
@@ -218,7 +220,7 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
 `hack/kargo-deploy-key.sh` after a fresh hub. Promotions change the lab: hold the lab lock.
 
 - **Worker addons** (project `addon-<name>`): Freight = a `main` commit touching the addon. `dev-canary`
-  auto-promotes, `dev` after verification in `dev-canary` (see canary ring); `test` and `prod` are promoted by hand
+  auto-promotes, `dev` after verification in `dev-canary` (see canary ring); `nit`, `sit` and `prod` are promoted by hand
   (UI: pick the Freight on the stage → Promote). Each promotion
   commits plain YAML to `rendered/<stage>`; the diff of that commit is the change. Prod through a PR (`pr: true`)
   needs a token that can open PRs (#6).
@@ -248,7 +250,7 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
     commit with its Argo CD poll, <= 4 min: `timeout.reconciliation` in `worker-birth-kit`).
     The hub copies of the Applications carry the workers' status (argocd-agent), and the revision check keeps a stale
     copy (agent disconnected) from passing.
-  - **Stages without clusters pass**: no matching Applications = nothing to verify (test and prod today, after 3
+  - **Stages without clusters pass**: no matching Applications = nothing to verify (nit, sit and prod today, after 3
     measurements, ~2 min). A label typo would look the same, which is why `test_kargo_verification.sh` ties the
     selector to the appset's labels. **Except `<env>-canary` stages** (arg `requireApps: "true"`): a canary ring
     without clusters fails verification, so `<env>` never follows an unproven Freight; give the ring a cluster
@@ -428,6 +430,6 @@ regex-managed pin (`capi-providers/values.yaml`, `cluster/values.yaml`), bump th
 body says so).
 
 Where a merged bump goes: hub addons and the birth kit deploy at merge. A worker addon chart bump becomes Kargo
-Freight and goes dev-canary → dev → test → prod. App chart bumps always deploy at merge (see
+Freight and goes dev-canary → dev → nit → sit → prod. App chart bumps always deploy at merge (see
 [Add an app](#add-an-app)). Review a Renovate PR like any other:
 upstream changelog, `make lint && make test`, and live verification under the lab lock when it changes the lab.

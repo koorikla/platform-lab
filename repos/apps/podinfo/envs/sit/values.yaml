@@ -1,10 +1,10 @@
-# env test: config frozen into the ComponentRelease (openchoreo-app values). No version: the image tag is the Kargo
+# env sit: config frozen into the ComponentRelease (openchoreo-app values). No version: the image tag is the Kargo
 # Freight's.
 container:
-  env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ test" }]
+  env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ sit" }]
 
 # LEGACY until #17: read only by the `workloads` appset (repos/apps/podinfo/chart, image = that chart's default tag);
 # openchoreo-app ignores it. #17 deletes this block together with chart/ and the appset.
 podinfo:
   ui:
-    message: "podinfo @ test"
+    message: "podinfo @ sit"
