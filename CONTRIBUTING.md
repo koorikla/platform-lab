@@ -57,7 +57,9 @@ CD applies, `kubectl apply/patch/delete`, Kargo promotions, `docker` on lab cont
 ## Local checks
 
 Needs `helm` and [mikefarah `yq` v4](https://github.com/mikefarah/yq) (python-yq has a different syntax and fails the
-tests on purpose). Running the lab also needs `docker`, `k3d`, `kubectl`, `clusterctl` (see README).
+tests on purpose). Running the lab also needs `docker`, `k3d`, `kubectl`, `clusterctl` (see README). The `hack/`
+scripts also need `jq` (`lab-lock.sh`, taking over an expired lock), `gh` (`kargo-deploy-key.sh`, and issues/PRs in
+general) and `go` (`hub-lb-reload.sh` renders the CAPD LB template with it).
 
 | Command | What it proves |
 |---|---|
@@ -69,7 +71,7 @@ Writing a test: `source "$(dirname "$0")/lib.sh"`, then `o=$(render <release> <c
 (an inline `$(render …)` swallows its exit code) and don't set your own `EXIT` trap. See `hack/tests/test_cluster_ring.sh`
 for a minimal example.
 
-CI running both on every PR, plus a chart-version-bump guard, is planned (#1). Until then, paste the summary lines
+CI running both on every PR, plus a chart-version-bump guard, is planned (#1, PR #35). Until then, paste the summary lines
 into the PR.
 
 ## Recipes
@@ -99,10 +101,18 @@ with `repos/`.
    with `make status`; get a kubeconfig with `make kubeconfig CLUSTER=<name> > <name>.kubeconfig`.
 4. Budget: each CAPD cluster runs as containers on the same Docker VM (memory and the shared disk).
 
-Removing a cluster (under the lab lock): rename the file to `.yaml.disabled` first. `fleet-clusters` never
-auto-prunes (`prune: false`), so check `kubectl --context mgmt -n fleet get cluster <name>` and delete the `Cluster`
-if it is still there. Deleting `Cluster/<name>` while its file is still enabled does not remove it: Argo CD re-creates
-it and CAPI builds a fresh cluster (that is how a rebirth is done).
+**Renaming a cluster file to `.yaml.disabled` deletes that cluster.** The ApplicationSet controller puts the
+resources finalizer on every Application it generates, and `fleet-clusters` doesn't set
+`preserveResourcesOnDeletion`. So the rename deletes `Application cluster-<name>` with cascade, which deletes
+`Cluster/<name>`, and CAPI tears the machines down. (`prune: false` only covers resources that drop out of the render,
+not the Application being deleted.) Tracked in #39.
+- **Never disable `fleet/clusters/mgmt/mgmt.yaml`.** It is the hub. Only the `Delete=false` sync option on its
+  `Cluster` object stands between that rename and deleting the hub.
+- To remove a worker (lab lock held, announced on the issue): make sure nothing still depends on it, rename its file
+  to `.yaml.disabled`, merge, then watch `kubectl --context mgmt -n fleet get cluster,machines` until it is gone. Its
+  OpenBao material goes too (PushSecret `deletionPolicy: Delete`, fleet-sync drops `auth/k8s-<name>`).
+- To rebuild a worker from scratch, delete `Cluster/<name>` while its file stays enabled. Argo CD re-creates the
+  object and CAPI builds a fresh cluster (a "rebirth").
 
 ### Add a worker addon
 1. **Umbrella chart** `repos/platform-charts/<name>/` (invariant 4):
@@ -133,8 +143,12 @@ it and CAPI builds a fresh cluster (that is how a rebirth is done).
 6. Hub and workers resolve a fixed list of registry/git domains through public resolvers (`coredns-custom`:
    `fleet/base/hub-coredns.yaml` for the hub, its copy in the birth kit for workers; a test keeps them equal), because
    the Docker Desktop resolver times out now and then. A new chart or image registry goes into both lists.
-7. Switch it off by renaming `addon.yaml` → `addon.yaml.disabled`: the Applications and the Kargo pipeline go away.
-   Stale folders on `rendered/*` are handled in #3.
+7. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled`. **Today that deletes the addon from every
+   worker**: the generated Applications carry the resources finalizer, so their resources go with them, CRDs included,
+   and every custom resource of those CRDs with them. The Kargo pipeline goes away too. Safe procedure: remove the
+   addon's consumers first (anything using its CRDs), then disable it under the lab lock and watch the workers. Never
+   disable an addon whose CRDs other addons still use (e.g. `cert-manager`, `gateway-api-crds`). Keeping resources on
+   disable, plus cleaning stale `rendered/*` folders, comes with #3.
 
 ### Add a hub addon
 1. Umbrella chart as above.
@@ -145,9 +159,12 @@ it and CAPI builds a fresh cluster (that is how a rebirth is done).
    the hub**, so merge under the lab lock.
 4. cert-manager, capi-operator and capi-providers are also applied by `bootstrap/bootstrap.sh` from the same chart
    and values before Argo CD exists, with `helm template --no-hooks | kubectl apply`: they must work without hooks.
+5. **Don't disable a hub addon by renaming it until #39 lands.** `mgmt-addons` Applications carry the resources
+   finalizer, so `.disabled` deletes everything the addon installed, CRDs included. For `capi-operator` or
+   `capi-providers` that means the CAPI CRDs, so every `Cluster` goes and the workers are torn down.
 
 ### Promote and canary with Kargo
-Kargo UI: `make ui` → http://localhost:8081. Kargo's git credential is a repo-scoped deploy key: run
+Kargo UI: `make ui` → http://localhost:8081, user `admin`, password from `make kargo-password`. Kargo's git credential is a repo-scoped deploy key: run
 `hack/kargo-deploy-key.sh` after a fresh hub. Promotions change the lab: hold the lab lock.
 
 - **Worker addons** (project `addon-<name>`): Freight = a `main` commit touching the addon. `dev-canary` and `dev`
@@ -170,8 +187,13 @@ Today (the `workloads` appset; every folder in `repos/apps/` is an app):
    Optional `clusters/<cluster>/values.yaml` for one cluster.
 3. Result: Application `<app>-<cluster>` on every worker, namespace `<app>`, project `workloads` (which allows only
    `Namespace` as a cluster-scoped kind).
-4. Promotion: copy `kargo/podinfo/` to `kargo/<app>/` and change project/namespace name, image repository and
-   constraint, and the `yaml-update` path/key in `promotion-task.yaml`.
+4. Promotion: copy `kargo/podinfo/` to `kargo/<app>/` and replace every `podinfo` (`grep -rn podinfo kargo/<app>/`):
+   - `project.yaml`: Namespace, Project and ProjectConfig names;
+   - `warehouse.yaml`: Warehouse name, image `repoURL` and semver `constraint`;
+   - `stages.yaml`: `namespace` and the Warehouse name in `requestedFreight[].origin.name`;
+   - `promotion-task.yaml`: `namespace`, the `image` var default, the `yaml-update` path/key and the commit message.
+5. Chart bumps in `repos/apps/<app>/chart/Chart.yaml` (yours or Renovate's) **are not promoted by Kargo**: `workloads`
+   syncs `main`, so every env gets them at merge. Only the image tag goes through Kargo.
 
 Planned: apps become OpenChoreo Components with `repos/apps/<app>/app.yaml`, rendered by an `openchoreo-app` chart
 and promoted by a `render-app` Kargo task, visible in Backstage; the `workloads` appset is retired (#15–#18).
@@ -183,11 +205,18 @@ versions TODO). A cluster file chooses `clusterClass`, `provider` and `variables
 more than that in the cluster file. #23 defines the layout (`fleet/base/clusterclasses/<class>.yaml`), disabled
 example cluster files for `k3s-openstack` and `eks`, and how the birth kit differs per provider (EKS has no k3s).
 Constraints meanwhile: invariants 1, 2 and 7 hold for every provider; CAPI core stays on 1.12.x while
-`cluster-api-k3s` is a v1beta1-contract provider; cloud credentials never go into git.
+`cluster-api-k3s` is a v1beta1-contract provider; cloud credentials never go into git. When you give a provider a
+version (e.g. `infrastructure.openstack.version`), also add a Renovate regex manager for it in `renovate.json`
+(copy the `cluster-api-k3s` one). Today only core/CAPD, k3s and CAAPH are covered.
 
 ## Secrets
 - No secret material in git, PRs, issues or logs. Evidence comments show key names or HTTP status, not values.
-  Remaining literals are being moved out (#21).
+- **Generate secrets in the cluster; don't put them in values.** Patterns in use:
+  - an ESO `Password` generator plus an `ExternalSecret` with `refreshPolicy: CreatedOnce` (Kargo admin,
+    `repos/platform-charts/kargo/templates/admin-secret.yaml`, read with `make kargo-password`; rotate by deleting the
+    target Secret and restarting the consumer);
+  - a cert-manager key copied into the shape the consumer wants (argocd-agent JWT key,
+    `repos/platform-charts/argocd-agent-principal/templates/jwt-key.yaml`).
 - **Hub → worker is a pull model** (invariant 7). The hub issues material (cert-manager) and a hub-local `PushSecret`
   writes it to OpenBao through `ClusterSecretStore openbao` at `secret/clusters/<name>/<item>`; only namespaces in the
   openbao chart's `hubWriter.namespaces` may push. The worker's ESO reads it through `ClusterSecretStore hub-openbao`
@@ -224,11 +253,20 @@ It covers:
   bump of the chart's own `version`.
 - Birth-kit HelmChartProxies and the agent image inside their `valuesTemplate`.
 - CAPI providers in `capi-providers/values.yaml`, grouped with the capi-operator chart; core/CAPD held below 1.13.
-- The Kubernetes version as one group: fleet `kubernetesVersion` (k3s), `render-addon` `kubeVersion`, the k3d
-  bootstrap image, `kindImageVersion`/`kindest/node`, and `alpine/k8s`. Patch updates open a PR; minor/major wait for
-  approval on the Dependency Dashboard issue, since they change the whole fleet.
+- The workers' Kubernetes version as one group: fleet `kubernetesVersion` (k3s), `render-addon` `kubeVersion`,
+  `kindImageVersion`/`kindest/node`, and `alpine/k8s`. Patch updates open a PR; minor/major wait for approval on the
+  Dependency Dashboard issue, since they change the whole fleet.
+- The hub (`fleet/clusters/mgmt/mgmt.yaml`) and the k3d bootstrap image in a separate `kubernetes hub` group that
+  always waits for dashboard approval: rolling the self-hosted, single-control-plane hub is its own change.
+- `gateway-crds-helm` grouped with kgateway and held below 1.9 (1.9 brings Gateway API v1.6, which kgateway and
+  OpenChoreo have to support first).
 
-PRs are grouped per area and labelled `dependencies` plus the `area:*` label. Nothing automerges. Kargo-owned files
-(`addons/workers/*/envs/`, `repos/apps/*/envs/`) are ignored. When Renovate changes a chart through a regex-managed pin
-(`capi-providers/values.yaml`, `cluster/values.yaml`), bump that chart's `version` in the PR (the PR body says so). Review a Renovate PR like any other:
+PRs are grouped per area and labelled `dependencies` plus the `area:*` label. Nothing automerges. Everything under
+`addons/workers/*/envs/` and `repos/apps/*/envs/` is ignored (Kargo writes there; the hand-written
+`envs/<env>.values.yaml` next to the pins are skipped too). When Renovate changes a chart through a regex-managed pin
+(`capi-providers/values.yaml`, `cluster/values.yaml`), bump that chart's `version` in the PR (the PR body says so).
+
+Where a merged bump goes: hub addons and the birth kit deploy at merge. Worker addons also reach every worker at
+merge today (pins at `main`); after #3 lands, a chart bump becomes Kargo Freight and goes dev-canary → dev → test →
+prod. App chart bumps always deploy at merge (see [Add an app](#add-an-app)). Review a Renovate PR like any other:
 upstream changelog, `make lint && make test`, and live verification under the lab lock when it changes the lab.

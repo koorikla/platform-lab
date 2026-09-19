@@ -4,9 +4,6 @@
   "extends": [
     "config:recommended"
   ],
-  "ignorePresets": [
-    ":ignoreModulesAndTests"
-  ],
   "dependencyDashboard": true,
   "enabledManagers": [
     "helmv3",
@@ -309,13 +306,22 @@
       ]
     },
     {
-      "groupName": "kgateway",
+      "description": "Gateway API CRDs and kgateway must agree on the Gateway API version (OpenChoreo too)",
+      "groupName": "gateway-api + kgateway",
       "matchDepNames": [
-        "/^kgateway/"
+        "/^kgateway/",
+        "gateway-crds-helm"
       ],
       "addLabels": [
         "area:networking"
       ]
+    },
+    {
+      "description": "gateway-crds-helm 1.9.x jumps to Gateway API v1.6.1: only together with kgateway/OpenChoreo support, by hand",
+      "matchDepNames": [
+        "gateway-crds-helm"
+      ],
+      "allowedVersions": "<1.9.0"
     },
     {
       "groupName": "istio",
@@ -343,6 +349,31 @@
       "addLabels": [
         "area:ci"
       ]
+    },
+    {
+      "description": "App charts sync from main (workloads appset): a bump reaches every env at merge, Kargo is not involved",
+      "matchFileNames": [
+        "repos/apps/**"
+      ],
+      "prBodyNotes": [
+        "App chart bump: not promoted by Kargo. The `workloads` appset syncs `main`, so every env and cluster gets this at merge. App owners decide."
+      ]
+    },
+    {
+      "description": "The self-hosted hub (single control plane) and its k3d bootstrap image: never in the workers' Kubernetes PRs, always on request",
+      "matchFileNames": [
+        "repos/platform-config/fleet/clusters/mgmt/mgmt.yaml",
+        "bootstrap/k3d-bootstrap.yaml"
+      ],
+      "groupName": "kubernetes hub",
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Must stay last: config:recommended's workarounds:k3sKubernetesVersioning sets a +k3s regex versioning on every k3s-io/k3s github-release, under which the bare 1.34.11 is invalid and the dep is skipped",
+      "matchDepNames": [
+        "render-addon kubeVersion"
+      ],
+      "versioning": "semver"
     }
   ]
 }

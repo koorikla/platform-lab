@@ -19,7 +19,7 @@
 # /repos/platform-config/argocd/                @<org>/delivery         # AppProjects + ApplicationSets
 # /repos/platform-config/kargo/                 @<org>/delivery
 # /repos/platform-config/fleet/                 @<org>/fleet            # ClusterClasses, birth kit, cluster files
-# /repos/platform-config/fleet/clusters/prod/   @<org>/fleet @<org>/sre # prod clusters: two teams sign off
+# /repos/platform-config/fleet/clusters/prod/   @<org>/fleet @<org>/sre # either team may approve; requiring BOTH needs a ruleset
 # /repos/platform-config/addons/management/     @<org>/platform-charts  # hub addons: merge = deploy to the hub
 # /repos/platform-config/addons/workers/        @<org>/platform-charts
 
