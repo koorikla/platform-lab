@@ -175,7 +175,20 @@ No developers action/apps/Deployment/restart applications workloads/podinfo-dev1
 No developers sync applications platform-workers/cert-manager-dev1
 No developers sync applications platform-mgmt/root
 No developers update projects workloads
-No sres sync applications workloads/podinfo-dev1
+Yes sres sync applications workloads/podinfo-dev1
+Yes sres sync applications platform-workers/cert-manager-dev1
+Yes sres action/apps/Deployment/restart applications workloads/podinfo-dev1
+Yes sres action/apps/Deployment/restart applications platform-workers/cert-manager-dev1
+Yes sres get applications platform-mgmt/root
+No sres sync applications platform-mgmt/root
+No sres action/apps/Deployment/restart applications platform-mgmt/mgmt-kargo
+No sres create applications workloads/x
+No sres update applications platform-workers/cert-manager-dev1
+No sres delete applications platform-workers/cert-manager-dev1
+No sres override applications workloads/podinfo-dev1
+No sres create exec platform-workers/cert-manager-dev1
+No sres update applicationsets platform-workers/x
+No sres update projects platform-workers
 Yes platform-engineers sync applications workloads/podinfo-dev1
 No someone-else sync applications workloads/podinfo-dev1
 EOF

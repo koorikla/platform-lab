@@ -63,6 +63,16 @@ spec:
     - { group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration }
     - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicy }
     - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicyBinding }
+  # Evaluated by argocd-server on the hub (the agent's copy drops roles in managed mode). Global roles:
+  # addons/management/argo-cd/values.yaml.
+  roles:
+    - name: sre
+      description: SREs operate the worker addons (sync, resource actions such as restart); the specs stay in git
+      groups: [sres]
+      policies:
+        - p, proj:platform-workers:sre, applications, get, platform-workers/*, allow
+        - p, proj:platform-workers:sre, applications, sync, platform-workers/*, allow
+        - p, proj:platform-workers:sre, applications, action/*, platform-workers/*, allow
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -90,3 +100,10 @@ spec:
       policies:
         - p, proj:workloads:developer, applications, get, workloads/*, allow
         - p, proj:workloads:developer, applications, sync, workloads/*, allow
+    - name: sre
+      description: SREs operate the apps (sync, resource actions such as restart); the specs stay in git
+      groups: [sres]
+      policies:
+        - p, proj:workloads:sre, applications, get, workloads/*, allow
+        - p, proj:workloads:sre, applications, sync, workloads/*, allow
+        - p, proj:workloads:sre, applications, action/*, workloads/*, allow

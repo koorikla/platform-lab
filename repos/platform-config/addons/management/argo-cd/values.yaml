@@ -22,7 +22,8 @@ argo-cd:
         requestedScopes: [openid, profile, email, groups]
     rbac:
       # Thunder groups (the names OpenChoreo's authz already binds). No policy.default: a Thunder user in none of these
-      # groups sees nothing. Project-scoped grants (developers sync the workloads apps) are AppProject roles in
+      # groups sees nothing. Project-scoped grants (developers sync workloads; sres sync + actions in platform-workers and
+      # workloads) are AppProject roles in
       # repos/platform-config/argocd/projects.yaml; argocd-server evaluates both together.
       policy.csv: |
         g, admins, role:admin
