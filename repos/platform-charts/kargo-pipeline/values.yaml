@@ -20,7 +20,7 @@ stages:                     # order = promotion order; the first stage takes Fre
 # canary's Applications Synced + Healthy at the promoted commit for `consecutiveSuccesses` measurements in a row. A
 # canary that doesn't get there within `count` measurements fails verification, and dev never takes that Freight.
 # No soak by default: `soak` (Kargo requiredSoakTime) only adds a minimum dwell counted from the promotion, without
-# looking at health; Argo's ~3 min repo poll on the worker plus the healthy streak already keep dev minutes behind.
+# looking at health; the worker Argo CD's <= 4 min repo poll plus the healthy streak already keep dev minutes behind.
 # Skip the gate by approving the Freight for dev (a manual approval supersedes verification and soak). test and prod
 # stay manual.
 autoPromote: [dev-canary, dev]
@@ -31,11 +31,12 @@ appSoak: 15m
 # Verification after every promotion, every stage (AnalysisTemplate argocd-apps; Argo Rollouts runs it in the project
 # namespace). One measurement = one Job (files/verify-apps.sh) reading the hub Applications of this addon on the
 # stage's clusters; a stage without clusters passes, except a canary stage (an empty ring must not open the gate).
-# Gives up after count x (interval + Job runtime), ~12 min here.
+# Gives up after count x (interval + Job runtime), ~11-12 min here. 60 s, not 30 s: every measurement is a Job + pod
+# on the hub, and during a promotion wave that churn helped starve the hub control plane (#76).
 verification:
-  interval: 30s
-  count: 20                 # measurements before giving up: covers Argo's ~3 min poll + the rollout on the worker
-  consecutiveSuccesses: 4   # healthy streak required (~2 min): a canary that flaps or crashes after start doesn't pass
+  interval: 60s
+  count: 10                 # measurements before giving up: covers the worker's <= 4 min repo poll + the rollout
+  consecutiveSuccesses: 3   # healthy streak required (>= 2 min): a canary that flaps or crashes after start doesn't pass
   # kubectl + git + jq + bash; same pin as openbao fleetSync.image (Renovate group kubernetes; a test keeps them equal)
   image: alpine/k8s:1.34.11@sha256:0382123ab8ae17d8da5d43cc299242933eb012cfbe56787b43731c942c3eed80
   argocdNamespace: argocd   # where the worker-addons Applications live on the hub

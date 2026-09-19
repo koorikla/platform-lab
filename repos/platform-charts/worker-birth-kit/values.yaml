@@ -24,6 +24,16 @@ argo-cd:
     replicas: 0                        # chart has no server.enabled switch (same as upstream agent-managed profile)
   applicationSet:
     replicas: 0                        # managed mode: ApplicationSets live on the hub
+  # Every worker shares the Docker VM with the hub (#76). A worker has a handful of Applications: 5/3 processors are
+  # plenty. The poll (180s + up to 60s jitter, chart default 120s) bounds how fast a promoted rendered/<stage> commit
+  # lands, so Kargo's verification window (kargo-pipeline verification) must cover it (a test checks).
+  configs:
+    params:
+      controller.status.processors: 5
+      controller.operation.processors: 3
+    cm:
+      timeout.reconciliation: 180s
+      timeout.reconciliation.jitter: 60s
   # the redis NetworkPolicy for the agent: templates/argocd-redis-networkpolicy.yaml
 
 argocd-agent-agent:

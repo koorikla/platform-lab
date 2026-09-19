@@ -70,7 +70,7 @@ Enable/disable anything file-driven by renaming `*.yaml` ⇄ `*.yaml.disabled` (
 # 0. push this repo, then point manifests at it (default: github.com/koorikla/platform-lab)
 make set-repo REPO=https://github.com/<you>/<repo>.git && git commit -am "set repo" && git push
 # 1. needs: docker, k3d, kubectl, helm, clusterctl (+ gh for the Kargo deploy key)
-make doctor    # free Docker disk (>= 25 GB), memory, tool versions, inotify, boot stage, hub, lab lock
+make doctor    # free Docker disk (>= 25 GB), memory, CPUs, load, tool versions, inotify, boot stage, hub, lab lock
 make up        # k3d bootstrap -> CAPI creates hub 'mgmt' -> clusterctl move (hub manages itself) -> Argo CD
                # -> rendered/* branches + Kargo deploy key. Re-run after a failure: resumes at the detected stage
 make status
@@ -113,4 +113,4 @@ provider: [CONTRIBUTING.md](CONTRIBUTING.md). Agents use the skill in
 
 ## Status
 
-Boots end to end on Docker Desktop (CAPI pivot + agent path verified). Open items are GitHub issues; `grep -rn VERIFY repos/` lists values still inferred rather than confirmed. Needs ~8 GB RAM and ≥25 GB free Docker disk for hub + one worker.
+Boots end to end on Docker Desktop (CAPI pivot + agent path verified). Open items are GitHub issues; `grep -rn VERIFY repos/` lists values still inferred rather than confirmed. Docker Desktop needs ≥25 GB free disk plus 8 CPUs / 8 GB for hub + one worker, 12 CPUs / 16 GB for the full lab (hub + dev1 + dev2 + OpenChoreo; `make doctor` warns below).

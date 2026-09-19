@@ -8,7 +8,7 @@
 #   capi/<cluster>                 worker Cluster object on the hub; `kubectl delete clusters` removes it and, unless
 #                                  `stuck` exists, its containers (CAPD's job)
 #   err_hub_cluster, err_boot_cluster, err_helm, err_kargo_secret: that read fails with a timeout (not NotFound)
-#   kargo_ns, kargo_secret, gh_auth, docker_down, uname, df, inotify_*, <tool>_version: see the cases below
+#   kargo_ns, kargo_secret, gh_auth, docker_down, uname, df, inotify_*, loadavg, <tool>_version: see the cases below
 set -u
 S=${FAKE_STATE:?}
 cmd=$(basename "$0")
@@ -64,6 +64,7 @@ docker)
     " exec "*" df "*) out df "$(printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 131787236 85747372 39312648 69%% /')" ;;
     " exec "*"max_user_watches "*) out inotify_watches 1048576 ;;
     " exec "*"max_user_instances "*) out inotify_instances 8192 ;;
+    " exec "*" cat /proc/loadavg ") out loadavg "3.10 2.50 2.00 4/900 1234" ;;
     *) echo "fake docker: unhandled: $*" >&2; exit 1 ;;
   esac ;;
 k3d)

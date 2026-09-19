@@ -22,7 +22,7 @@ spec:
     - name: requireApps # "true" on <env>-canary stages: no Applications = fail, not pass
   metrics:
     - name: argocd-apps
-      # wait for the worker to pick the commit up (Argo polls ~3 min), then require a healthy streak; a failed
+      # wait for the worker to pick the commit up (worker Argo CD polls <= 4 min), then require a healthy streak; a failed
       # measurement only resets the streak, running out of `count` fails the verification
       interval: {{ $v.interval }}
       count: {{ $v.count }}
