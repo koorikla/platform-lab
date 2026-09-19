@@ -13,7 +13,7 @@ assert_yq "$w" 'select(.kind=="ExternalSecret" and .metadata.name=="cluster-dev1
 # worker API CA for fleet-sync: projector may get exactly dev1-ca; only its public cert lands in openbao
 assert_yq "$w" 'select(.kind=="Role" and .metadata.namespace=="fleet") | .rules[0].resourceNames | join(",")' dev1-ca
 assert_yq "$w" 'select(.kind=="Role" and .metadata.namespace=="fleet") | .rules[0].verbs | join(",")' get
-assert_yq "$w" 'select(.kind=="RoleBinding") | .subjects[0].namespace + "/" + .subjects[0].name' openbao/fleet-ca-projector
+assert_yq "$w" 'select(.kind=="RoleBinding" and .metadata.namespace=="fleet") | .subjects[0].namespace + "/" + .subjects[0].name' openbao/fleet-ca-projector
 es='select(.kind=="ExternalSecret" and .metadata.name=="dev1-ca-public")'
 assert_yq "$w" "$es | .metadata.namespace" openbao
 assert_yq "$w" "$es | .spec.secretStoreRef.kind + \"/\" + .spec.secretStoreRef.name" SecretStore/fleet-ca
