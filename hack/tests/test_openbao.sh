@@ -116,7 +116,8 @@ ukrun
 [ "$st" = 0 ] || fail "unseal-key first boot exit $st: $out"
 [ "$(wc -c < "$tmp/u/unseal/key" | tr -d ' ')" = 44 ] || fail "key file must be 44 base64 chars (no newline): $(wc -c < "$tmp/u/unseal/key")"
 [ "$(base64 -d < "$tmp/u/unseal/key" | wc -c | tr -d ' ')" = 32 ] || fail "key must decode to 32 bytes"
-[ "$(stat -f %Lp "$tmp/u/unseal/key" 2>/dev/null || stat -c %a "$tmp/u/unseal/key")" = 400 ] || fail "key file must be 0400"
+# GNU stat first: on Linux `stat -f` is filesystem status and succeeds with other output
+[ "$(stat -c %a "$tmp/u/unseal/key" 2>/dev/null || stat -f %Lp "$tmp/u/unseal/key")" = 400 ] || fail "key file must be 0400"
 first=$(cat "$tmp/u/unseal/key")
 ! grep -qF "$first" <<<"$out$(cat "$tmp/kubectl")" || fail "key on stdout or kubectl argv"
 # 2. restart (key file still there from an earlier init attempt, 0400): Secret exists -> same key, no create
