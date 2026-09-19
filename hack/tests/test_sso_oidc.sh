@@ -18,6 +18,10 @@ a=$(render argocd $charts/argo-cd -n argocd -f $config/addons/management/argo-cd
 cm='select(.kind=="ConfigMap" and .metadata.name=="argocd-cm") | .data'
 url=$(yq "$cm | .url" "$a")
 [ "$url" = http://localhost:8090 ] || fail "argocd-cm url = '$url', want the make-ui port-forward"
+# browsers reach both UIs only through `make ui`: redirect URIs are worthless on any other port
+ui=$(make -s -n ui)
+grep -qF -- 'svc/argocd-server 8090:' <<<"$ui" || fail "make ui: Argo CD not on 8090 (argocd-cm url)"
+grep -qF -- 'svc/kargo-api 8091:' <<<"$ui" || fail "make ui: Kargo not on 8091 (Thunder kargo redirect/CORS)"
 assert_yq "$a" "$cm | .[\"admin.enabled\"]" true      # break-glass: local admin stays
 oidc=$(yq "$cm | .[\"oidc.config\"]" "$a")
 assert_yq - '.issuer' "$issuer" <<<"$oidc"            # go-oidc: must equal the discovery issuer byte for byte
