@@ -83,7 +83,9 @@ patterns=$(sed -n 's/^path "\([^"]*\)".*/\1/p' <<<"$policy")
 while read -r method path; do
   path=${path%%\?*}
   case "$path" in auth/kubernetes/login|auth/token/revoke-self) continue ;; esac
-  ok=0; for p in $patterns; do [[ "$path" == ${p//+/[!\/]*} ]] && ok=1; done   # vault: trailing * = prefix, + = segment
+  ok=0
+  # shellcheck disable=SC2053  # unquoted on purpose: policy paths are globs
+  for p in $patterns; do [[ "$path" == ${p//+/[!\/]*} ]] && ok=1; done   # vault: trailing * = prefix, + = segment
   [ "$ok" = 1 ] || fail "fleet-sync policy doesn't cover $method $path (policy paths: $(tr '\n' ' ' <<<"$patterns"))"
 done < "$tmp/calls"
 

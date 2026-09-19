@@ -69,17 +69,23 @@ Enable/disable anything file-driven by renaming `*.yaml` ⇄ `*.yaml.disabled` (
 ```bash
 # 0. push this repo, then point manifests at it (default: github.com/koorikla/platform-lab)
 make set-repo REPO=https://github.com/<you>/<repo>.git && git commit -am "set repo" && git push
-# 1. needs: docker, k3d, kubectl, helm, clusterctl
+# 1. needs: docker, k3d, kubectl, helm, clusterctl (+ gh for the Kargo deploy key)
+make doctor    # free Docker disk (>= 25 GB), memory, tool versions, inotify, boot stage, hub, lab lock
 make up        # k3d bootstrap -> CAPI creates hub 'mgmt' -> clusterctl move (hub manages itself) -> Argo CD
+               # -> rendered/* branches + Kargo deploy key. Re-run after a failure: resumes at the detected stage
 make status
 make ui        # Argo CD :8080 (admin / make argocd-password), Kargo :8081 (admin / make kargo-password)
 make kubeconfig CLUSTER=dev1 > dev1.kubeconfig
+make down      # workers via CAPI (waits for their containers), then the hub's containers; FORCE=1 if the hub is gone
 ```
 
 Linux hosts running several CAPD clusters usually need
 `sysctl fs.inotify.max_user_watches=1048576 fs.inotify.max_user_instances=8192`.
 
 Kargo needs git push credentials: `hack/kargo-deploy-key.sh` (repo-scoped deploy key, straight into a hub Secret).
+`make up` runs it when `gh` is logged in and the hub has no such Secret yet. It **replaces** the repo's
+`kargo-platform-lab` key, so on a shared repo (e.g. without `make set-repo` to your fork) it cuts off every other lab's
+Kargo: log out of `gh` or skip it if that isn't yours to rotate.
 
 ## Working on this repo
 

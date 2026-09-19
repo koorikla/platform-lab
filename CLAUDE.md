@@ -39,7 +39,8 @@ Everything is k3s. Workers get argocd-agent injected at birth and are then drive
 bootstrap.sh → k3d `bootstrap` + cert-manager/capi-operator/capi-providers (same charts+values as GitOps, applied with
 `helm template | kubectl apply`) → Cluster `mgmt` (`fleet/clusters/mgmt/mgmt.yaml`, role=management, ClusterClass
 variable `managementCluster=true`: docker.sock in nodes + LB frontends :30443, :30820) → same CAPI stack on mgmt →
-`clusterctl move -n fleet` → delete k3d → helm install `repos/platform-charts/argo-cd` (release `argocd`) → `root` app →
+`clusterctl move -n fleet` → delete k3d → helm install `repos/platform-charts/argo-cd` (release `argocd`) → `root` app
+(then `post`: `hack/init-rendered-branches.sh`, and `hack/kargo-deploy-key.sh` if gh is logged in and the secret is missing) →
 `platform-config/argocd/*` → `mgmt-addons` appset (cert-manager, ESO, OpenBao, principal, capi-operator,
 capi-providers, kargo + argo-rollouts, argo-cd itself) + `fleet-base` (ClusterClass, HelmChartProxies) + `fleet-clusters` appset →
 `cluster` chart per file (agent client cert → hub PushSecret → OpenBao `secret/clusters/<name>/argocd-agent`) → CAPI
@@ -54,6 +55,11 @@ ships them → worker reconciles. Worker addon content: a `main` commit touching
 ## Hub access
 Context `mgmt` in ~/.kube/config (server = 127.0.0.1:<published port of container `mgmt-lb`>; bootstrap re-points it).
 UIs: `make ui` (port-forwards; CAPD nodes publish no host ports). Hub `Cluster` carries `Delete=false,Prune=false`.
+`make up` is resumable: `bootstrap/bootstrap.sh stage` prints the detected stage (fresh / bootstrap / hub-requested /
+pivot-partial / pivoted / argo / orphan) and the steps left; a failed API read aborts rather than counting as absent.
+`make down` never runs `kind delete`: Argo scaled to 0, workers deleted via CAPI and awaited, then containers labelled
+`io.x-k8s.kind.cluster=mgmt`.
+`make doctor` = preflight + health (read-only). Tests: `hack/tests/test_{boot,doctor}.sh` with fake tools (`fakebin.sh`).
 
 ## Verification status
 Booted end to end on Docker Desktop (2026-09-19): k3d bootstrap → CAPI creates hub → `clusterctl move` (clusterctl

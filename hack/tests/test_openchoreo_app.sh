@@ -6,7 +6,7 @@ source "$(dirname "$0")/lib.sh"
 c=$charts/openchoreo-app
 a=hack/tests/fixtures/podinfo          # shaped like repos/apps/<app>/ (the real podinfo app is #16)
 rel='select(.kind=="ComponentRelease")'
-dev=(-f $a/app.yaml -f $a/envs/dev/values.yaml --set env=dev --set stage=dev)   # what Kargo passes
+dev=(-f "$a/app.yaml" -f "$a/envs/dev/values.yaml" --set env=dev --set stage=dev)   # what Kargo passes
 
 # --- types (hub addon): upstream v1.2.5 getting-started types, vendored verbatim
 t=$(render types $c --set mode=types)

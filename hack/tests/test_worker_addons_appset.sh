@@ -13,9 +13,9 @@ assert_yq "$a" '.spec.goTemplate' true
 assert_yq "$a" '.spec.goTemplateOptions | join(",")' 'missingkey=error'
 assert_yq "$a" '.spec.syncPolicy.preserveResourcesOnDeletion' true
 assert_yq "$a" "$g | length" 2
-assert_yq "$a" "$g[0].git.revision" main
-assert_yq "$a" "$g[0].git.files | map(.path) | join(\",\")" 'repos/platform-config/addons/workers/*/addon.yaml'
-assert_yq "$a" "$g[1].clusters.selector.matchLabels | to_entries | map(.key + \"=\" + .value) | join(\",\")" \
+assert_yq "$a" "${g}[0].git.revision" main
+assert_yq "$a" "${g}[0].git.files | map(.path) | join(\",\")" 'repos/platform-config/addons/workers/*/addon.yaml'
+assert_yq "$a" "${g}[1].clusters.selector.matchLabels | to_entries | map(.key + \"=\" + .value) | join(\",\")" \
   'platform.lab/role=worker'
 # plain directory from a rendered branch: no helm, no kustomize, no $values source, no per-cluster patching
 assert_yq "$a" '.spec.template.spec | has("sources")' false
@@ -43,11 +43,11 @@ app() {
   # clusters generator: name + metadata.labels of the Argo cluster secret, then its templated `values`
   yq -n '.name = "dev9" | .metadata.labels = {}' > "$c"
   for kv in ${2//,/ }; do yq -i ".metadata.labels[\"${kv%%=*}\"] = \"${kv#*=}\"" "$c"; done
-  for k in $(yq "$g[1].clusters.values | keys | .[]" "$a"); do
-    v=$(gotpl "$(yq "$g[1].clusters.values.$k" "$a")" "$c") yq -i ".values.$k = strenv(v)" "$c"
+  for k in $(yq "${g}[1].clusters.values | keys | .[]" "$a"); do
+    v=$(gotpl "$(yq "${g}[1].clusters.values.$k" "$a")" "$c") yq -i ".values.$k = strenv(v)" "$c"
   done
   # git files generator: the file's content + path params under pathParamPrefix
-  pp=$(yq "$g[0].git.pathParamPrefix" "$a")
+  pp=$(yq "${g}[0].git.pathParamPrefix" "$a")
   yq ". * load(\"$c\") | .$pp.path = {\"path\": \"$dir\", \"basename\": \"$1\", \"filename\": \"addon.yaml\"}" \
     "$f" > "$p"
   gotpl "$(yq '.spec.template' "$a")" "$p" > "$out"
