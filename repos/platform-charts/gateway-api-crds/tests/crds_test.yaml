@@ -1,0 +1,54 @@
+suite: Gateway API v1.5.1 standard-channel CRDs (hub + workers), Envoy Gateway's own CRDs off
+release:
+  name: gateway-api-crds
+  namespace: kube-system
+templates:
+  - charts/gateway-crds-helm/templates/*.yaml
+  - charts/gateway-crds-helm/templates/generated/*.yaml
+tests:
+  # templates, not crds/: a plain render (Argo CD, Kargo's render-addon) carries them, so upgrades apply
+  - it: renders the eight standard-channel CRDs from templates
+    template: charts/gateway-crds-helm/templates/standard-gatewayapi-crds.yaml
+    asserts:
+      - hasDocuments: { count: 8, filterAware: true }
+        documentSelector: { path: kind, value: CustomResourceDefinition, matchMany: true }
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: backendtlspolicies.gateway.networking.k8s.io, any: true }
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: gatewayclasses.gateway.networking.k8s.io, any: true }
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: gateways.gateway.networking.k8s.io, any: true }
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: grpcroutes.gateway.networking.k8s.io, any: true }
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: httproutes.gateway.networking.k8s.io, any: true }
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: listenersets.gateway.networking.k8s.io, any: true }
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: referencegrants.gateway.networking.k8s.io, any: true }
+      - containsDocument: { kind: CustomResourceDefinition, apiVersion: apiextensions.k8s.io/v1, name: tlsroutes.gateway.networking.k8s.io, any: true }
+
+  - it: pins bundle v1.5.1, standard channel, group gateway.networking.k8s.io
+    template: charts/gateway-crds-helm/templates/standard-gatewayapi-crds.yaml
+    documentSelector: { path: kind, value: CustomResourceDefinition, matchMany: true }
+    asserts:
+      - equal: { path: spec.group, value: gateway.networking.k8s.io }
+      - equal: { path: 'metadata.annotations["gateway.networking.k8s.io/bundle-version"]', value: v1.5.1 }
+      - equal: { path: 'metadata.annotations["gateway.networking.k8s.io/channel"]', value: standard }
+
+  # upstream's upgrade guard (blocks e.g. an older bundle over a newer one) ships with the CRDs
+  - it: ships upstream's safe-upgrades admission policy and its binding
+    template: charts/gateway-crds-helm/templates/standard-gatewayapi-crds.yaml
+    asserts:
+      - equal: { path: metadata.name, value: safe-upgrades.gateway.networking.k8s.io }
+        documentSelector: { path: kind, value: ValidatingAdmissionPolicy }
+      - equal: { path: metadata.name, value: safe-upgrades.gateway.networking.k8s.io }
+        documentSelector: { path: kind, value: ValidatingAdmissionPolicyBinding }
+      - hasDocuments: { count: 10 }
+
+  - it: renders nothing else - no experimental channel, no Envoy Gateway CRDs
+    asserts:
+      - hasDocuments: { count: 0 }
+        template: charts/gateway-crds-helm/templates/experimental-gatewayapi-crds.yaml
+      # every suite template (the generated/ ones are Envoy Gateway's)
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: spec.group, value: gateway.envoyproxy.io, matchMany: true, skipEmptyTemplates: true }
+
+  # the addon namespace (kube-system) only hosts the Argo/Kargo release, no objects
+  - it: renders nothing namespaced
+    template: charts/gateway-crds-helm/templates/standard-gatewayapi-crds.yaml
+    asserts:
+      - notExists: { path: metadata.namespace }
