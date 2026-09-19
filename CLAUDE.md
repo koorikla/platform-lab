@@ -83,3 +83,8 @@ verification under `hack/lab-lock.sh`). Design/plan background: `docs/plans/`.
 Minimal readable YAML; comments explain *why*. Label prefix `platform.lab/`. Namespaces: `argocd`, `fleet`, `kargo`.
 New addon = umbrella chart + `addons/<scope>/<name>/{addon.yaml,values.yaml}` (+ `envs/*.yaml` for workers).
 New cluster = one file in `fleet/clusters/<env>/`.
+Worker addons sync plain YAML from Kargo's `rendered/<env>[-canary]:addons/<addon>/` (`worker-addons` appset, branch
+from cluster labels `platform.lab/env` + `platform.lab/ring`). Disable one = rename `addon.yaml` → `.disabled` on main:
+its Application and Kargo pipeline go, the workload stays (`preserveResourcesOnDeletion`; delete it by hand if it must
+go). Then `hack/rendered-prune.sh` (dry run) / `--apply` removes the stale `addons/<addon>` from every `rendered/*`
+branch — the one documented cleanup besides Kargo that writes those branches.
