@@ -206,3 +206,4 @@ Replaces "hub PushSecret writes into the worker with the CAPI admin kubeconfig".
 - **Soak:** dev's 15 min soak (#61) is dropped: a timer that ignores health. `stages[].soak` stays for a deliberate
   minimum dwell on top of verification.
 - **Empty stages pass** (no clusters in test/prod today): the Stage can't know the fleet without breaking invariant 2.
+  Except `<env>-canary` stages (arg `requireApps`): an empty canary ring must not open the gate for `<env>`.

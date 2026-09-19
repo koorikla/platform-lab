@@ -9,11 +9,14 @@ metadata:
   name: argocd-apps
   namespace: {{ $p }}
 spec:
-  args:              # passed per stage by the Stage (Kargo fails the run if one isn't declared here)
+  # Values come from the Stage (spec.verification.args). Kargo v1.11.4 silently drops a Stage arg not declared here,
+  # and fails the AnalysisRun if one declared here gets no value: keep both lists equal (a test checks).
+  args:
     - name: env
     - name: ring
-    - name: branch   # rendered/<branch> = the stage's branch
-    - name: revision # rendered commit of the last promotion (Stage status.metadata.renderedCommit)
+    - name: branch      # rendered/<branch> = the stage's branch
+    - name: revision    # rendered commit of the last promotion (Stage status.metadata.renderedCommit)
+    - name: requireApps # "true" on <env>-canary stages: no Applications = fail, not pass
   metrics:
     - name: argocd-apps
       # wait for the worker to pick the commit up (Argo polls ~3 min), then require a healthy streak; a failed
@@ -28,9 +31,6 @@ spec:
             backoffLimit: 0             # the next measurement is the retry
             activeDeadlineSeconds: 120
             template:
-              metadata:
-                annotations:
-                  checksum/script: {{ .Files.Get "files/verify-apps.sh" | sha256sum }}
               spec:
                 serviceAccountName: verify-apps
                 restartPolicy: Never
@@ -49,6 +49,7 @@ spec:
                       - { name: RING, value: {{ `"{{args.ring}}"` }} }
                       - { name: BRANCH, value: {{ `"{{args.branch}}"` }} }
                       - { name: REVISION, value: {{ `"{{args.revision}}"` }} }
+                      - { name: REQUIRE_APPS, value: {{ `"{{args.requireApps}}"` }} }
                     securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
                     resources:
                       requests: { cpu: 10m, memory: 32Mi }
@@ -79,7 +80,8 @@ metadata:
 ---
 # Read-only on Applications in Argo CD's namespace, nothing else (RBAC can't narrow list to a label selector: the SA
 # can read every Application there, spec and status; they hold no credentials). Per project, so disabling an addon
-# prunes its grant with its pipeline.
+# prunes its grant with its pipeline. Anyone who may create Pods or Jobs in addon-<name> (the Rollouts controller,
+# hub Argo CD, cluster admins) can run as verify-apps and so gets this read access too.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

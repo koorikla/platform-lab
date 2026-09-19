@@ -231,7 +231,9 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
     copy (agent disconnected) from passing.
   - **Stages without clusters pass**: no matching Applications = nothing to verify (test and prod today, after 4
     measurements, ~2 min). A label typo would look the same, which is why `test_kargo_verification.sh` ties the
-    selector to the appset's labels.
+    selector to the appset's labels. **Except `<env>-canary` stages** (arg `requireApps: "true"`): a canary ring
+    without clusters fails verification, so `<env>` never follows an unproven Freight; give the ring a cluster
+    (`ring: canary`), or approve the Freight for `<env>` by hand.
   - **Watch it**: Kargo UI → stage → Verifications (per measurement); the Job logs say which Application it waits for
     (`kubectl --context mgmt -n addon-<name> logs -l analysisrun.argoproj.io/uid --tail=20`, `WAIT <app>: <sync>/<health>
     at <revision>`). A failed verification leaves the Freight unverified in `dev-canary`: `dev` never takes it, and

@@ -23,7 +23,8 @@ stages:                     # order = promotion order; the first stage takes Fre
 autoPromote: [dev-canary, dev]
 # Verification after every promotion, every stage (AnalysisTemplate argocd-apps; Argo Rollouts runs it in the project
 # namespace). One measurement = one Job (files/verify-apps.sh) reading the hub Applications of this addon on the
-# stage's clusters; a stage without clusters passes. Gives up after count x (interval + Job runtime), ~12 min here.
+# stage's clusters; a stage without clusters passes, except a canary stage (an empty ring must not open the gate).
+# Gives up after count x (interval + Job runtime), ~12 min here.
 verification:
   interval: 30s
   count: 20                 # measurements before giving up: covers Argo's ~3 min poll + the rollout on the worker

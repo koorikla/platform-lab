@@ -46,13 +46,15 @@ spec:
                 values:
                   renderedCommit: {{ `'${{ quote(outputs.render.commit) }}'` }}
   # Freight is verified here (and may move on) once this stage's Applications are Synced + Healthy at renderedCommit
-  # for a streak of measurements (templates/verification.yaml). No Applications (no clusters in the stage) = passes.
+  # for a streak of measurements (templates/verification.yaml). No Applications = passes, except on a canary stage.
   verification:
     analysisTemplates:
       - name: argocd-apps
     args:
       - { name: env, value: {{ $s.env | quote }} }
       - { name: ring, value: {{ include "kargo-pipeline.ring" $s }} }
+      # a canary stage gates the next one: without a canary cluster it must not pass by having nothing to check
+      - { name: requireApps, value: {{ eq (include "kargo-pipeline.ring" $s) "canary" | toString | quote }} }
       - { name: branch, value: {{ $s.name | quote }} }
       - { name: revision, value: {{ `'${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}'` }} }
 {{- end }}

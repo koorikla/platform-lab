@@ -28,7 +28,11 @@ for s in dev-canary prod; do
   assert_yq "$o" "$(stage $s) | .spec.promotionTemplate.spec.steps[1].config.updates[0].values.renderedCommit" '${{ quote(outputs.render.commit) }}'
 done
 assert_yq "$o" "$(arg dev revision)" '${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}'
-# Kargo fails the AnalysisRun if the template doesn't declare every arg the Stage passes
+# an empty canary ring must not open the gate for the next stage; other empty stages pass
+assert_yq "$o" "$(arg dev-canary requireApps)" true
+assert_yq "$o" "[$(arg dev requireApps), $(arg test requireApps), $(arg prod requireApps)] | join(\",\")" false,false,false
+# Kargo v1.11.4 silently drops a Stage arg the template doesn't declare, and fails the run for a declared arg without
+# a value: both lists must be equal
 assert_yq "$o" "$at | .spec.args | map(.name) | sort | join(\",\")" \
   "$(yq eval-all "$(stage dev) | .spec.verification.args | map(.name) | sort | join(\",\")" "$o")"
 
@@ -48,9 +52,11 @@ envv() { echo "$job | .template.spec.containers[0].env[] | select(.name==\"$1\")
 assert_yq "$o" "$(envv ADDON)" cert-manager
 assert_yq "$o" "$(envv ARGOCD_NS)" argocd
 assert_yq "$o" "$(envv REPO_URL)" https://github.com/koorikla/platform-lab.git
-for a in env ring branch revision; do
-  assert_yq "$o" "$(envv "$(tr '[:lower:]' '[:upper:]' <<<"$a")")" "{{args.$a}}"
+for a in env:ENV ring:RING branch:BRANCH revision:REVISION requireApps:REQUIRE_APPS; do
+  assert_yq "$o" "$(envv "${a#*:}")" "{{args.${a%%:*}}}"
 done
+# every declared arg reaches the Job
+assert_yq "$o" "[$at | .spec.args[].name | \"{{args.\" + . + \"}}\"] - [$job | .template.spec.containers[0].env[].value] | length" 0
 # the rendered branches the Job reads are the ones Argo syncs (worker-addons appset source)
 assert_yq "$o" "$(envv REPO_URL)" "$(yq .spec.template.spec.source.repoURL $config/argocd/appset-worker-addons.yaml)"
 assert_yq "$o" "$job | .template.spec.securityContext.runAsNonRoot" true
@@ -107,12 +113,13 @@ chmod +x "$bin/kubectl" "$bin/git"
 app() {  # app <name> <sync> <health> <revision>
   printf '{"metadata":{"name":"%s"},"status":{"sync":{"status":"%s","revision":"%s"},"health":{"status":"%s"}}}' "$1" "$2" "$4" "$3"
 }
-run() {  # run <revision> <app json>... -> $out, $st; calls in $tmp/calls
+run() {  # run <revision> <app json>... -> $out, $st; calls in $tmp/calls. $REQ = REQUIRE_APPS (default false)
   local rev=$1; shift
   printf '{"items":[%s]}' "$(IFS=,; echo "$*")" > "$tmp/apps.json"; : > "$tmp/calls"
   set +e
   out=$(env -i PATH="$bin:$PATH" HOME="$tmp/home" STUB_DIR="$tmp" ADDON=cert-manager ENV=dev RING=canary BRANCH=dev-canary \
-        REVISION="$rev" REPO_URL=https://example.invalid/lab.git ARGOCD_NS=argocd bash "$script" 2>&1)
+        REVISION="$rev" REQUIRE_APPS="${REQ:-false}" REPO_URL=https://example.invalid/lab.git ARGOCD_NS=argocd \
+        bash "$script" 2>&1)
   st=$?; set -e
 }
 ok()   { [ "$st" = 0 ] || fail "line ${BASH_LINENO[0]}: want success, got $st: $out"; }
@@ -127,6 +134,11 @@ run "$R"
 ok; has 'no Applications'; nogit
 # ...also before any promotion recorded a commit (the stage's first verification after this change)
 run ""
+ok
+# a canary stage (REQUIRE_APPS=true) without Applications fails: an empty ring must not let dev follow
+REQ=true run "$R"
+nok; has 'requires some'
+REQ=true run "$R" "$(app cert-manager-dev2 Synced Healthy $R)"
 ok
 # all at the promoted commit
 run "$R" "$(app cert-manager-dev2 Synced Healthy $R)" "$(app cert-manager-dev3 Synced Healthy $R)"
