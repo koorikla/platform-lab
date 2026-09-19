@@ -1,0 +1,117 @@
+# OpenChoreo's secrets (#9). Upstream seeds literals in postStart (values-openbao.yaml); here nothing is in git.
+# Per key in .Values.openchoreo.generated (one chain each, so adding or rotating one key leaves the others alone):
+#   Password generator -> Secret openchoreo-<key>, key `value` (generated ONCE; the source of truth, because OpenBao
+#   dev mode is in-memory) -> PushSecret -> secret/openchoreo/<key> (property `value`) -> ClusterSecretStore `default`
+#   (read-only) -> ExternalSecrets in the OpenChoreo namespaces (backstage-secrets: openchoreo-control-plane chart).
+# Roles/policies `openchoreo-seeder` / `openchoreo-reader`: server.postStart (values.yaml).
+#
+# CreatedOnce: a refresh never mints a new value. ESO still regenerates a key whenever its Secret is invalid:
+#   - Secret openbao/openchoreo-<key> deleted (the rotation procedure, see below)
+#   - label reconcile.external-secrets.io/managed removed, or data-hash annotation mismatch (kubectl edit)
+#   - its ExternalSecret deleted -> Secret garbage-collected (Owner): app cascade-delete/recreate, rename, move
+# CreatedOnce also ignores later spec changes (e.g. length): delete the Secret to apply them.
+# Rotation: delete the Secret; the PushSecret overwrites OpenBao within a minute; consumers pick it up on their
+# refresh. backstage-client-secret is shared with Thunder's Backstage app: rotating it means re-registering that app
+# (re-run Thunder's setup) and restarting backstage, or Backstage login fails.
+{{- $addr := printf "http://%s.%s.svc:8200" .Release.Name .Release.Namespace }}
+{{- range .Values.openchoreo.generated }}
+---
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: openchoreo-{{ . }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  length: 32
+  digits: 6
+  symbols: 0                      # client secrets go into OAuth forms, headers and JSON verbatim
+  noUpper: false
+  allowRepeat: true
+  secretKeys: [value]
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: openchoreo-{{ . }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  refreshPolicy: CreatedOnce      # see the header: what still regenerates it
+  target:
+    name: openchoreo-{{ . }}
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: openchoreo-{{ . }}
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: openchoreo-{{ . }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  refreshInterval: 1m             # dev mode forgets everything on restart: refill quickly
+  updatePolicy: Replace
+  # None: this PushSecret goes away together with OpenBao (same chart), a Delete finalizer would wait on a gone server;
+  # and a prune/rename must not wipe a value consumers depend on
+  deletionPolicy: None
+  secretStoreRefs:
+    - { kind: SecretStore, name: openchoreo-seeder }
+  selector:
+    secret:
+      name: openchoreo-{{ . }}
+  data:
+    - match: { secretKey: value, remoteRef: { remoteKey: openchoreo/{{ . }}, property: value } }
+{{- end }}
+---
+# Seeder: may write secret/openchoreo/* only; namespaced store, so only this namespace can push through it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-openchoreo-seeder
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: openchoreo-seeder
+  namespace: {{ .Release.Namespace }}
+spec:
+  provider:
+    vault:
+      server: {{ $addr }}
+      path: secret
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: openchoreo-seeder
+          serviceAccountRef: { name: openbao-openchoreo-seeder }
+---
+# `default`: the store name OpenChoreo's docs and samples use on the control plane. Read-only (upstream binds its
+# writer role here because single-cluster installs also push from the workflow plane; OpenChoreo's own PushSecrets
+# go through each plane's secretStoreRef, not this hub store).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-openchoreo-reader
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: default
+spec:
+  conditions:
+    - namespaces: {{ toYaml .Values.openchoreo.namespaces | nindent 8 }}
+  provider:
+    vault:
+      server: {{ $addr }}
+      path: secret
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: openchoreo-reader
+          serviceAccountRef: { name: openbao-openchoreo-reader, namespace: {{ .Release.Namespace }} }

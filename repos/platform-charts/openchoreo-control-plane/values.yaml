@@ -1,5 +1,6 @@
 # Phase 2. Needs: cert-manager, external-secrets, kgateway, Gateway API CRDs, an IdP (ThunderID) and a
-# ClusterSecretStore "default" (OpenBao in upstream guide). K8s >= 1.34. Keys below are from upstream docs.
+# ClusterSecretStore "default" (openbao umbrella chart; feeds templates/backstage-secrets.yaml). K8s >= 1.34.
+# Keys below are from upstream docs.
 openchoreo-control-plane:
   openchoreoApi:
     http:

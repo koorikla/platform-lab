@@ -628,6 +628,22 @@ Accepted. Commit.
 - Test: render contains `ClusterSecretStore/default`. E2E: `kubectl --context mgmt get clustersecretstore default`
   Ready=True. Commit.
 
+**As built (#9), overrides the text above:** OpenBao itself is the Phase 1b umbrella (chart 0.29.x, no root-token literal).
+No upstream KV seeds and no `kv put` literals. Instead, `repos/platform-charts/openbao/templates/openchoreo.yaml` builds one chain
+per key in `openchoreo.generated` (`backstage-backend-secret`, `backstage-client-secret`, `backstage-jenkins-api-key`):
+ESO `Password` → `ExternalSecret` (`CreatedOnce`) → Secret `openbao/openchoreo-<key>` (key `value`; the source of truth
+that survives OpenBao's in-memory restarts) → `PushSecret` (1m, `deletionPolicy: None`, namespaced store
+`openchoreo-seeder`) → **`secret/openchoreo/<key>`, property `value`**. Upstream snippets use flat keys
+(`backstage-client-secret`): add the `openchoreo/` prefix. `ClusterSecretStore default` is **read-only**: role/policy
+`openchoreo-reader` (read on `secret/data/openchoreo/*` only), SA `openbao-openchoreo-reader`. There is no
+`external-secrets-openbao` SA and no `openchoreo-secret-writer-role`: OpenChoreo's own PushSecrets use each plane's
+`secretStoreRef`, not this hub store. `conditions.namespaces`: `openchoreo-control-plane`, `thunder`. The
+`backstage-secrets` ExternalSecret lives in the openchoreo-control-plane umbrella (`templates/backstage-secrets.yaml`).
+**Thunder contract (#10):** the Backstage app's `client_secret` = `secret/openchoreo/backstage-client-secret` (property
+`value`) via `ClusterSecretStore default` from namespace `thunder`. Its ExternalSecret must be a PreSync hook with a lower
+weight than the setup Job (-5). Rotating one key = deleting its Secret; for `backstage-client-secret` also re-run
+Thunder's setup and restart backstage.
+
 ### Task 2.4: Thunder IdP (hub)
 
 **Files:** `repos/platform-charts/thunder/{Chart.yaml,values.yaml}`, `repos/platform-config/addons/management/thunder/{addon.yaml,values.yaml}`.

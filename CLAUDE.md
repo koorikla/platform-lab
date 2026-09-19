@@ -72,7 +72,11 @@ upgrade) until ESO CRDs/webhook exist: ~40 revisions within a minute at birth, h
 - CAPD renders the hub LB template (`fleet/base/hub-lb.yaml`) only on control-plane machine create/delete: after
   editing it on a running hub run `hack/hub-lb-reload.sh`.
 - OpenBao is in-memory (dev mode): a pod restart empties it; postStart, fleet-sync (≤2 min) and PushSecrets (1 min)
-  refill it. Workers keep their already-synced secrets meanwhile.
+  refill it. Workers keep their already-synced secrets meanwhile. Generated sources (`openbao/openchoreo-*`) are k8s
+  Secrets and survive a restart.
+- Hardening gap: `openbao-fleet-sync` may `get` every Secret in `openbao` (its CA names are dynamic), including the
+  generated `openchoreo-*` sources. It can already escalate inside OpenBao (`cluster-*` policy bodies), so treat that
+  SA as sensitive.
 
 ## Backlog
 Lives in **GitHub issues** (koorikla/platform-lab, labels `status:*`, `phase:*`, `area:*`, `needs-lab`). Work them with
