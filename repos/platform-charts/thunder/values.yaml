@@ -10,8 +10,15 @@
 # Under Argo CD every Helm hook of the chart is a PreSync hook (exact list: hack/tests/test_thunder.sh):
 # - PVC thunder-database-pvc (sqlite): Pending until its first consumer (local-path is WaitForFirstConsumer), and that
 #   consumer is the later setup Job -> needs the argocd-cm PVC health override (argo-cd umbrella) to not deadlock, and
-#   hook-delete-policy hook-failed (below) so later syncs re-apply it instead of deleting the in-use PVC (data loss).
+#   hook-delete-policy hook-failed (below): successful syncs re-apply the PVC instead of deleting the in-use one
+#   (BeforeHookCreation, the default, would wipe the DB every sync). RISK: a FAILED sync operation deletes every
+#   HookFailed hook, succeeded ones included (gitops-engine: hooksPendingDeletionFailed). The PVC then sits Terminating
+#   (pvc-protection) while the pod runs, is gone at the next pod restart (reclaim Delete = DB lost), the pod stays Pending
+#   until the next sync creates an empty PVC, and bootstrap re-seeds it (users/groups/apps come back, anything created by
+#   hand does not). No chart knob for "never delete"; check: pvc thunder-database-pvc .metadata.deletionTimestamp.
 # - Job thunder-setup runs on every sync; all bootstrap scripts are check-then-create/update, so re-runs are safe.
+#   setup.preserveJob (below) drops the chart's hook-succeeded: Argo re-creates the Job every sync (BeforeHookCreation),
+#   so a failed Job can't block later syncs until its 24h TTL, and the finished Job + logs stay until the next sync.
 # - ServiceAccount + ConfigMaps are re-created on every sync (no chart knob; Thunder's API use is an endpoints read).
 # - ExternalSecret thunder-backstage-client (ours, templates/): weight -20, before the Job; see the template.
 #
@@ -24,6 +31,10 @@
 # - Thunder console admin admin/admin: not in this file, created by the image's bootstrap/01-default-resources.sh
 # - token signing + encryption keys: files shipped in the image (repository/resources/security/*); VERIFY whether they
 #   are per build (then shared by every install of 0.28.0) and mount per-install keys before trusting these tokens
+# - unauthenticated admin API during each sync: the setup pod runs Thunder with THUNDER_SKIP_SECURITY=true on 8090,
+#   carries the Deployment's selector labels (chart helper, no values knob) and has no readiness probe, so
+#   thunder-service (and the HTTPRoute) also route to it for ~1 min. Upstream Helm runs this once at install; under
+#   Argo it is every sync. Fix upstream (distinct pod labels for the setup Job) or restrict with a NetworkPolicy (#29).
 #
 # Footprint: one pod, requests 100m CPU / 50Mi, limits 200m / 100Mi (chart defaults = upstream); the setup Job the same
 # while it runs (per sync, ~1 min); PVC 1Gi on local-path (node-affine: Job and Deployment share the node).
@@ -58,7 +69,8 @@ thunder:
   hpa:
     enabled: false
 
-  # lab: see the header - keep the PVC across syncs (Argo maps this to HookFailed, not BeforeHookCreation)
+  # lab: see the header - kept across successful syncs (Argo: HookFailed, not BeforeHookCreation); a failed sync
+  # marks it for deletion
   persistence:
     annotations:
       helm.sh/hook-delete-policy: hook-failed
@@ -103,6 +115,8 @@ thunder:
 
   setup:
     enabled: true
+    # lab: no hook-succeeded/TTL -> Argo re-creates the Job every sync; a failed one doesn't stick (see the header)
+    preserveJob: true
     # lab: setup.sh sources each bootstrap script in a subshell, so they see the Job's env
     env:
       - name: BACKSTAGE_CLIENT_SECRET

@@ -26,19 +26,24 @@ assert_yq - '.database | [.config.type, .runtime.type, .user.type] | unique | jo
 assert_yq - '.cors.allowed_origins | sort | join(",")' \
   http://localhost:7007,http://localhost:8090,http://localhost:8091,http://openchoreo.localhost:8080 <<<"$cfg"
 
-# Helm hooks become Argo sync hooks. Exactly these, and the PVC must survive every sync after the first:
-# hook-failed -> HookFailed instead of the default BeforeHookCreation (which deletes the in-use PVC).
+# Helm hooks become Argo sync hooks; exactly these. hook-failed (Argo: HookFailed) on the PVC and the ExternalSecret
+# keeps them across SUCCESSFUL syncs (BeforeHookCreation would re-create them every sync = empty PVC). Caveat: a FAILED
+# sync operation deletes every HookFailed hook, succeeded ones included (gitops-engine hooksPendingDeletionFailed), so
+# the PVC goes Terminating (pvc-protection holds it until the pod restarts). See the values.yaml header.
+# The setup Job has no delete policy (setup.preserveJob): Argo's default BeforeHookCreation re-creates it every sync,
+# so a failed Job can't block later syncs, and the finished Job and its logs stay until the next sync.
 # No DB-credentials Secret hook: sqlite has no password. The ExternalSecret is ours (Backstage client secret, below).
-hooks='ConfigMap/thunder-bootstrap:pre-install:-10:,ConfigMap/thunder-setup-config-map:pre-install:-10:,ExternalSecret/thunder-backstage-client:pre-install:-20:hook-failed,Job/thunder-setup:pre-install:-5:hook-succeeded,PersistentVolumeClaim/thunder-database-pvc:pre-install:-15:hook-failed,ServiceAccount/thunder-service-account:pre-install:-10:'
+hooks='ConfigMap/thunder-bootstrap:pre-install:-10:,ConfigMap/thunder-setup-config-map:pre-install:-10:,ExternalSecret/thunder-backstage-client:pre-install:-20:hook-failed,Job/thunder-setup:pre-install:-5:,PersistentVolumeClaim/thunder-database-pvc:pre-install:-15:hook-failed,ServiceAccount/thunder-service-account:pre-install:-10:'
 assert_yq "$o" '[select(.metadata.annotations["helm.sh/hook"] != null) | .kind + "/" + .metadata.name + ":" + .metadata.annotations["helm.sh/hook"] + ":" + .metadata.annotations["helm.sh/hook-weight"] + ":" + (.metadata.annotations["helm.sh/hook-delete-policy"] // "")] | sort | join(",")' "$hooks"
 assert_yq "$o" '[select(.metadata.annotations["argocd.argoproj.io/hook"] != null)] | length' 0
+assert_yq "$o" 'select(.kind=="Job") | .spec.ttlSecondsAfterFinished' null   # kept until the next sync re-creates it
 # the setup Job is the PVC's first consumer (local-path is WaitForFirstConsumer), so it must mount it
 assert_yq "$o" 'select(.kind=="Job") | .spec.template.spec.volumes[] | select(.persistentVolumeClaim) | .persistentVolumeClaim.claimName' thunder-database-pvc
 
 # Backstage OAuth client secret (#9 contract): generated in-cluster, OpenBao secret/openchoreo/backstage-client-secret
 # (property value), read through ClusterSecretStore `default`. PreSync hook at a lower weight than the Job: Argo waits
-# until the ExternalSecret is Ready (= Secret written) before the Job starts. hook-failed keeps it (and its Secret)
-# across syncs; BeforeHookCreation would delete it and garbage-collect the Secret on every sync.
+# until the ExternalSecret is Ready (= Secret written) before the Job starts. hook-failed: fewer re-creations than
+# BeforeHookCreation (same caveat as above: a failed sync deletes it; the retry re-creates it, harmless).
 es='select(.kind=="ExternalSecret" and .metadata.name=="thunder-backstage-client")'
 assert_yq "$o" "$es | .spec.secretStoreRef.kind + \"/\" + .spec.secretStoreRef.name" ClusterSecretStore/default
 assert_yq "$o" "$es | .spec.data | map(.secretKey + \"=\" + .remoteRef.key + \"#\" + .remoteRef.property) | join(\",\")" \
@@ -47,6 +52,8 @@ assert_yq "$o" "$es | .spec.target.name" thunder-backstage-client
 assert_yq "$o" 'select(.kind=="Job") | .spec.template.spec.containers[0].env[] | select(.name=="BACKSTAGE_CLIENT_SECRET") | .valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key' \
   thunder-backstage-client/client-secret
 grep -q backstage-portal-secret "$o" && fail "upstream literal Backstage client secret still rendered"
+# no config = no render (else the Job would wait forever on a Secret nobody creates)
+assert_fails helm template thunder $charts/thunder -n thunder -f $a/values.yaml --set backstageClientSecret=null
 
 # seed data (bootstrap scripts run by the setup Job; every script is check-then-create/update, so re-runs are safe)
 scripts=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="thunder-bootstrap") | .data' "$o")
