@@ -4,11 +4,10 @@
 # the app installed (capi-operator -> CAPI CRDs -> every Cluster; cluster-<name> -> Cluster -> CAPI teardown).
 # Every ApplicationSet must be classified here, so a new one is a conscious choice.
 source "$(dirname "$0")/lib.sh"
-# infrastructure: disabling must orphan, never delete (removal is a manual step, see CLAUDE.md "Disabling")
-preserve=" mgmt-addons fleet-clusters "
-# deletion is the point: a disabled worker addon's Kargo pipeline must stop promoting; a removed app goes away.
-# worker-addons: #36 moves it to preserve (asserted in its own test); add it here once that is merged.
-cascade=" kargo-addon-pipelines workloads worker-addons "
+# infrastructure: disabling must orphan, never delete (removal is a manual step: CONTRIBUTING.md "Disabling")
+preserve=" mgmt-addons fleet-clusters worker-addons "
+# deletion is the point: a disabled worker addon's Kargo pipeline must stop promoting; a removed app goes away
+cascade=" kargo-addon-pipelines workloads "
 
 for f in $config/argocd/appset-*.yaml; do
   name=$(yq '.metadata.name' "$f")
@@ -18,12 +17,15 @@ for f in $config/argocd/appset-*.yaml; do
     assert_yq "$f" '.spec.template.spec.syncPolicy.preserveResourcesOnDeletion' null
     # template finalizers are copied verbatim and win over preserveResourcesOnDeletion
     assert_yq "$f" '.spec.template.metadata.finalizers' null
-  elif [[ "$cascade" != *" $name "* ]]; then
+  elif [[ "$cascade" == *" $name "* ]]; then
+    assert_yq "$f" '.spec.syncPolicy.preserveResourcesOnDeletion' null
+  else
     fail "$f: ApplicationSet $name is in neither preserve nor cascade list of $0"
   fi
 done
-for name in $preserve; do
-  grep -qx "  name: $name" $config/argocd/appset-*.yaml || fail "preserve list names missing ApplicationSet $name"
+names=" $(yq eval-all '[.metadata.name] | join(" ")' $config/argocd/appset-*.yaml) "
+for name in $preserve $cascade; do
+  [[ "$names" == *" $name "* ]] || fail "$0 lists $name, but no ApplicationSet has that name"
 done
 
 # plain hub Applications (fleet-base: ClusterClass + HelmChartProxies = every worker's birth kit) must not cascade

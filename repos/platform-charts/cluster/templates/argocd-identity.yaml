@@ -79,7 +79,7 @@ metadata:
 spec:
   refreshInterval: 1m           # OpenBao runs in dev mode (in-memory): refills it quickly after a restart
   updatePolicy: Replace
-  deletionPolicy: Delete        # cluster file removed -> its material leaves OpenBao too
+  deletionPolicy: Delete        # PushSecret deleted -> its material leaves OpenBao (a .disabled file alone keeps it)
   secretStoreRefs:
     - { kind: ClusterSecretStore, name: {{ .Values.openbao.store }} }
   selector:
