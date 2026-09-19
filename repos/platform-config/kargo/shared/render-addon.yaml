@@ -23,9 +23,11 @@ spec:
         repoURL: ${{ vars.repoURL }}
         # SPLIT: ./src is one checkout of platform-charts + platform-config; split repos => one clone per repo
         # (chart from the charts repo at its Freight commit, values from the config repo at its Freight commit)
+        # rendered/<branch> first: its existence check / orphan creation is the fetch most likely to hit the network
+        # (transient DNS). All network I/O then happens before any worktree exists, so a retry starts from scratch.
         checkout:
-          - { commit: "${{ commitFrom(vars.repoURL).ID }}", path: ./src }
           - { branch: "rendered/${{ vars.branch }}", create: true, path: ./out }
+          - { commit: "${{ commitFrom(vars.repoURL).ID }}", path: ./src }
     # helm-template only adds/overwrites files: start from an empty folder so removed resources disappear.
     # Only this addon's folder; the other addons on the branch are other pipelines' output.
     - uses: delete
@@ -39,6 +41,7 @@ spec:
         namespace: ${{ vars.namespace }}
         buildDependencies: true      # charts/*.tgz are gitignored; deps are pinned by Chart.lock
         includeCRDs: true
+        skipTests: true              # helm test pods are for `helm test`, not for the cluster
         kubeVersion: "1.34.11"       # keep in sync with fleet kubernetesVersion (hack/lint.sh checks the minor)
         # Rendered on the hub, not the worker: no lookup(), .Capabilities only knows what is listed here, and
         # chart-generated secrets/certs change on every render. Workers have no extra CRD APIs today (e.g. no
@@ -49,7 +52,11 @@ spec:
           - ./src/repos/platform-config/addons/workers/${{ vars.addon }}/values.yaml
           - ./src/repos/platform-config/addons/workers/${{ vars.addon }}/envs/${{ vars.env }}.values.yaml
         outPath: ./out/addons/${{ vars.addon }}
-        outLayout: flat   # <group>-<kind>-<namespace>-<name>.yaml per resource: reviewable diffs, no chart subfolder
+        # flat: <group>-<kind>-<namespace>-<name>.yaml per resource (reviewable diffs, no chart subfolder). Caveats,
+        # Kargo v1.11.4: a resource without metadata.name (generateName) goes to resource-0.yaml and every further
+        # one overwrites it (the index never increments); a hook and a main resource with the same kind/namespace/
+        # name share one file and the hook, written last, wins. hack/lint.sh rejects both in worker addon renders.
+        outLayout: flat
     - uses: git-commit
       config:
         path: ./out
@@ -59,6 +66,7 @@ spec:
     - uses: git-push
       as: push-direct
       if: ${{ success() && vars.pr != "true" }}
+      retry: { errorThreshold: 3 }   # network step (its own maxAttempts covers rebase races, not DNS/transport)
       config:
         path: ./out
         maxAttempts: 20   # every addon pipeline pushes to the same rendered/<stage> branch; each attempt rebases
@@ -68,10 +76,12 @@ spec:
     - uses: git-push
       as: push
       if: ${{ success() && vars.pr == "true" }}
+      retry: { errorThreshold: 3 }   # network step
       config: { path: ./out, generateTargetBranch: true }
     - uses: git-open-pr
       as: open-pr
       if: ${{ success() && vars.pr == "true" }}
+      retry: { errorThreshold: 3 }   # network step
       config:
         repoURL: ${{ vars.repoURL }}
         sourceBranch: ${{ task.outputs.push.branch }}
@@ -80,13 +90,14 @@ spec:
     - uses: git-wait-for-pr
       as: wait-for-pr
       if: ${{ success() && vars.pr == "true" && status('open-pr') != 'Skipped' }}
+      retry: { errorThreshold: 3 }   # network step (polls the PR)
       config:
         repoURL: ${{ vars.repoURL }}
         prNumber: ${{ task.outputs['open-pr'].pr.id }}
-    # PR flow: the pushed SHA sits on a generated branch, so report the merge commit on rendered/<branch> instead.
-    # Ternary, not ?? : the skipped branch's outputs don't exist and expr only evaluates the chosen side.
+    # PR flow: prefer the merge commit on rendered/<branch>; the pushed SHA (generated branch) only as a fallback.
+    # Skipped steps have no outputs: ?. / ?? (expr-lang v1.17) keep the unused side from erroring.
     - uses: compose-output
       as: result
       config:
         commit: >-
-          ${{ vars.pr == "true" ? task.outputs['wait-for-pr'].commit : task.outputs['push-direct'].commit }}
+          ${{ vars.pr == "true" ? (task.outputs['wait-for-pr']?.commit ?? task.outputs.push.commit) : task.outputs['push-direct'].commit }}

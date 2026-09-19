@@ -21,6 +21,7 @@ spec:
     spec:
       steps:
         - task: { name: render-{{ $.Values.kind }}, kind: ClusterPromotionTask }
+          as: render   # later steps (e.g. argocd-update) read outputs.render.commit = SHA on rendered/<stage>
           vars:
             - { name: repoURL, value: {{ $.Values.repoURL | quote }} }
             {{- include (printf "kargo-pipeline.vars.%s" $.Values.kind) $ | nindent 12 }}

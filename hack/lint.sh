@@ -25,15 +25,22 @@ for a in $config/addons/workers/*/; do
   for env in dev test prod; do
     f=(-f "$a/values.yaml"); [ -f "$a/envs/$env.values.yaml" ] && f+=(-f "$a/envs/$env.values.yaml")
     render "$chart" "$charts/$chart" "${f[@]}"
+    # Kargo's flat layout writes one file per <group>-<kind>-<namespace>-<name>: nameless or duplicate resources
+    # would silently overwrite each other on rendered/<stage> (see render-addon.yaml)
+    ids=$(helm template "$chart" "$charts/$chart" -n "$chart" --include-crds --skip-tests "${f[@]}" |
+      yq -N 'select(.kind != null) | .apiVersion + "/" + .kind + "/" + (.metadata.namespace // "") + "/" + (.metadata.name // "<none>")')
+    ! grep -q '/<none>$' <<<"$ids" || { echo "FAIL: $chart ($env): resource without metadata.name"; exit 1; }
+    [ -z "$(sort <<<"$ids" | uniq -d)" ] || { echo "FAIL: $chart ($env): duplicate resources: $(sort <<<"$ids" | uniq -d)"; exit 1; }
   done
 done
 # appsets take the addon name from the folder (Kargo project, rendered/<stage>/addons/<name>); addon.yaml must agree
 for f in $config/addons/*/*/addon.yaml*; do
-  [ "$(awk '/name:/ {print $2; exit}' "$f")" = "$(basename "$(dirname "$f")")" ] || { echo "FAIL: $f: addon.name != folder"; exit 1; }
+  [ "$(yq '.addon.name' "$f")" = "$(basename "$(dirname "$f")")" ] || { echo "FAIL: $f: addon.name != folder"; exit 1; }
 done
 # render-addon renders for the fleet's Kubernetes minor (charts gate on .Capabilities.KubeVersion)
 kv=$(awk -F'"' '/kubeVersion:/ {print $2}' $config/kargo/shared/render-addon.yaml | cut -d. -f1,2)
 for f in $config/fleet/clusters/*/*.yaml*; do
+  [[ $f == */clusters/mgmt/* ]] && continue   # only workers consume rendered manifests
   fv=$(awk '/^kubernetesVersion:/ {print $2}' "$f" | sed 's/^v//' | cut -d. -f1,2)
   [ "$fv" = "$kv" ] || { echo "FAIL: $f: kubernetesVersion $fv != render-addon kubeVersion $kv"; exit 1; }
 done

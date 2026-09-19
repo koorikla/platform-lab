@@ -46,3 +46,5 @@ assert_fails helm template p $charts/kargo-pipeline --set name=foo --set kind=bo
 ra=$config/kargo/shared/render-addon.yaml
 assert_yq "$ra" '[.spec.steps[] | select(has("if"))] | length > 0' true
 assert_yq "$ra" '[.spec.steps[] | select(has("if")) | .if | test("^[$][{][{] success[(][)] && ")] | all' true
+# the task step's alias is how later Stage steps read its output (outputs.render.commit)
+assert_yq "$o" '[select(.kind=="Stage") | .spec.promotionTemplate.spec.steps[0].as] | unique | join(",")' render

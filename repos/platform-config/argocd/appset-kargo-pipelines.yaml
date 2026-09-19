@@ -16,9 +16,9 @@ spec:
           - path: repos/platform-config/addons/workers/*/addon.yaml
   template:
     metadata:
-      name: 'kargo-addon-{{ .addon.name }}'
+      name: 'kargo-addon-{{ .path.basename }}'
       labels:
-        platform.lab/addon: '{{ .addon.name }}'
+        platform.lab/addon: '{{ .path.basename }}'
     spec:
       project: platform-mgmt
       source:

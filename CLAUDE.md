@@ -66,7 +66,8 @@ k3s-agent Type=notify deadlocks CAPD bootstrap until timeout (~5 min, Type=exec 
 3. Kargo: git creds via ESO; second pipeline promoting `rollout.chartRevision` of worker addons (Warehouse on git tags
    of platform-charts); prod stage via `git-open-pr` + `git-wait-for-pr`; verification (AnalysisTemplate) per stage.
    Rendered manifests follow-ups:
-   - disabling an addon leaves `rendered/<branch>:addons/<x>/` behind → cleanup step (Task 1.5);
+   - disabling an addon leaves `rendered/<branch>:addons/<x>/` behind → until Task 1.5 automates it,
+     `git rm -r addons/<x>` on each `rendered/*` branch by hand;
    - tooling-only changes (`kargo/shared/`) make no Freight → re-promote by hand to re-render;
    - one push changing an Application's spec *and* its content can race: the auto-sync captures the old spec and
      retries it until the limit → `argocd app terminate-op <app>`.

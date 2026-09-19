@@ -569,8 +569,9 @@ Accepted. Commit.
 ### Task 2.5: Hostnames, DNS and UI access for `*.openchoreo.localhost`
 
 - Hub CoreDNS rewrite so pods resolve `*.openchoreo.localhost` to the kgateway gateway service: port upstream
-  `install/k3d/common/coredns-custom.yaml` as a mgmt addon manifest (k3s reads ConfigMap `kube-system/coredns-custom`).
-  Put it in the `openchoreo-control-plane` umbrella chart templates.
+  `install/k3d/common/coredns-custom.yaml` into `repos/platform-config/fleet/base/hub-coredns.yaml` as key
+  `openchoreo.override` (k3s imports `*.override` into the default server block). That ConfigMap
+  (`kube-system/coredns-custom`) has a single owner, so the rewrite does NOT go into the control-plane chart.
 - Browser: `make ui` gains `kubectl -n <gateway ns> port-forward svc/<gateway-svc> 8080:<port>`; move Argo CD to 8090
   and Kargo to 8091 (issuer URLs contain `:8080`, same as upstream). Update README/Makefile/bootstrap echo lines.
 
