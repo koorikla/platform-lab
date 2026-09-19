@@ -120,7 +120,8 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
      4. `-n argocd delete certificate <name>-agent-client-tls` and then `-n argocd delete secret
         <name>-agent-client-tls`: otherwise the hub keeps renewing a valid agent client cert, and cert-manager leaves
         the Secret behind.
-     5. `-n fleet delete role,rolebinding <name>-ca-projector`, `-n openbao delete externalsecret <name>-ca-public`,
+     5. `-n argocd delete role,rolebinding eso-in-cluster-<name>` (the in-cluster store's read on that cert),
+        `-n fleet delete role,rolebinding <name>-ca-projector`, `-n openbao delete externalsecret <name>-ca-public`,
         and, if `openchoreo.enabled`, `delete dataplane <name>` in the OpenChoreo namespace.
   4. Check nothing is left: `kubectl --context mgmt get certificate,externalsecret,pushsecret,role,rolebinding -A |
      grep <name>`.
@@ -156,14 +157,12 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
 6. Hub and workers resolve a fixed list of registry/git domains through public resolvers (`coredns-custom`:
    `fleet/base/hub-coredns.yaml` for the hub, its copy in the birth kit for workers; a test keeps them equal), because
    the Docker Desktop resolver times out now and then. A new chart or image registry goes into both lists.
-7. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled` (lab lock). `worker-addons` sets
-   `preserveResourcesOnDeletion`: the `<name>-<cluster>` Applications go, **the addon keeps running on every worker**
-   (unmanaged), and the Kargo pipeline goes (`kargo-addon-pipelines` cascades on purpose, so it stops promoting). Then
-   `make rendered-prune` drops its stale `rendered/*` folders. Removing it from the workers is a manual step per
-   cluster: consumers first (anything using its CRDs), CRDs last. Never remove an addon whose CRDs other addons still
-   use (e.g. `cert-manager`, `gateway-api-crds`). Before the first disable, check that the worker's own copy of the
-   Application has no finalizer either (the agent copies finalizers from the hub): see
-   [Disabling](#disabling-rules-for-every-applicationset).
+7. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled`. **Today that deletes the addon from every
+   worker**: the generated Applications carry the resources finalizer, so their resources go with them, CRDs included,
+   and every custom resource of those CRDs with them. The Kargo pipeline goes away too. Safe procedure: remove the
+   addon's consumers first (anything using its CRDs), then disable it under the lab lock and watch the workers. Never
+   disable an addon whose CRDs other addons still use (e.g. `cert-manager`, `gateway-api-crds`). Keeping resources on
+   disable, plus cleaning stale `rendered/*` folders, comes with #3.
 
 ### Add a hub addon
 1. Umbrella chart as above.
