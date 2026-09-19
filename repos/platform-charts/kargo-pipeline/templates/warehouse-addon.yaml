@@ -12,10 +12,8 @@ spec:
         branch: main
         commitSelectionStrategy: NewestFromBranch
         # SPLIT: one subscription spans platform-charts + platform-config; split repos => one subscription each
-        includePaths:   # freight = a commit touching the chart or the addon's values
+        # freight = a commit touching the chart or the addon's config (addon.yaml, fleet + env values: all rendered)
+        includePaths:
           - repos/platform-charts/{{ include "kargo-pipeline.chart" . }}/
           - {{ $cfg }}/
-        excludePaths:   # rollout pins (envs/<env>.yaml) and per-cluster values aren't rendered (removed in Task 1.6)
-          - regex:^{{ $cfg }}/envs/[^/.]+\.yaml$
-          - {{ $cfg }}/clusters/
 {{- end }}

@@ -26,7 +26,6 @@
   ],
   "ignorePaths": [
     "repos/apps/*/envs/**",
-    "repos/platform-config/addons/workers/*/envs/**",
     "docs/**"
   ],
   "customManagers": [

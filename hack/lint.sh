@@ -16,7 +16,7 @@ done
 
 render() { helm template "$@" >/dev/null || { echo "FAIL: helm template $*"; exit 1; }; }
 
-# addons: chart defaults < scope values (< env/cluster values for workers)
+# addons: chart defaults < scope values (< env values for workers, as Kargo's render-addon passes them)
 for a in $config/addons/management/*/; do
   chart=$(awk '/chart:/ {print $2}' "$a"/addon.yaml*); render "$chart" "$charts/$chart" -f "$a/values.yaml"
 done

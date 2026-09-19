@@ -27,7 +27,7 @@ flowchart LR
   weso -->|"argocd-agent-client-tls"| agent
   agent -->|"gRPC mTLS :30443"| principal
   argo -->|"Applications labelled argocd-agent=true"| principal
-  kargo -->|"commit envs/<env>"| git
+  kargo -->|"render to rendered/<stage>"| git
 ```
 
 ## Layout
@@ -39,7 +39,7 @@ Top-level folders under `repos/` simulate separate git repositories (split later
 | `bootstrap/` | platform-config | the only imperative bit: k3d → CAPI builds hub → `clusterctl move` → Argo CD + root app |
 | `repos/platform-charts/` | one repo (or one per chart) | umbrella Helm charts, 1 per addon, + local charts `cluster`, `capi-providers` |
 | `repos/platform-config/argocd/` | platform-config | AppProjects, ApplicationSets (root app points here) |
-| `repos/platform-config/addons/{management,workers}/` | platform-config | which addon, which version, which values — per fleet / env / cluster |
+| `repos/platform-config/addons/{management,workers}/` | platform-config | which addon, which values — per fleet / env (worker addon versions travel as Kargo Freight) |
 | `repos/platform-config/fleet/` | platform-config | ClusterClasses, CAAPH HelmChartProxies, one file per cluster |
 | `repos/platform-config/kargo/` | platform-config | Kargo projects, warehouses, stages |
 | `repos/apps/` | app team repos | workloads: `chart/` + `envs/<env>/values.yaml` |
@@ -50,12 +50,17 @@ Top-level folders under `repos/` simulate separate git repositories (split later
 `platform.lab/{name,env,role,provider,region}` labels on the CAPI `Cluster` **and** on the Argo CD cluster secret it
 mints for the agent. ApplicationSets select on those labels:
 
+Worker addons carry no version on `main`: a merge touching an addon's chart or config becomes Kargo Freight, and each
+promotion renders it into `rendered/<stage>`. A cluster follows `rendered/<env>`, or `rendered/<env>-canary` if it is
+in the canary ring. Rings replace per-cluster pins: nothing is rendered per cluster.
+
 | Scope | Where you change it |
 |---|---|
-| whole env (dev1, dev2, …) | `addons/workers/<addon>/envs/<env>.yaml` → `rollout.chartRevision`; values in `envs/<env>.values.yaml` |
-| one cluster | same file → `rollout.clusters.<cluster>.chartRevision`; values in `clusters/<cluster>.values.yaml` |
-| whole fleet | `addons/workers/<addon>/values.yaml`, or the chart itself |
-| apps | `repos/apps/<app>/envs/<env>/values.yaml` (Kargo writes), `clusters/<cluster>/values.yaml` for one cluster |
+| whole fleet | `addons/workers/<addon>/values.yaml`, or the chart itself; reaches each env by promotion |
+| whole env (dev1, dev2, …) | values in `addons/workers/<addon>/envs/<env>.values.yaml`; version = the Freight promoted to that env's stage |
+| clusters ahead of their env | `ring: canary` in their fleet file → they follow stage `<env>-canary`, promoted before `<env>` |
+| one cluster's identity | CAAPH birth kit (`fleet/base/helmchartproxies.yaml`, cluster name via `valuesTemplate`) |
+| apps | `repos/apps/<app>/envs/<env>/values.yaml` (Kargo writes, until apps move to OpenChoreo), `clusters/<cluster>/values.yaml` for one cluster |
 
 Enable/disable anything file-driven by renaming `*.yaml` ⇄ `*.yaml.disabled` (test1, prod1, dev2, OpenChoreo, Istio ship disabled).
 
