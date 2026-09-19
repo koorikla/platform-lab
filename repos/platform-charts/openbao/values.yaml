@@ -16,6 +16,8 @@ openbao:
     dev:
       enabled: true
       devRootToken: ""            # empty -> random per start (chart default is the literal "root")
+    # chart default OnDelete suits manual unseal; dev mode re-seeds itself, so let config changes (postStart) roll
+    updateStrategyType: RollingUpdate
     # chart Service stays ClusterIP (8200 + 8201 cluster port); workers get only 8200 via templates/nodeport.yaml
     # Hub-side config, re-applied on every start (dev mode forgets it). Names must match templates/*.yaml.
     postStart:

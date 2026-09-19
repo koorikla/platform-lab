@@ -17,5 +17,6 @@ assert_yq "$o" 'select(.kind=="ClusterSecretStore") | .spec.provider.vault.serve
 assert_yq "$o" 'select(.kind=="ClusterSecretStore") | .spec.provider.vault.auth.kubernetes.role' hub-writer
 # no root token literal in git: dev mode generates one per start (kept in the pod's ~/.vault-token for postStart)
 assert_yq "$o" 'select(.kind=="StatefulSet") | .spec.template.spec.containers[0].env[] | select(.name=="VAULT_DEV_ROOT_TOKEN_ID") | (.value // "") | length' 0
+assert_yq "$o" 'select(.kind=="StatefulSet") | .spec.updateStrategy.type' RollingUpdate   # postStart edits must roll the pod
 # postStart seeds the roles the hub-writer store and the fleet-sync CronJob log in with
 assert_yq "$o" 'select(.kind=="StatefulSet") | .spec.template.spec.containers[0].lifecycle.postStart.exec.command[2] | [test("role/hub-writer"), test("role/fleet-sync")] | all' true
