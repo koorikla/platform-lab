@@ -806,7 +806,8 @@ until 2.8). Commit.
   per-cluster selfSigned `Issuer <name>-openchoreo-agent-selfsigned` (no shared ClusterIssuer) → CA
   `<name>-openchoreo-agent-ca` → client cert `<name>-openchoreo-agent-tls` (CN = name).
 - Pull model instead of the worker ClusterSecretStore: PushSecrets through `ClusterSecretStore openbao` write
-  `secret/clusters/<name>/openchoreo-agent` (tls.crt, tls.key, ca.crt) and `secret/clusters/<name>/openchoreo-gateway-ca`
+  `secret/clusters/<name>/openchoreo-agent` (tls.crt, tls.key; client cert 8760h, renewBefore 720h — the agent
+  loads it once, #14 restarts it on change) and `secret/clusters/<name>/openchoreo-gateway-ca`
   (ca.crt of upstream's `cluster-gateway-ca`, the CA of the gateway's server cert). openbao `hubWriter.namespaces` gains
   `openchoreo-control-plane`. #14 pulls them into `openchoreo-data-plane/cluster-agent-tls` + ConfigMap `cluster-gateway-ca`.
 - `ClusterDataPlane <name>`: `clientCA.secretKeyRef {namespace: openchoreo-control-plane, name: <name>-openchoreo-agent-ca,

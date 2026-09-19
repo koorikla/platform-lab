@@ -68,14 +68,18 @@ assert_yq "$o" "$tls | .spec.commonName" dev1
 assert_yq "$o" "$tls | .spec.usages | join(\",\")" "client auth"
 assert_yq "$o" "$tls | .spec.issuerRef.kind + \"/\" + .spec.issuerRef.name" Issuer/dev1-openchoreo-agent-ca
 assert_yq "$o" "$tls | .spec.isCA" null
+# upstream cluster-agent loads its cert once at startup (agent.go:83): renew rarely; #14 restarts it on Secret change
+assert_yq "$o" "$tls | .spec.duration + \"/\" + .spec.renewBefore" 8760h/720h
 
 # --- to OpenBao (hub-local PushSecrets); the worker pulls them (#14). Never the CA's secret, never the gateway's key.
+#     No ca.crt with the client cert: that is the agent's own CA, useless on the worker and easy to mistake for the
+#     gateway CA (--server-ca), which has its own path.
 ps='select(.kind=="PushSecret" and .metadata.namespace=="'$ns'")'
 assert_yq "$o" "[$ps | .spec.selector.secret.name] | sort | join(\",\")" cluster-gateway-ca,dev1-openchoreo-agent-tls
 assert_yq "$o" "[$ps | .spec.secretStoreRefs[] | .kind + \"/\" + .name] | unique | join(\",\")" ClusterSecretStore/openbao
 agent="$ps | select(.spec.selector.secret.name==\"dev1-openchoreo-agent-tls\")"
 assert_yq "$o" "$agent | [.spec.data[].match | .secretKey + \">\" + .remoteRef.remoteKey + \"#\" + .remoteRef.property] | sort | join(\",\")" \
-  "ca.crt>clusters/dev1/openchoreo-agent#ca.crt,tls.crt>clusters/dev1/openchoreo-agent#tls.crt,tls.key>clusters/dev1/openchoreo-agent#tls.key"
+  "tls.crt>clusters/dev1/openchoreo-agent#tls.crt,tls.key>clusters/dev1/openchoreo-agent#tls.key"
 gca="$ps | select(.spec.selector.secret.name==\"cluster-gateway-ca\")"
 assert_yq "$o" "$gca | [.spec.data[].match | .secretKey + \">\" + .remoteRef.remoteKey + \"#\" + .remoteRef.property] | join(\",\")" \
   "ca.crt>clusters/dev1/openchoreo-gateway-ca#ca.crt"

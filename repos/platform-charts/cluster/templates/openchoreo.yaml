@@ -39,7 +39,9 @@ metadata:
 spec:
   ca: { secretName: {{ $n }}-openchoreo-agent-ca }
 ---
-# 2. The agent's client cert (CN = planeID = cluster name, invariant 1)
+# 2. The agent's client cert (CN = planeID = cluster name, invariant 1). Upstream cluster-agent loads it once at startup
+#    (internal/cluster-agent/agent.go:83) and never reloads: a renewed cert takes effect only after a restart (#14
+#    restarts the agent when the pulled Secret changes). Long-lived so that happens once a year, not every 60 days.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -48,14 +50,17 @@ metadata:
 spec:
   secretName: {{ $n }}-openchoreo-agent-tls
   commonName: {{ $n }}
+  duration: 8760h
+  renewBefore: 720h
   usages: [client auth]
   privateKey: { algorithm: ECDSA, size: 256 }
   issuerRef: { name: {{ $n }}-openchoreo-agent-ca, kind: Issuer }
 ---
-# 3. Pull model (CLAUDE.md invariant 7): client cert -> secret/clusters/<name>/openchoreo-agent, the gateway's server CA
-#    (public, shared by all planes; copied per cluster so a worker reads only its own path) ->
+# 3. Pull model (CLAUDE.md invariant 7): client cert (tls.crt, tls.key) -> secret/clusters/<name>/openchoreo-agent, the
+#    gateway's server CA (public, shared by all planes; copied per cluster so a worker reads only its own path) ->
 #    secret/clusters/<name>/openchoreo-gateway-ca. The worker's ESO pulls both (#14: Secret cluster-agent-tls and
 #    ConfigMap cluster-gateway-ca in openchoreo-data-plane). Only the listed keys leave: never the gateway CA's key.
+#    The client Secret's ca.crt (this agent CA) stays here: the worker doesn't need it, and it is not the gateway CA.
 apiVersion: external-secrets.io/v1alpha1
 kind: PushSecret
 metadata:
@@ -71,7 +76,7 @@ spec:
     secret:
       name: {{ $n }}-openchoreo-agent-tls
   data:
-    {{- range list "tls.crt" "tls.key" "ca.crt" }}
+    {{- range list "tls.crt" "tls.key" }}
     - match: { secretKey: {{ . }}, remoteRef: { remoteKey: clusters/{{ $n }}/openchoreo-agent, property: {{ . }} } }
     {{- end }}
 ---
