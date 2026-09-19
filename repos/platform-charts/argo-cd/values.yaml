@@ -7,6 +7,20 @@ argo-cd:
     params:
       server.insecure: true
       controller.diff.server.side: true   # CRD defaults (ESO, CAPI) otherwise show as permanent drift
+    cm:
+      # Built-in PVC health + one exception: a Pending PVC that is a Helm hook (Argo: PreSync) counts as Healthy.
+      # Thunder's sqlite PVC is a pre-install hook, the hub StorageClass (local-path) binds on first consumer, and that
+      # consumer is a later hook (the setup Job): with Pending = Progressing the sync would wait forever.
+      # Core kinds take no "<group>_" prefix. Tested with `argocd admin settings resource-overrides health`.
+      resource.customizations.health.PersistentVolumeClaim: |
+        hs = {}
+        local phase = obj.status and obj.status.phase or "Pending"
+        if phase == "Bound" then hs.status = "Healthy"; hs.message = "Bound"; return hs end
+        if phase == "Lost" then hs.status = "Degraded"; hs.message = "Lost"; return hs end
+        if obj.metadata.annotations ~= nil and obj.metadata.annotations["helm.sh/hook"] ~= nil then
+          hs.status = "Healthy"; hs.message = "Pending until first consumer (Helm hook)"; return hs
+        end
+        hs.status = "Progressing"; hs.message = "Pending"; return hs
   server:
     service:
       type: NodePort
