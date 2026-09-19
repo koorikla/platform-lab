@@ -31,6 +31,16 @@
   ],
   "customManagers": [
     {
+      "description": "helm-unittest plugin that make test installs (hack/tests/unittest.sh); must install on helm 3 and helm 4",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^hack/tests/unittest\\.sh$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n[A-Z_]+=(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ]
+    },
+    {
       "description": "Birth-kit HelmChartProxy (CAAPH): the published worker-birth-kit version",
       "customType": "regex",
       "managerFilePatterns": [

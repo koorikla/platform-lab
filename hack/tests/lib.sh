@@ -21,17 +21,17 @@ assert_yq() {
 assert_fails() {
   if "$@" >/dev/null 2>&1; then fail "line ${BASH_LINENO[0]}: expected failure: $*"; fi
 }
+# deps <chart dir>: umbrella charts' charts/*.tgz are gitignored, so build them (fast once helm's cache is warm)
+deps() {
+  ! grep -q '^dependencies:' "$1/Chart.yaml" || helm dependency build "$1" >/dev/null || fail "helm dependency build $1"
+}
 # render <release> <chart> [helm args...] -> path of the rendered multi-doc file.
 # Assign it first (x=$(render ...)): `local x=$(...)` or an inline $(render) swallows its exit code.
 render() {
   local out a
   out=$(mktemp "$tmp/$1.XXXXXX")
-  # umbrella charts: charts/*.tgz are gitignored, so build them (fast once helm's cache is warm)
   for a in "${@:2}"; do
-    if [ -f "$a/Chart.yaml" ]; then
-      ! grep -q '^dependencies:' "$a/Chart.yaml" || helm dependency build "$a" >/dev/null || fail "helm dependency build $a"
-      break
-    fi
+    if [ -f "$a/Chart.yaml" ]; then deps "$a"; break; fi
   done
   # `|| fail` because errexit is off inside $(...)
   helm template "$@" > "$out" || fail "helm template $*"
