@@ -1,0 +1,30 @@
+# Source: openchoreo-data-plane/charts/openchoreo-data-plane/templates/gateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gateway-default
+  namespace: openchoreo-data-plane
+  labels:
+    helm.sh/chart: openchoreo-data-plane-1.2.5
+    app.kubernetes.io/name: openchoreo-data-plane
+    app.kubernetes.io/instance: openchoreo-data-plane
+    app.kubernetes.io/version: "v1.2.5"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: openchoreo
+    app.kubernetes.io/component: gateway
+spec:
+  gatewayClassName: kgateway
+  infrastructure:
+    labels:
+      openchoreo.dev/system-component: gateway
+    parametersRef:
+      group: gateway.kgateway.dev
+      kind: GatewayParameters
+      name: gateway-default
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All

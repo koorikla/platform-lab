@@ -1,0 +1,27 @@
+# Source: openchoreo-data-plane/charts/reloader/templates/rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  annotations:
+    meta.helm.sh/release-namespace: "openchoreo-data-plane"
+    meta.helm.sh/release-name: "openchoreo-data-plane"
+  labels:
+    app: reloader
+    release: "openchoreo-data-plane"
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/instance: "openchoreo-data-plane"
+    helm.sh/chart: "reloader-2.2.17"
+    chart: "reloader-2.2.17"
+    heritage: "Helm"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "v1.4.22"
+  name: reloader-role-binding
+  namespace: openchoreo-data-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: reloader-role
+subjects:
+  - kind: ServiceAccount
+    name: reloader
+    namespace: openchoreo-data-plane

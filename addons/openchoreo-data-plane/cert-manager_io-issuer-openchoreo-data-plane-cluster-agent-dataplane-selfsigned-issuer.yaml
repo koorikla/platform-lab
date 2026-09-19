@@ -1,0 +1,17 @@
+# Source: openchoreo-data-plane/charts/openchoreo-data-plane/templates/cluster-agent/issuer.yaml
+# Self-signed issuer for multi-cluster setups where each plane generates its own CA
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: cluster-agent-dataplane-selfsigned-issuer
+  namespace: openchoreo-data-plane
+  labels:
+    helm.sh/chart: openchoreo-data-plane-1.2.5
+    app.kubernetes.io/name: openchoreo-data-plane
+    app.kubernetes.io/instance: openchoreo-data-plane
+    app.kubernetes.io/version: "v1.2.5"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: openchoreo
+    app.kubernetes.io/component: cluster-agent
+spec:
+  selfSigned: {}

@@ -1,0 +1,95 @@
+# Source: openchoreo-data-plane/charts/openchoreo-data-plane/templates/cluster-agent/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-agent-dataplane
+  namespace: openchoreo-data-plane
+  labels:
+    helm.sh/chart: openchoreo-data-plane-1.2.5
+    app.kubernetes.io/name: openchoreo-data-plane
+    app.kubernetes.io/instance: openchoreo-data-plane
+    app.kubernetes.io/version: "v1.2.5"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: openchoreo
+    app.kubernetes.io/component: cluster-agent
+    app: cluster-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cluster-agent
+      app.kubernetes.io/component: cluster-agent
+      app.kubernetes.io/name: openchoreo-data-plane
+      app.kubernetes.io/instance: openchoreo-data-plane
+  template:
+    metadata:
+      labels:
+        app: cluster-agent
+        app.kubernetes.io/component: cluster-agent
+        app.kubernetes.io/name: openchoreo-data-plane
+        app.kubernetes.io/instance: openchoreo-data-plane
+      annotations:
+        configmap.reloader.stakater.com/reload: cluster-gateway-ca
+        secret.reloader.stakater.com/reload: cluster-agent-tls
+    spec:
+      serviceAccountName: cluster-agent-dataplane
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: agent
+        image: "ghcr.io/openchoreo/cluster-agent:v1.2.5"
+        imagePullPolicy: IfNotPresent
+        args:
+        - --server-url=wss://mgmt-lb:30843/ws
+        - --plane-type=dataplane
+        - --plane-id=$(PLANE_ID)
+        - --tls-enabled=true
+        - --client-cert=/certs/tls.crt
+        - --client-key=/certs/tls.key
+        - --server-ca=/ca-certs/ca.crt
+        - --heartbeat-interval=30s
+        - --reconnect-delay=5s
+        - --log-level=info
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: PLANE_ID
+          valueFrom:
+            secretKeyRef:
+              key: plane-id
+              name: cluster-agent-tls
+        resources:
+          limits:
+            cpu: 100m
+            memory: 256Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: client-certs
+          mountPath: /certs
+          readOnly: true
+        - name: server-ca
+          mountPath: /ca-certs
+          readOnly: true
+      volumes:
+      - name: client-certs
+        secret:
+          secretName: cluster-agent-tls
+      - name: server-ca
+        configMap:
+          name: cluster-gateway-ca

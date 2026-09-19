@@ -1,0 +1,118 @@
+# Source: openchoreo-data-plane/charts/reloader/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    meta.helm.sh/release-namespace: "openchoreo-data-plane"
+    meta.helm.sh/release-name: "openchoreo-data-plane"
+  labels:
+    app: reloader
+    release: "openchoreo-data-plane"
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/instance: "openchoreo-data-plane"
+    helm.sh/chart: "reloader-2.2.17"
+    chart: "reloader-2.2.17"
+    heritage: "Helm"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "v1.4.22"
+    group: com.stakater.platform
+    provider: stakater
+    version: v1.4.22
+  name: reloader
+  namespace: openchoreo-data-plane
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: reloader
+      release: "openchoreo-data-plane"
+  template:
+    metadata:
+      labels:
+        app: reloader
+        release: "openchoreo-data-plane"
+        app.kubernetes.io/name: reloader
+        app.kubernetes.io/instance: "openchoreo-data-plane"
+        helm.sh/chart: "reloader-2.2.17"
+        chart: "reloader-2.2.17"
+        heritage: "Helm"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "v1.4.22"
+        group: com.stakater.platform
+        provider: stakater
+        version: v1.4.22
+    spec:
+      containers:
+      - image: "ghcr.io/stakater/reloader:v1.4.22"
+        imagePullPolicy: IfNotPresent
+        name: reloader
+        env:
+        - name: GOMAXPROCS
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.cpu
+              divisor: '1'
+        - name: GOMEMLIMIT
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.memory
+              divisor: '1'
+        - name: KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+
+        - name: RELOADER_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+
+        - name: RELOADER_DEPLOYMENT_NAME
+          value: reloader
+        ports:
+        - name: http
+          containerPort: 9090
+        livenessProbe:
+          httpGet:
+            path: /live
+            port: http
+          timeoutSeconds: 5
+          failureThreshold: 5
+          periodSeconds: 10
+          successThreshold: 1
+          initialDelaySeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: http
+          timeoutSeconds: 5
+          failureThreshold: 5
+          periodSeconds: 10
+          successThreshold: 1
+          initialDelaySeconds: 10
+
+        securityContext:
+          readOnlyRootFilesystem: true
+        volumeMounts:
+          - mountPath: /tmp/
+            name: tmp-volume
+        args:
+          - "--log-level=info"
+          - "--reload-strategy=annotations"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 5m
+            memory: 32Mi
+      securityContext: 
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: reloader
+      volumes:
+        - emptyDir: {}
+          name: tmp-volume

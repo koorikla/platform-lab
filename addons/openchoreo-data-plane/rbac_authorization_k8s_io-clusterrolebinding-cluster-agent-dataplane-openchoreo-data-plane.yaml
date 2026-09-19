@@ -1,0 +1,21 @@
+# Source: openchoreo-data-plane/charts/openchoreo-data-plane/templates/cluster-agent/clusterrolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-agent-dataplane-openchoreo-data-plane
+  labels:
+    helm.sh/chart: openchoreo-data-plane-1.2.5
+    app.kubernetes.io/name: openchoreo-data-plane
+    app.kubernetes.io/instance: openchoreo-data-plane
+    app.kubernetes.io/version: "v1.2.5"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: openchoreo
+    app.kubernetes.io/component: cluster-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-agent-dataplane-openchoreo-data-plane
+subjects:
+- kind: ServiceAccount
+  name: cluster-agent-dataplane
+  namespace: openchoreo-data-plane
