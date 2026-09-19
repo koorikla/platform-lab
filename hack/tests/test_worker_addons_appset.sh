@@ -76,6 +76,14 @@ branch "$o" dev-canary
 o=$(app cert-manager platform.lab/role=worker,platform.lab/env=prod)
 branch "$o" prod
 assert_yq "$o" '.metadata.labels["platform.lab/env"]' prod
+# the app carries its ring (UI filters, Kargo verification #26, a future RollingSync — design doc addendum #27),
+# normalised by the same rule as the branch: only "canary" is canary, a missing or unknown ring is stable
+for r in canary:canary:dev-canary stable:stable:dev "":stable:dev canery:stable:dev; do
+  IFS=: read -r in want br <<<"$r"
+  o=$(app cert-manager "platform.lab/role=worker,platform.lab/env=dev${in:+,platform.lab/ring=$in}")
+  assert_yq "$o" '.metadata.labels["platform.lab/ring"]' "$want"
+  branch "$o" "$br"
+done
 # addon.yaml without namespace: the folder name, as kargo-pipeline defaults it for the render
 printf 'addon:\n  name: foo\n' > "$tmp/foo.yaml"
 o=$(app foo platform.lab/role=worker,platform.lab/env=dev "$tmp/foo.yaml")

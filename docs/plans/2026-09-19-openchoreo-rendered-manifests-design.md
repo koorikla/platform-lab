@@ -146,3 +146,47 @@ Replaces "hub PushSecret writes into the worker with the CAPI admin kubeconfig".
     values file (multi-source `$rendered`).
 - Consequences: `addon.yaml` has no `clusterIdentity`; the worker-addons appset has no `templatePatch`; sections above
   that mention kustomize patches are superseded by this addendum.
+
+## Addendum: progressive sync (RollingSync) on worker-addons — not enabled (coordinator decision 2026-09-19, #27)
+- **Decision:** `worker-addons` stays auto-sync (AllAtOnce). Generated apps carry `platform.lab/ring` (canary|stable,
+  same rule as the branch) so RollingSync, UI filters and Kargo verification (#26) can select on it. Kargo gates
+  promotion per addon; #26 adds health verification per stage.
+- **It would work through argocd-agent managed mode** (verified in source: Argo CD v3.5.3, argocd-agent v0.10.0):
+  - RollingSync reads only hub Application status and writes `automated.enabled=false` + `.operation`
+    (`applicationset/progressivesync/progressive_sync.go` 738 `disableAutomatedSync`, 745 `SyncDesiredApplications`,
+    775 `syncApplication`: prune = `automated.prune`, retry/syncOptions from `syncPolicy`); a manually set
+    `.operation` survives (`applicationset_controller.go:678`).
+  - The hub app-controller skips apps on `skip-reconcile` clusters (`controller/sharding/cache.go:66`).
+  - The principal forwards a nil→set `.operation` as a `SetOperation` event, like a UI sync
+    (`principal/callbacks.go:206,219`); the agent applies labels/spec/operation (`internal/manager/application/
+    application.go:308` `UpdateManagedApp`, `:695` `SetOperation`) and mirrors status and the cleared operation back
+    (`:573` `UpdateStatus`, `:594`). Worker Argo CD honours `automated.enabled: false` (`types.go:1531`).
+    Upstream lists weak progressive syncs as an *autonomous*-mode drawback only (`docs/concepts/agent-modes/autonomous.md:27`).
+- **Why not now:**
+  - RollingSync forces auto-sync off → no selfHeal on any worker addon (it only reacts to a revision/spec change,
+    `progressive_sync.go:411`; drift stays OutOfSync until a new commit or a manual sync).
+  - A step starts only when every earlier-step app is Healthy (`getAppsToSync`, `:525`), across all addons: one
+    Degraded dev app holds every test/prod sync, including a new cluster's addons.
+  - It orders by revisions each worker has already seen (its own ~3 min refresh), so it cannot order `dev-canary` →
+    `dev` moved seconds apart by Kargo autoPromote — the one ordering Kargo doesn't enforce today.
+  - Pending → Progressing compares the worker's `reconciledAt`/`operationState.startedAt` with the hub controller's
+    `lastTransitionTime` (`:468,470`): clock skew between hub and workers can stall or misjudge a step (same Docker
+    clock in the lab, not across real clouds).
+  - Beta feature (since v3.3); with a single worker (dev1) it buys nothing but costs selfHeal.
+- **To enable later** (e.g. many clusters per env): argo-cd umbrella `argo-cd.configs.params` add
+  `applicationsetcontroller.enable.progressive.syncs: true` (bump the chart; argo-helm's `checksum/cmd-params` restarts
+  the controller), then in `appset-worker-addons.yaml`:
+  ```yaml
+  strategy:
+    type: RollingSync          # no deletionOrder: preserveResourcesOnDeletion leaves nothing to order
+    rollingSync:
+      steps:                   # Kargo stage order
+        - matchExpressions: [{ key: platform.lab/env, operator: In, values: [dev] }, { key: platform.lab/ring, operator: In, values: [canary] }]
+        - matchExpressions: [{ key: platform.lab/env, operator: In, values: [dev] }, { key: platform.lab/ring, operator: In, values: [stable] }]
+        - matchExpressions: [{ key: platform.lab/env, operator: In, values: [test] }]
+        - matchExpressions: [{ key: platform.lab/env, operator: In, values: [prod] }]
+          maxUpdate: 25%       # prod apps (addon x cluster) at once; >0% never rounds to 0
+  ```
+  Escape hatch for a held step: `argocd app sync <addon>-<cluster>` on the hub. Kargo must then not sync these apps
+  itself (`argocd-update`). Back out = drop `strategy` (auto-sync returns). Test sketch (step order == Kargo stages,
+  every app in exactly one step): PR #51's first revision, commit fbe5e99.
