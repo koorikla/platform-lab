@@ -45,55 +45,25 @@ spec:
     - { secretKey: key, remoteRef: { key: {{ $tls }}, property: tls.key } }
     - { secretKey: ca,  remoteRef: { key: {{ $tls }}, property: ca.crt } }
 ---
-# 3. Push cert + CA into the workload cluster, authenticating with the kubeconfig CAPI generates (<name>-kubeconfig).
-apiVersion: external-secrets.io/v1
-kind: ClusterSecretStore
-metadata:
-  name: fleet-{{ $n }}-argocd
-spec:
-  provider:
-    kubernetes:
-      remoteNamespace: argocd            # created on the worker by the argocd HelmChartProxy
-      authRef:
-        name: {{ $n }}-kubeconfig
-        namespace: {{ .Values.fleetNamespace }}
-        key: value
----
-# Client cert as-is (keeps type kubernetes.io/tls, which the agent requires).
+# 3. Cert + CA to OpenBao (secret/clusters/<name>/argocd-agent). Pull model: the worker's ESO (CAAPH birth kit,
+#    fleet/base/helmchartproxies.yaml) reads only its own path and materialises argocd-agent-client-tls (tls) and
+#    argocd-agent-ca (ca.crt only). Nothing on the hub writes into the worker.
 apiVersion: external-secrets.io/v1alpha1
 kind: PushSecret
 metadata:
-  name: {{ $tls }}
+  name: {{ $n }}-argocd-agent
   namespace: {{ .Values.argocdNamespace }}
 spec:
-  refreshInterval: 5m           # also the retry cadence while the worker API is still coming up
+  refreshInterval: 1m           # OpenBao runs in dev mode (in-memory): refills it quickly after a restart
   updatePolicy: Replace
-  deletionPolicy: Delete
+  deletionPolicy: Delete        # cluster file removed -> its material leaves OpenBao too
   secretStoreRefs:
-    - { kind: ClusterSecretStore, name: fleet-{{ $n }}-argocd }
+    - { kind: ClusterSecretStore, name: {{ .Values.openbao.store }} }
   selector:
     secret:
       name: {{ $tls }}
   data:
-    - match: { remoteRef: { remoteKey: argocd-agent-client-tls } }
----
-# CA only, as Opaque: the agent parses every key of this secret as a certificate.
-apiVersion: external-secrets.io/v1alpha1
-kind: PushSecret
-metadata:
-  name: {{ $n }}-agent-ca
-  namespace: {{ .Values.argocdNamespace }}
-spec:
-  refreshInterval: 5m           # also the retry cadence while the worker API is still coming up
-  updatePolicy: Replace
-  deletionPolicy: Delete
-  secretStoreRefs:
-    - { kind: ClusterSecretStore, name: fleet-{{ $n }}-argocd }
-  selector:
-    secret:
-      name: {{ $tls }}
-  template:
-    type: Opaque
-  data:
-    - match: { secretKey: ca.crt, remoteRef: { remoteKey: argocd-agent-ca, property: ca.crt } }
+    {{- range list "tls.crt" "tls.key" "ca.crt" }}
+    - match: { secretKey: {{ . }}, remoteRef: { remoteKey: clusters/{{ $n }}/argocd-agent, property: {{ . }} } }
+    {{- end }}
 {{- end }}

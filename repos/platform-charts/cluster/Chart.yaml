@@ -1,5 +1,5 @@
 apiVersion: v2
 name: cluster
-description: One workload cluster = CAPI topology Cluster + its Argo CD identity (agent cert, labelled cluster secret, cert push)
+description: One workload cluster = CAPI topology Cluster + its Argo CD identity (agent cert, labelled cluster secret, cert -> OpenBao)
 type: application
 version: 0.1.0

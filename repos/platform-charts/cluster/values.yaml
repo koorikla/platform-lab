@@ -24,6 +24,9 @@ network:                       # k3s defaults; the k3s provider does not derive 
 
 resourceProxy: argocd-agent-resource-proxy:9090
 
+openbao:
+  store: openbao                # hub ClusterSecretStore (platform-charts/openbao); workers pull secret/clusters/<name>/*
+
 openchoreo:
   enabled: false               # Phase 2
   namespace: default
