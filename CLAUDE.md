@@ -74,44 +74,10 @@ upgrade) until ESO CRDs/webhook exist: ~40 revisions within a minute at birth, h
 - OpenBao is in-memory (dev mode): a pod restart empties it; postStart, fleet-sync (≤2 min) and PushSecrets (1 min)
   refill it. Workers keep their already-synced secrets meanwhile.
 
-## Backlog (ordered)
-1. Harden the boot: `make up` should be re-runnable after partial failure (bootstrap cluster already has `mgmt`;
-   hub exists but Argo not yet installed); `make down` tested only by hand.
-2. Enable dev2, prove env-wide vs single-cluster pinning (`rollout.clusters.dev2`). Then enable test1/prod1.
-3. Kargo: git creds via ESO; second pipeline promoting `rollout.chartRevision` of worker addons (Warehouse on git tags
-   of platform-charts); prod stage via `git-open-pr` + `git-wait-for-pr`; verification (AnalysisTemplate) per stage.
-   Rendered manifests follow-ups:
-   - disabling an addon leaves `rendered/<branch>:addons/<x>/` behind → until Task 1.5 automates it,
-     `git rm -r addons/<x>` on each `rendered/*` branch by hand;
-   - tooling-only changes (`kargo/shared/`) make no Freight → re-promote by hand to re-render;
-   - one push changing an Application's spec *and* its content can race: the auto-sync captures the old spec and
-     retries it until the limit → `argocd app terminate-op <app>`.
-4. Publish umbrella charts to OCI (ghcr) with CI; switch appsets from git-path to `chart:` + semver, and point
-   HelmChartProxies at the umbrellas. Per-env HelmChartProxies so agent upgrades are staged too.
-5. OpenChoreo (phase 2) — enable `kgateway`, `openchoreo-control-plane` (hub), `kgateway`, `openchoreo-data-plane`
-   (workers), `openchoreo.enabled` in cluster files. Missing pieces:
-   - Gateway API CRDs v1.5.1 (no chart upstream → small CRD chart or kustomize app), ThunderID, OpenChoreo seeds in
-     OpenBao (hub, `addons/management/openbao`) + `ClusterSecretStore/default`, hostnames/TLS for the lab, default resources (Project, Environments, DeploymentPipeline).
-   - **OpenChoreo trust, declaratively**: upstream flow extracts the agent's self-signed CA by hand. Target design:
-     issue `cluster-agent-tls` on the hub from a dedicated CA, PushSecret it to OpenBao
-     (`secret/clusters/<name>/…`) and pull it into `openchoreo-data-plane` with a birth-kit ExternalSecret
-     (`clusterAgent.tls.generateCerts=false`), and reference that CA in `DataPlane.spec.clusterAgent.clientCA`
-     (check whether the CRD supports `secretRef`; see upstream "mTLS with External CA" guide). The gateway server CA
-     must land on the worker as ConfigMap `cluster-gateway-ca` (ESO generic target / `target.manifest: ConfigMap`).
-   - per-cluster `clusterAgent.planeId` (= cluster name): add an appset `helm.parameters` hook or per-cluster values.
-   - Decide ownership between OpenChoreo deployment pipelines and Kargo for app promotion.
-   - Requires Kubernetes >= 1.34 (k3s version in fleet files already is).
-6. Istio ambient on hub (chart ready, disabled), then multi-cluster ambient east-west if wanted.
-7. Providers: `k3s-openstack` ClusterClass (CAPO + k3s), EKS ClusterClass (CAPA managed control plane, no k3s);
-   only `clusterClass`, `provider`, `variables` change in a cluster file. (Hub pivot/self-hosting: done.)
-8. Hardening: Kargo admin secret, principal `jwt.allowGenerate`, AppProject `sourceRepos`, RBAC, NetworkPolicies,
-   AppSet progressive sync (RollingSync by `platform.lab/env`) as a guard rail besides Kargo. OpenBao prod mode (raft
-   PVC, auto-unseal, TLS on :30820 or a gateway); the `fleet-sync` OpenBao policy can't constrain the body of
-   `sys/policies/acl/cluster-*` (a compromised CronJob could write a broad policy) → a controller with a fixed template.
-
-9. Team template (see docs/plans/ addendum): CI (lint/test/kubeconform), CODEOWNERS, CONTRIBUTING recipes, Renovate,
-   provider extension points; **Backstage template "new Helm chart repo"** (pre-commit helm lint + conventional
-   commits, semver releases, GitLab CI pushing to Artifactory).
+## Backlog
+Lives in **GitHub issues** (koorikla/platform-lab, labels `status:*`, `phase:*`, `area:*`, `needs-lab`). Work them with
+the project skill `.claude/skills/platform-lab-issue` (worktree branch → TDD → PR → coordinator review/merge → live
+verification under `hack/lab-lock.sh`). Design/plan background: `docs/plans/`.
 
 ## Conventions
 Minimal readable YAML; comments explain *why*. Label prefix `platform.lab/`. Namespaces: `argocd`, `fleet`, `kargo`.
