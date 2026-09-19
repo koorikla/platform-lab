@@ -3,6 +3,7 @@
 # addons/workers/<a>/addon.yaml is not enabled on main, touches nothing else, dry run by default, idempotent.
 source "$(dirname "$0")/lib.sh"
 prune=$PWD/hack/rendered-prune.sh
+if command -v shellcheck >/dev/null; then shellcheck "$prune" || fail "shellcheck rendered-prune.sh"; fi
 remote=$tmp/remote.git
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid
 git init -q --bare "$remote"

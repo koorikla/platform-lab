@@ -43,7 +43,7 @@ for b in $branches; do
     stale=$(awk -F'\t' -v on="$enabled" '$1 ~ / tree / && index(on, " " $2 " ") == 0 {print $2}' <<<"$entries" |
       paste -sd' ' -)
     if [ -z "$stale" ]; then echo "$b: nothing to prune"; break; fi
-    echo "$b: remove $(printf 'addons/%s ' $stale | sed 's/ $//')"
+    echo "$b: remove addons/${stale// / addons/}"
     $apply || break
     keep=$(awk -F'\t' -v drop=" $stale " 'index(drop, " " $2 " ") == 0' <<<"$entries")
     # an empty addons/ would vanish from the branch; the .keep from hack/init-rendered-branches.sh holds it
