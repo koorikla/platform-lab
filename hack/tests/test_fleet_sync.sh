@@ -75,6 +75,9 @@ run 'dev1 172.23.0.3 6443\ndev8 172.23.0.8 6443\ndev6 172.23.0.6 6443\n'
 [ "$st" = 1 ] || fail "one failing cluster must exit 1, got $st: $out"
 has '^failed dev8' && has '^ensured k8s-dev1' && has '^ensured k8s-dev6' && has '^removed k8s-old' && has '^removed policy cluster-old'
 grep -qx 'POST sys/auth/k8s-dev6' "$tmp/calls" || fail "new cluster dev6: mount not enabled"
+# existing mount: config (CA + endpoint) is still rewritten every run - a reborn cluster's new CA lands within one run
+grep -qx 'POST auth/k8s-dev1/config' "$tmp/calls" || fail "existing k8s-dev1: config not rewritten"
+grep -q 'kubernetes_ca_cert":"FAKE CA".*auth/k8s-dev1/config$' "$tmp/argv" || fail "k8s-dev1 config doesn't carry the projected CA"
 grep -qx 'POST auth/token/revoke-self' "$tmp/calls" || fail "token not revoked at exit"
 ! grep -q 's.faketoken\|fake-jwt' "$tmp/argv" || fail "token/JWT on curl's argv"
 grep -q -- '-H @' "$tmp/argv" || fail "token header not passed as a file"

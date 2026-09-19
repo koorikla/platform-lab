@@ -19,5 +19,10 @@ assert_yq "$w" "$es | .metadata.namespace" openbao
 assert_yq "$w" "$es | .spec.secretStoreRef.kind + \"/\" + .spec.secretStoreRef.name" SecretStore/fleet-ca
 assert_yq "$w" "$es | [.spec.data[].secretKey] | join(\",\")" ca.crt
 assert_yq "$w" "$es | .spec.data[0].remoteRef.key + \"#\" + .spec.data[0].remoteRef.property" dev1-ca#tls.crt
+# rebirth (#68): CAPI mints a new <name>-ca; fleet-sync (every 2m) copies whatever this projection holds into
+# auth/k8s-<name>, so it must follow the source within a minute. Periodic is the only ESO v2.10 policy that re-reads
+# the source (OnChange = ExternalSecret spec changes only, CreatedOnce = never).
+assert_yq "$w" "$es | .spec.refreshInterval" 1m
+assert_yq "$w" "$es | .spec.refreshPolicy // \"Periodic\"" Periodic
 h=$(render mgmt $charts/cluster -f $config/fleet/clusters/mgmt/mgmt.yaml)
 assert_yq "$h" '[select(.kind=="PushSecret" or .kind=="Role" or .kind=="RoleBinding")] | length' 0
