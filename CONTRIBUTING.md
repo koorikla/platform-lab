@@ -98,9 +98,10 @@ with `repos/`.
 2. `make lint && make test`. Merge; this is `needs-lab`: hold the lab lock when it merges.
 3. What happens: the `fleet-clusters` ApplicationSet renders the `cluster` chart into `fleet` on the hub: CAPI
    `Cluster`, agent client cert, labelled Argo CD cluster secret, and a PushSecret of the cert to OpenBao. CAPI builds
-   the cluster; the CAAPH birth kit (`fleet/base/helmchartproxies.yaml`) installs argo-cd, argocd-agent, ESO and the
-   OpenBao pull wiring; the agent connects; `worker-addons` and `workloads` select the cluster by its labels. Watch
-   with `make status`; get a kubeconfig with `make kubeconfig CLUSTER=<name> > <name>.kubeconfig`.
+   the cluster; the CAAPH birth kit (chart `worker-birth-kit`, `fleet/base/helmchartproxies.yaml`) installs argo-cd,
+   argocd-agent, ESO and the OpenBao pull wiring; the agent connects; `worker-addons` and `workloads` select the
+   cluster by its labels. Watch with `make status`; get a kubeconfig with
+   `make kubeconfig CLUSTER=<name> > <name>.kubeconfig`.
 4. Budget: each CAPD cluster runs as containers on the same Docker VM (memory and the shared disk).
 
 **Renaming a cluster file to `.yaml.disabled` deletes only `Application cluster-<name>`.** `fleet-clusters` sets
@@ -257,9 +258,10 @@ version (e.g. `infrastructure.openstack.version`), also add a Renovate regex man
   writes it to OpenBao through `ClusterSecretStore openbao` at `secret/clusters/<name>/<item>`; only namespaces in the
   openbao chart's `hubWriter.namespaces` may push. The worker's ESO reads it through `ClusterSecretStore hub-openbao`
   (birth kit), which authenticates as that worker (`auth/k8s-<name>`, maintained by the `openbao-fleet-sync` CronJob)
-  and can read only its own path. Widen the store's `conditions.namespaces` for a new consumer namespace. Nothing on
-  the hub writes into a worker with the CAPI admin kubeconfig. Example: `repos/platform-charts/cluster/templates/argocd-identity.yaml`
-  (push) and `worker-secret-bootstrap` in `fleet/base/helmchartproxies.yaml` (pull).
+  and can read only its own path. Widen the store's namespaces (birth kit value `hubOpenbao.namespaces`) for a new
+  consumer namespace. Nothing on the hub writes into a worker with the CAPI admin kubeconfig. Example:
+  `repos/platform-charts/cluster/templates/argocd-identity.yaml` (push) and
+  `repos/platform-charts/worker-birth-kit/templates/` (pull).
 - OpenBao runs in dev mode (in-memory): anything in it must be re-creatable from the hub (PushSecrets refill it
   within minutes). Don't hand-write secrets into it and expect them to survive a restart. Production shape: #30.
   OpenChoreo's secrets and `ClusterSecretStore default`: #9.
@@ -287,7 +289,7 @@ version (e.g. `infrastructure.openstack.version`), also add a Renovate regex man
 It covers:
 - Chart dependencies in every `Chart.yaml` (including OCI) and image pins in `values.yaml` files, with a patch
   bump of the chart's own `version`.
-- Birth-kit HelmChartProxies and the agent image inside their `valuesTemplate`.
+- The birth-kit HelmChartProxy's `worker-birth-kit` version (proposed once charts.yaml publishes a new one).
 - CAPI providers in `capi-providers/values.yaml`, grouped with the capi-operator chart; core/CAPD held below 1.13.
 - The workers' Kubernetes version as one group: fleet `kubernetesVersion` (k3s), `render-addon` `kubeVersion`,
   `kindImageVersion`/`kindest/node`, and `alpine/k8s`. Patch updates open a PR; minor/major wait for approval on the

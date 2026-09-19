@@ -31,7 +31,7 @@
   ],
   "customManagers": [
     {
-      "description": "Birth-kit HelmChartProxies (CAAPH) that install from OCI registries",
+      "description": "Birth-kit HelmChartProxy (CAAPH): the published worker-birth-kit version",
       "customType": "regex",
       "managerFilePatterns": [
         "/^repos/platform-config/fleet/base/helmchartproxies\\.yaml$/"
@@ -41,28 +41,6 @@
       ],
       "datasourceTemplate": "docker",
       "packageNameTemplate": "{{{registry}}}/{{{depName}}}"
-    },
-    {
-      "description": "Birth-kit HelmChartProxies (CAAPH) that install from https Helm repositories",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/^repos/platform-config/fleet/base/helmchartproxies\\.yaml$/"
-      ],
-      "matchStrings": [
-        "repoURL: (?<registryUrl>https://\\S+)[^\\n]*\\n\\s*chartName: (?<depName>\\S+)[^\\n]*\\n\\s*version: (?<currentValue>[^\\s#]+)"
-      ],
-      "datasourceTemplate": "helm"
-    },
-    {
-      "description": "Images pinned inside HelmChartProxy valuesTemplate strings (helm-values can't see into them)",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/^repos/platform-config/fleet/base/helmchartproxies\\.yaml$/"
-      ],
-      "matchStrings": [
-        "repository: (?<depName>\\S+)[^\\n]*\\n\\s*tag: (?<currentValue>[^\\s#]+)"
-      ],
-      "datasourceTemplate": "docker"
     },
     {
       "description": "k3s version of every cluster (fleet files, also *.yaml.disabled) and the cluster chart default",
@@ -184,7 +162,7 @@
       ]
     },
     {
-      "description": "Hub umbrella chart and the worker birth-kit HelmChartProxy move together",
+      "description": "Hub umbrella chart and the worker birth kit (platform-charts/worker-birth-kit) move together",
       "groupName": "argo-cd",
       "matchDepNames": [
         "argo-cd"
@@ -203,6 +181,15 @@
       ],
       "addLabels": [
         "area:argocd"
+      ]
+    },
+    {
+      "description": "The birth-kit HelmChartProxy runs the chart's current version (hack/tests/test_birth_kit.sh)",
+      "matchFileNames": [
+        "repos/platform-charts/worker-birth-kit/**"
+      ],
+      "prBodyNotes": [
+        "Set `version` of HelmChartProxy `worker-birth-kit` (`fleet/base/helmchartproxies.yaml`) to the new chart version; merging rolls every worker (verify under the lab lock)."
       ]
     },
     {
@@ -278,7 +265,7 @@
       ]
     },
     {
-      "description": "Hub umbrella chart and the worker birth-kit HelmChartProxy stay equal (hack/tests/test_birth_kit.sh)",
+      "description": "Hub umbrella chart and the worker birth kit stay equal (hack/tests/test_birth_kit.sh)",
       "groupName": "external-secrets",
       "matchDepNames": [
         "external-secrets"
@@ -342,15 +329,6 @@
       ],
       "addLabels": [
         "area:networking"
-      ]
-    },
-    {
-      "description": "Birth-kit plain-manifest chart (bedag/raw) until #2 replaces it",
-      "matchDepNames": [
-        "raw"
-      ],
-      "addLabels": [
-        "area:capi"
       ]
     },
     {

@@ -1,200 +1,32 @@
 # What CAPI (CAAPH) injects into every worker at birth: the minimum needed for the cluster to phone home, plus
-# everything bound to the cluster's identity (valuesTemplate renders {{ .Cluster.metadata.name }} per cluster).
-#   worker-argocd, worker-argocd-agent   app-controller/repo-server/redis + the agent
-#   worker-external-secrets              ESO (pull model: the worker fetches its own secrets from the hub's OpenBao)
-#   worker-secret-bootstrap              store hub-openbao + the ExternalSecrets for the agent identity
-# The HCPs install independently and in any order; each converges by retry (CAAPH re-runs a failed install as an
-# upgrade; ESO keeps retrying ExternalSecrets; the agent restarts until its secrets exist).
-# Everything after that is delivered by Argo CD through the agent (worker-addons ApplicationSet).
-# CAAPH only installs from Helm/OCI repos, not git paths -> upstream charts are referenced directly here.
-# TODO: publish umbrella charts to OCI and point these at them; split per env to stage agent upgrades.
+# everything bound to the cluster's identity. One umbrella chart, one release per worker (platform-charts/worker-birth-kit):
+#   argo-cd worker profile      app-controller/repo-server/redis
+#   argocd-agent                dials the hub principal (mgmt-lb:30443) with the identity ESO pulls
+#   external-secrets            pull model: the worker fetches its own secrets from the hub's OpenBao
+#   store hub-openbao + agent ExternalSecrets + coredns-custom
+# valuesTemplate renders the only per-cluster value, the cluster name. Everything after that is delivered by Argo CD
+# through the agent (worker-addons ApplicationSet).
+# CAAPH only installs from Helm/OCI registries, not git paths -> the chart published by charts.yaml. A kit change
+# bumps both versions in one PR; CAAPH retries until charts.yaml has published it (a minute or two after merge).
+# TODO: split per env to stage birth-kit upgrades.
 apiVersion: addons.cluster.x-k8s.io/v1alpha1
 kind: HelmChartProxy
 metadata:
-  name: worker-argocd
+  name: worker-birth-kit
   namespace: fleet
 spec:
   clusterSelector:
     matchLabels:
       platform.lab/role: worker
-  repoURL: oci://ghcr.io/argoproj/argo-helm
-  chartName: argo-cd
-  version: 10.9.2
-  releaseName: argocd                  # -> argocd-redis / argocd-repo-server, which the agent expects
-  namespace: argocd
+  repoURL: oci://ghcr.io/koorikla/platform-charts
+  chartName: worker-birth-kit
+  version: 0.1.0                       # = repos/platform-charts/worker-birth-kit/Chart.yaml (hack/tests/test_birth_kit.sh)
+  releaseName: worker-birth-kit        # = the owner written into the chart's crds/ (hack/birth-kit-crds.sh)
+  namespace: argocd                    # argo-cd + agent; ESO goes to external-secrets (the chart creates that one)
   options:
-    wait: true
+    wait: true                         # Ready = agent up, i.e. ESO pulled its identity from OpenBao (~90 s at birth)
     timeout: 10m
     install:
       createNamespace: true
   valuesTemplate: |
-    # Workload-cluster profile: application-controller + repo-server + redis only.
-    fullnameOverride: argocd
-    dex:
-      enabled: false
-    notifications:
-      enabled: false
-    server:
-      replicas: 0                      # chart has no server.enabled switch (same as upstream agent-managed profile)
-    applicationSet:
-      replicas: 0                      # managed mode: ApplicationSets live on the hub
-    # default NetworkPolicy only admits Argo's own components to redis; the agent needs it too
-    extraObjects:
-      - apiVersion: networking.k8s.io/v1
-        kind: NetworkPolicy
-        metadata: { name: argocd-redis-allow-agent }
-        spec:
-          podSelector: { matchLabels: { app.kubernetes.io/name: argocd-redis } }
-          policyTypes: [Ingress]
-          ingress:
-            - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: argocd-agent-agent } } }]
-              ports: [{ port: 6379, protocol: TCP }]
----
-apiVersion: addons.cluster.x-k8s.io/v1alpha1
-kind: HelmChartProxy
-metadata:
-  name: worker-argocd-agent
-  namespace: fleet
-spec:
-  clusterSelector:
-    matchLabels:
-      platform.lab/role: worker
-  repoURL: oci://ghcr.io/argoproj-labs/argocd-agent
-  chartName: argocd-agent-agent
-  version: 0.2.7                       # identical to the v0.10.0 chart; image pinned below
-  releaseName: argocd-agent
-  namespace: argocd
-  options:
-    timeout: 10m
-    install:
-      createNamespace: true
-  valuesTemplate: |
-    image:                             # chart default (ghcr, v0.8.1 tag) does not exist; releases live on quay
-      repository: quay.io/argoprojlabs/argocd-agent
-      tag: v0.10.0
-    agentMode: managed
-    auth: "mtls:any"                   # identity = CN of argocd-agent-client-tls (= {{ .Cluster.metadata.name }}, pulled from OpenBao)
-    server: mgmt-lb                    # hub CAPD LB (fleet/base/hub-lb.yaml); keep in sync with hub.host / hub.principalNodePort of argocd-agent-principal
-    serverPort: "30443"
-    destinationBasedMapping: true
-    createNamespace: true
-    allowedNamespaces: "*"
-    labelSelector: "argocd-agent=true"
-    tlsSecretName: argocd-agent-client-tls
-    tlsRootCASecretName: argocd-agent-ca
-    redisAddress: argocd-redis:6379
-    heartbeatInterval: 30s              # < hub LB haproxy idle timeout (50s), keeps the gRPC stream open
----
-apiVersion: addons.cluster.x-k8s.io/v1alpha1
-kind: HelmChartProxy
-metadata:
-  name: worker-external-secrets
-  namespace: fleet
-spec:
-  clusterSelector:
-    matchLabels:
-      platform.lab/role: worker
-  repoURL: oci://ghcr.io/external-secrets/charts
-  chartName: external-secrets
-  version: 2.10.0                      # = hub (platform-charts/external-secrets); hack/tests/test_birth_kit.sh checks it
-  releaseName: external-secrets        # -> SA external-secrets/external-secrets, bound in OpenBao role eso (fleet-sync)
-  namespace: external-secrets
-  options:
-    wait: true
-    timeout: 10m
-    install:
-      createNamespace: true
-  valuesTemplate: |
-    installCRDs: true
----
-# Per-cluster OpenBao pull wiring. Lives in the birth kit (not worker-addons) because it carries the cluster's
-# identity and must exist before the agent can connect. OpenBao side: auth/k8s-<name> + role eso + policy
-# cluster-<name> (fleet-sync CronJob, platform-charts/openbao); data: secret/clusters/<name>/* (hub PushSecrets).
-apiVersion: addons.cluster.x-k8s.io/v1alpha1
-kind: HelmChartProxy
-metadata:
-  name: worker-secret-bootstrap
-  namespace: fleet
-spec:
-  clusterSelector:
-    matchLabels:
-      platform.lab/role: worker
-  repoURL: https://bedag.github.io/helm-charts/
-  chartName: raw                       # plain manifests; CAAPH renders valuesTemplate first, so values are concrete
-  version: 2.0.2
-  releaseName: secret-bootstrap
-  namespace: argocd                    # createNamespace: the ExternalSecrets land here whichever HCP comes first
-  options:
-    timeout: 5m
-    install:
-      createNamespace: true
-  valuesTemplate: |
-    resources:
-      - apiVersion: external-secrets.io/v1
-        kind: ClusterSecretStore
-        metadata:
-          name: hub-openbao
-        spec:
-          conditions:
-            - namespaces: [argocd]     # widen per consumer (e.g. openchoreo-data-plane) when it needs a secret
-          provider:
-            vault:
-              server: http://mgmt-lb:30820    # hub CAPD LB (fleet/base/hub-lb.yaml); lab: plain HTTP, see platform-charts/openbao
-              path: secret
-              version: v2
-              auth:
-                kubernetes:
-                  mountPath: k8s-{{ .Cluster.metadata.name }}
-                  role: eso
-                  serviceAccountRef: { name: external-secrets, namespace: external-secrets }
-      # OpenBao reviews the ESO token with that same token (disable_local_ca_jwt): it must be allowed to TokenReview
-      - apiVersion: rbac.authorization.k8s.io/v1
-        kind: ClusterRoleBinding
-        metadata:
-          name: external-secrets-openbao-tokenreview
-        roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "system:auth-delegator" }
-        subjects:
-          - { kind: ServiceAccount, name: external-secrets, namespace: external-secrets }
-      - apiVersion: external-secrets.io/v1
-        kind: ExternalSecret
-        metadata:
-          name: argocd-agent-client-tls
-          namespace: argocd
-        spec:
-          refreshInterval: 5m
-          secretStoreRef: { kind: ClusterSecretStore, name: hub-openbao }
-          target:
-            name: argocd-agent-client-tls
-            template:
-              type: kubernetes.io/tls         # the agent requires it; no template.data -> keys pass through
-          data:
-            - { secretKey: tls.crt, remoteRef: { key: clusters/{{ .Cluster.metadata.name }}/argocd-agent, property: tls.crt } }
-            - { secretKey: tls.key, remoteRef: { key: clusters/{{ .Cluster.metadata.name }}/argocd-agent, property: tls.key } }
-      # CA only, as Opaque: the agent parses every key of this secret as a certificate
-      - apiVersion: external-secrets.io/v1
-        kind: ExternalSecret
-        metadata:
-          name: argocd-agent-ca
-          namespace: argocd
-        spec:
-          refreshInterval: 5m
-          secretStoreRef: { kind: ClusterSecretStore, name: hub-openbao }
-          target:
-            name: argocd-agent-ca
-          data:
-            - { secretKey: ca.crt, remoteRef: { key: clusters/{{ .Cluster.metadata.name }}/argocd-agent, property: ca.crt } }
-      # same as fleet/base/hub-coredns.yaml (worker repo-servers clone from GitHub too); the test keeps them equal
-      - apiVersion: v1
-        kind: ConfigMap
-        metadata:
-          name: coredns-custom
-          namespace: kube-system
-        data:
-          external.server: |
-            github.com github.io githubusercontent.com ghcr.io quay.io docker.io docker.com k8s.io googleapis.com pkg.dev kgateway.dev {
-              errors
-              cache 30
-              forward . 1.1.1.1 8.8.8.8 /etc/resolv.conf {
-                policy sequential   # public resolvers first; Docker's resolver only when both fail
-              }
-            }
+    clusterName: {{ .Cluster.metadata.name }}

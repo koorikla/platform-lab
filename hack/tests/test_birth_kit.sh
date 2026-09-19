@@ -1,13 +1,30 @@
 #!/usr/bin/env bash
 # CAAPH birth kit = umbrella chart platform-charts/worker-birth-kit (argo-cd worker profile + argocd-agent + ESO + the
 # per-cluster OpenBao pull wiring), one Helm release per worker. CAAPH renders the HelmChartProxy valuesTemplate
-# (clusterName: {{ .Cluster.metadata.name }}) per cluster; offline we pass dev1.
+# (clusterName: {{ .Cluster.metadata.name }}) per cluster; offline we pass dev1. Object-by-object equivalence with the
+# four HelmChartProxies it replaced was checked in #52 (git history of this file).
 source "$(dirname "$0")/lib.sh"
 kit=$charts/worker-birth-kit
-release=worker-birth-kit   # the release name the crds/ ownership annotations are written for (see crds/ header)
+hcps=$config/fleet/base/helmchartproxies.yaml
 dep() { yq ".dependencies[] | select(.name==\"$2\") | .version" "$1/Chart.yaml"; }
 
-o=$(render $release $kit -n argocd --set clusterName=dev1)
+# --- the one HelmChartProxy: the published kit at the chart's current version, identity from the CAPI Cluster
+assert_yq "$hcps" '[select(.kind=="HelmChartProxy") | .metadata.name] | join(",")' worker-birth-kit
+h='select(.kind=="HelmChartProxy")'
+assert_yq "$hcps" "$h | .spec.clusterSelector.matchLabels[\"platform.lab/role\"]" worker
+assert_yq "$hcps" "$h | .spec.repoURL + \"/\" + .spec.chartName" oci://ghcr.io/koorikla/platform-charts/worker-birth-kit
+assert_yq "$hcps" "$h | .spec.version" "$(yq '.version' $kit/Chart.yaml)"
+assert_yq "$hcps" "$h | .spec.valuesTemplate" 'clusterName: {{ .Cluster.metadata.name }}'
+release=$(yq "$h | .spec.releaseName" "$hcps")
+ns=$(yq "$h | .spec.namespace" "$hcps")
+[ "$ns" = argocd ] || fail "HCP namespace $ns: the agent and argo-cd live in argocd"
+# The first install relies on Helm's default path: crds/ installed first, then templates adopted by ownership metadata.
+# skipCRDs would drop crds/ ("no matches for kind"); includeCRDs / takeOwnership change how CRDs and existing objects
+# are handled -> none of them, until re-verified.
+assert_yq "$hcps" "$h | .spec.options | [.skipCRDs, .install.includeCRDs, .takeOwnership] | map(select(. != null)) | length" 0
+# CAAPH renders valuesTemplate per cluster; offline: substitute dev1 the same way
+yq "$h | .spec.valuesTemplate" "$hcps" | sed 's/{{ \.Cluster\.metadata\.name }}/dev1/g' > "$tmp/values.yaml"
+o=$(render "$release" $kit -n "$ns" -f "$tmp/values.yaml")
 
 # --- same versions as the hub (Renovate groups them)
 [ "$(dep $kit external-secrets)" = "$(dep $charts/external-secrets external-secrets)" ] || fail "ESO: birth kit != hub"
@@ -21,12 +38,12 @@ fails_with() {
   if out=$("${@:2}" 2>&1); then fail "line ${BASH_LINENO[0]}: expected failure: ${*:2}"; fi
   grep -qF -- "$1" <<<"$out" || fail "line ${BASH_LINENO[0]}: want error '$1', got: $out"
 }
-fails_with 'clusterName is required' helm template $release $kit -n argocd
-fails_with 'clusterName "Dev_1" is not a DNS-1123 label' helm template $release $kit -n argocd --set clusterName=Dev_1
+fails_with 'clusterName is required' helm template "$release" $kit -n "$ns"
+fails_with 'clusterName "Dev_1" is not a DNS-1123 label' helm template "$release" $kit -n "$ns" --set clusterName=Dev_1
 long=$(printf 'a%.0s' {1..64})
-fails_with "clusterName \"$long\" is not a DNS-1123 label" helm template $release $kit -n argocd --set clusterName="$long"
+fails_with "clusterName \"$long\" is not a DNS-1123 label" helm template "$release" $kit -n "$ns" --set clusterName="$long"
 fails_with 'external-secrets.namespaceOverride is required' \
-  helm template $release $kit -n argocd --set clusterName=dev1 --set external-secrets.namespaceOverride=
+  helm template "$release" $kit -n "$ns" --set clusterName=dev1 --set external-secrets.namespaceOverride=
 
 # --- OpenBao pull wiring (store + TokenReview binding + agent identity)
 css='select(.kind=="ClusterSecretStore")'
@@ -95,7 +112,7 @@ assert_yq "$crds" '[select(.kind != null) | .metadata.name] | sort | join(",")' 
   clustersecretstores.external-secrets.io,externalsecrets.external-secrets.io
 assert_yq "$crds" '[select(.kind != null) | .metadata.labels["app.kubernetes.io/managed-by"] + " " +
   .metadata.annotations["meta.helm.sh/release-name"] + " " + .metadata.annotations["meta.helm.sh/release-namespace"]] | unique | join(",")' \
-  "Helm $release argocd"
+  "Helm $release $ns"
 for n in clustersecretstores externalsecrets; do
   want=$(yq "select(.kind==\"CustomResourceDefinition\" and .metadata.name==\"$n.external-secrets.io\") | .spec" "$o")
   got=$(yq "select(.kind != null and .metadata.name==\"$n.external-secrets.io\") | .spec" "$crds")
@@ -106,42 +123,7 @@ done
 # --- Helm stores each release in one Secret (<1 MiB): base64(gzip(release JSON)) = chart templates + files (crds/),
 # values and the rendered manifest (subcharts aren't stored). Same encoding as Helm's storage driver; 0.1.0: 522 KB
 # (the release Secret on a k3d test cluster held the same).
-helm install $release $kit -n argocd --set clusterName=dev1 --dry-run=client -o json > "$tmp/release.json" ||
+helm install "$release" $kit -n "$ns" -f "$tmp/values.yaml" --dry-run=client -o json > "$tmp/release.json" ||
   fail "helm install --dry-run=client"
 sz=$(gzip -9 < "$tmp/release.json" | base64 | wc -c)
 [ "$sz" -lt 900000 ] || fail "release Secret would be ${sz}B: too close to the 1 MiB limit"
-
-# --- equivalence with the 4 HelmChartProxies this chart replaces (#2; this section leaves with them).
-# Render each HCP as CAAPH does, normalise release-bound noise, compare object by object. Intentional differences:
-#   Namespace external-secrets   was CAAPH createNamespace; one release has one namespace -> a template now
-#   webhook failurePolicy Ignore  see values.yaml external-secrets.webhook
-#   labels of the raw objects     bedag/raw stamped its own
-#   redis NetworkPolicy namespace explicit now (was an argo-cd extraObject without one -> release namespace)
-hcps=$config/fleet/base/helmchartproxies.yaml
-hcp() { yq "select(.kind==\"HelmChartProxy\" and .metadata.name==\"$1\") | $2" "$hcps"; }
-legacy=$(mktemp "$tmp/legacy.XXXXXX")
-for n in worker-argocd worker-argocd-agent worker-external-secrets worker-secret-bootstrap; do
-  hcp $n .spec.valuesTemplate | sed 's/{{ \.Cluster\.metadata\.name }}/dev1/g' > "$tmp/$n.values.yaml"
-  repo=$(hcp $n .spec.repoURL); chart=$(hcp $n .spec.chartName)
-  if [[ $repo == oci://* ]]; then ref=("$repo/$chart"); else ref=("$chart" --repo "$repo"); fi
-  r=$(render "$(hcp $n .spec.releaseName)" "${ref[@]}" --version "$(hcp $n .spec.version)" \
-    -n "$(hcp $n .spec.namespace)" -f "$tmp/$n.values.yaml")
-  cat "$r" >> "$legacy"; echo "---" >> "$legacy"
-done
-norm='select(.kind != null)
-  | (.. | select(tag == "!!map")) |= with_entries(select(.key | test("^(app.kubernetes.io/instance|checksum/.*)$") | not))
-  | (select(.kind == "ClusterSecretStore" or .kind == "ExternalSecret" or .metadata.name == "coredns-custom"
-      or .metadata.name == "external-secrets-openbao-tokenreview") | .metadata) |= del(.labels)
-  | sort_keys(..)'
-yq -o json -I0 "$norm | (select(.kind == \"ValidatingWebhookConfiguration\") | .webhooks[].failurePolicy) = \"Ignore\"
-  | (select(.metadata.name == \"argocd-redis-allow-agent\") | .metadata.namespace) = \"argocd\" | sort_keys(..)" \
-  "$legacy" | sort > "$tmp/legacy.json"
-yq -o json -I0 "$norm | select(.kind != \"Namespace\")" "$o" | sort > "$tmp/kit.json"
-id() { yq -p json -o tsv '[.kind, .metadata.namespace // "-", .metadata.name]' "$1" | sort; }
-d=$(diff <(id "$tmp/legacy.json") <(id "$tmp/kit.json")) || fail "object set differs from the 4 HCPs (< legacy, > kit):
-$d"
-if ! cmp -s "$tmp/legacy.json" "$tmp/kit.json"; then
-  comm -3 "$tmp/legacy.json" "$tmp/kit.json" | tr -d '\t' > "$tmp/delta.json"
-  fail "objects differ from what the 4 HCPs install:
-$(id "$tmp/delta.json" | uniq)"
-fi
