@@ -2,7 +2,7 @@ REPO ?= https://github.com/koorikla/platform-lab.git
 OLD  := $(shell grep -m1 -oE 'https://github.com/[^ ]+\.git' bootstrap/root-app.yaml)
 CTX  := --context mgmt
 
-.PHONY: up down status ui argocd-password set-repo kubeconfig lint test
+.PHONY: up down status ui argocd-password kargo-password set-repo kubeconfig lint test
 up:              ## bootstrap k3d -> CAPI builds hub "mgmt" -> clusterctl move -> Argo CD + root app
 	./bootstrap/bootstrap.sh
 down:            ## workers via CAPI, then the self-hosted hub's containers (it cannot delete itself)
@@ -18,6 +18,8 @@ ui:              ## Argo CD on :8080, Kargo on :8081 (CAPD nodes publish no host
 	kubectl $(CTX) -n kargo port-forward svc/kargo-api 8081:80 & wait
 argocd-password:
 	@kubectl $(CTX) -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+kargo-password:  ## Kargo "admin" password: generated once in-cluster by ESO (repos/platform-charts/kargo/templates/admin-secret.yaml)
+	@kubectl $(CTX) -n kargo get secret kargo-api-admin -o jsonpath='{.data.adminPassword}' | base64 -d; echo
 # owner/repo slugs: Argo CD uses the https form, Kargo the SSH form (deploy key), hack/kargo-deploy-key.sh the bare slug
 slug = $(patsubst https://github.com/%.git,%,$(1))
 set-repo:        ## make set-repo REPO=https://github.com/you/fork.git

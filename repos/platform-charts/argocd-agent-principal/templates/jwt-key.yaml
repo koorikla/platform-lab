@@ -1,0 +1,30 @@
+# Principal JWT signing key, generated on the hub instead of `jwt.allowGenerate` (a new key on every restart).
+# The principal reads Secret argocd-agent-jwt, key jwt.key, at startup and parses it with x509.ParsePKCS8PrivateKey;
+# it signs RS512 only -> RSA in PKCS#8. cert-manager mints exactly that; the certificate itself is unused.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-agent-jwt-key
+spec:
+  secretName: argocd-agent-jwt-key
+  commonName: argocd-agent-jwt
+  duration: 87600h
+  privateKey:
+    algorithm: RSA
+    size: 4096
+    encoding: PKCS8
+    rotationPolicy: Never   # cert-manager >= 1.18 defaults to Always: renewals must not swap the key under the principal
+  issuerRef: { name: argocd-agent-selfsigned, kind: Issuer }
+---
+# The chart only mounts/reads key jwt.key of its secret and has no rename knob: project tls.key into it.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: argocd-agent-jwt
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { kind: SecretStore, name: in-cluster }
+  target:
+    name: {{ index .Values "argocd-agent-principal" "principal" "jwt" "secretName" }}
+  data:
+    - { secretKey: jwt.key, remoteRef: { key: argocd-agent-jwt-key, property: tls.key } }
