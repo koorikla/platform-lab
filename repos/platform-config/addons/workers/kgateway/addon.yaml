@@ -1,0 +1,7 @@
+addon:
+  name: kgateway
+  chart: kgateway
+  # as OpenChoreo v1.2.5 installs it on a data plane (install/k3d/multi-cluster/README.md): next to the data plane.
+  # Only the controller lives here; each Gateway's envoy proxy is deployed into that Gateway's own namespace.
+  namespace: openchoreo-data-plane
+  releaseName: kgateway

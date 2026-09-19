@@ -2,7 +2,7 @@ apiVersion: v2
 name: kgateway
 description: Umbrella chart for kgateway
 type: application
-version: 0.1.1
+version: 0.1.2
 dependencies:
   - name: kgateway-crds
     version: v2.3.1
