@@ -1,0 +1,17 @@
+# Example: a k3s worker on OpenStack. Enable the class first (fleet/base/clusterclasses/k3s-openstack.yaml.disabled
+# lists the hub prerequisites), then rename this file to .yaml. Values for repos/platform-charts/cluster.
+name: os-dev1
+env: dev
+provider: openstack             # platform.lab/provider: selects provider-specific HelmChartProxies (CCM, CSI) later
+region: RegionOne               # platform.lab/region: the OpenStack region (informational; clouds.yaml decides)
+clusterClass: k3s-openstack
+kubernetesVersion: v1.34.11+k3s1
+controlPlaneReplicas: 1
+workerReplicas: 1
+variables:                      # replaces the chart default (kindImageVersion is CAPD-only)
+  - name: identityRef           # Secret fleet/openstack-cloud-config (key clouds.yaml) comes from OpenBao via ESO
+    value: { name: openstack-cloud-config, cloudName: openstack }
+  - { name: controlPlaneFlavor, value: m1.medium }
+  - { name: workerFlavor, value: m1.medium }
+  - { name: image, value: ubuntu-24.04 }
+  - { name: externalNetwork, value: public }

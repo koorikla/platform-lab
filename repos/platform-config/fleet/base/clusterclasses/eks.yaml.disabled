@@ -1,0 +1,151 @@
+# EKS (CAPA managed control plane) - no k3s: AWS runs the control plane, workers are EC2 instances in a
+# MachineDeployment. Example, not booted yet: shape from CAPA v2.12.1 templates/cluster-template-eks-clusterclass.yaml,
+# fields checked against its CRDs (hack/tests/test_clusterclass_schema.sh); behaviour marked VERIFY is inferred.
+# Differences from the k3s classes that the cluster file must reflect (fleet/clusters/dev/eks-dev1.yaml.disabled):
+#   - kubernetesVersion is an EKS minor as semver (v1.34.0), not a k3s version; AWS picks the patch;
+#   - no control-plane replicas (controlPlaneReplicas: null), workerClass: default-worker;
+#   - Amazon Linux 2023 + nodeadm: EKS publishes no Amazon Linux 2 AMIs for Kubernetes >= 1.33, so the
+#     EKSConfigTemplate (AL2 bootstrap.sh) path is out.
+# Enable (CONTRIBUTING.md "Add a CAPI provider or ClusterClass"):
+#   1. hub reachable from the VPC at a real address (workers can't reach the CAPD `mgmt-lb`);
+#   2. AWS account prepared once with `clusterawsadm bootstrap iam create-cloudformation-stack` (EKS enabled): the IAM
+#      roles and the nodes.cluster-api-provider-aws.sigs.k8s.io instance profile used below;
+#   3. `infrastructure.aws.enabled: true` in addons/management/capi-providers/values.yaml, with Secret
+#      capa-system/capa-variables (key AWS_B64ENCODED_CREDENTIALS) created by ESO from OpenBao before the provider;
+#   4. the identity the cluster file names (identityRef), e.g. an AWSClusterStaticIdentity whose Secret in capa-system
+#      comes from OpenBao via ESO - never from git;
+#   5. rename this file to .yaml, then a cluster file with `clusterClass: eks`.
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: ClusterClass
+metadata:
+  name: eks
+  namespace: fleet
+spec:
+  controlPlane:
+    ref:
+      apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+      kind: AWSManagedControlPlaneTemplate
+      name: eks-control-plane
+  infrastructure:
+    ref:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+      kind: AWSManagedClusterTemplate
+      name: eks
+  workers:
+    machineDeployments:
+      - class: default-worker
+        template:
+          bootstrap:
+            ref:
+              apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+              kind: NodeadmConfigTemplate
+              name: eks-worker
+          infrastructure:
+            ref:
+              apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+              kind: AWSMachineTemplate
+              name: eks-worker
+  variables:
+    - name: region
+      required: true
+      schema:
+        openAPIV3Schema: { type: string, minLength: 1 }
+    - name: identityRef                # required: no silent fallback to the controller's own credentials
+      required: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [kind, name]
+          properties:
+            kind: { type: string, enum: [AWSClusterStaticIdentity, AWSClusterRoleIdentity, AWSClusterControllerIdentity] }
+            name: { type: string, minLength: 1 }
+    - name: instanceType
+      required: false
+      schema:
+        openAPIV3Schema: { type: string, default: t3.large }
+    - name: sshKeyName                 # EC2 key pair; empty = none (CAPA's own default would be a key named "default")
+      required: false
+      schema:
+        openAPIV3Schema: { type: string, default: "" }
+  patches:
+    - name: controlPlane
+      definitions:
+        - selector:
+            apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+            kind: AWSManagedControlPlaneTemplate
+            matchResources: { controlPlane: true }
+          jsonPatches:
+            - { op: add, path: /spec/template/spec/region, valueFrom: { variable: region } }
+            - { op: add, path: /spec/template/spec/identityRef, valueFrom: { variable: identityRef } }
+            # invariant 1: the EKS cluster carries the CAPI Cluster name (CAPA would derive one from namespace + control-plane name)
+            - { op: add, path: /spec/template/spec/eksClusterName, valueFrom: { template: '{{ .builtin.cluster.name }}' } }
+    - name: workers
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+            kind: AWSMachineTemplate
+            matchResources:
+              machineDeploymentClass: { names: [default-worker] }
+          jsonPatches:
+            - { op: replace, path: /spec/template/spec/instanceType, valueFrom: { variable: instanceType } }
+    - name: sshKeyName
+      enabledIf: '{{ if .sshKeyName }}true{{ end }}'
+      definitions:
+        - selector:
+            apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+            kind: AWSManagedControlPlaneTemplate
+            matchResources: { controlPlane: true }
+          jsonPatches:
+            - { op: replace, path: /spec/template/spec/sshKeyName, valueFrom: { variable: sshKeyName } }
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+            kind: AWSMachineTemplate
+            matchResources:
+              machineDeploymentClass: { names: [default-worker] }
+          jsonPatches:
+            - { op: replace, path: /spec/template/spec/sshKeyName, valueFrom: { variable: sshKeyName } }
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: AWSManagedClusterTemplate
+metadata:
+  name: eks
+  namespace: fleet
+spec:
+  template:
+    spec: {}
+---
+# CAPA creates a VPC (subnets and NAT gateways in every AZ) per cluster unless spec.network names an existing one;
+# the default EKS networking add-ons (VPC CNI, kube-proxy, CoreDNS) stay on (bootstrapSelfManagedAddons defaults to true).
+# The API endpoint is public by default: the hub's CAPI/CAAPH and OpenBao's TokenReview need to reach it.
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: AWSManagedControlPlaneTemplate
+metadata:
+  name: eks-control-plane
+  namespace: fleet
+spec:
+  template:
+    spec:
+      sshKeyName: ""
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: NodeadmConfigTemplate
+metadata:
+  name: eks-worker
+  namespace: fleet
+spec:
+  template:
+    spec: {}
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: AWSMachineTemplate
+metadata:
+  name: eks-worker
+  namespace: fleet
+spec:
+  template:
+    spec:
+      instanceType: t3.large           # replaced by the instanceType variable
+      ami: { eksLookupType: AmazonLinux2023 }
+      iamInstanceProfile: nodes.cluster-api-provider-aws.sigs.k8s.io   # from clusterawsadm's CloudFormation stack
+      sshKeyName: ""
+      cloudInit: { insecureSkipSecretsManager: true }   # as upstream's EKS ClusterClass sample: bootstrap data as plain user data. VERIFY

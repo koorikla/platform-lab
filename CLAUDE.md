@@ -101,6 +101,8 @@ Minimal readable YAML; comments explain *why*. Label prefix `platform.lab/`. Nam
 New addon = umbrella chart + `addons/<scope>/<name>/{addon.yaml,values.yaml}` (+ optional `envs/<env>.values.yaml`
 for workers; nothing else in a worker addon folder, `make test` checks).
 New cluster = one file in `fleet/clusters/<env>/`.
+New ClusterClass / CAPI provider = `fleet/base/clusterclasses/<class>.yaml` + a `capi-providers` toggle (disabled
+examples: `k3s-openstack`, `eks`; recipe and per-provider differences in CONTRIBUTING.md).
 Worker addons sync plain YAML from Kargo's `rendered/<env>[-canary]:addons/<addon>/` (`worker-addons` appset, branch
 from cluster labels `platform.lab/env` + `platform.lab/ring`). Disable one = rename `addon.yaml` → `.disabled` on main:
 its Application and Kargo pipeline go, the workload stays (`preserveResourcesOnDeletion`; delete it by hand if it must
