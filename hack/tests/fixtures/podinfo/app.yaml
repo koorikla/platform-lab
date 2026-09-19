@@ -1,0 +1,8 @@
+# Test fixture for the openchoreo-app chart, shaped like repos/apps/<app>/app.yaml (the real podinfo app is #16).
+# What the app is; no version: Kargo supplies image.tag (and env/stage) at render time.
+name: podinfo
+project: lab
+componentType: deployment/service
+image: { repository: ghcr.io/stefanprodan/podinfo }
+endpoints:
+  http: { type: HTTP, port: 9898, visibility: [external] }

@@ -1,0 +1,9 @@
+{{- if not (has .Values.mode (list "types" "component" "release" "binding")) }}
+{{- fail (printf "openchoreo-app: unknown mode %q (types|component|release|binding)" .Values.mode) }}
+{{- end }}
+{{- if eq .Values.mode "types" }}
+{{- range $f, $_ := .Files.Glob "files/types/*.yaml" }}
+---
+{{ $.Files.Get $f }}
+{{- end }}
+{{- end }}

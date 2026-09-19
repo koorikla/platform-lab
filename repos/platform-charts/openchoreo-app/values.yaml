@@ -1,0 +1,35 @@
+# One chart, four renders (OpenChoreo v1.2.5 CRDs, namespace `default` = the labelled OpenChoreo org namespace):
+#   types     hub addon: ClusterComponentTypes + ClusterProjectType from files/types (vendored upstream samples)
+#   component hub, from main: Component (autoDeploy off: Kargo cuts releases) [+ Project if createProject]
+#   release   Kargo, per stage: ComponentRelease <name>-<stage>-<tag>-<hash8> [+ Workload on the workload stage]
+#   binding   hub appset, from main, one per (rendered release x worker cluster): ReleaseBinding <name>-<environment>.
+#             Identity only; everything env-specific is in the promoted release. The appset reads each
+#             rendered/<branch>/apps/*/release/ ComponentRelease and passes: name=spec.owner.componentName,
+#             project=spec.owner.projectName, releaseName=metadata.name, environment=<cluster>.
+mode: component
+namespace: default
+
+# --- app (repos/apps/<app>/app.yaml)
+name: ""                          # Component name
+project: lab
+componentType: deployment/service # <workloadType>/<ClusterComponentType name> from files/types
+parameters: {}                    # Component.spec.parameters (schema: the type's parameters); frozen into releases
+traits: []                        # not supported yet (would need vendored ClusterTrait specs to freeze)
+image: { repository: "", tag: "" }  # tag comes from Kargo (the Freight's image)
+container: {}                     # Workload container fields besides image: command, args, env [{key, value}], files
+endpoints: {}                     # Workload endpoints: {<name>: {type, port, visibility: [...]}}
+dependencies: {}                  # Workload dependencies: {endpoints: [...], resources: [...]}
+
+# --- component mode
+createProject: false              # the shared `lab` Project comes from the openchoreo-types addon, not per app
+deploymentPipeline: default
+projectType: default              # ClusterProjectType
+
+# --- release mode
+stage: ""                         # Kargo stage = rendered branch (required): names the release, so dev-canary (which
+                                  # renders env=dev too) and dev never own the same object
+workloadStage: dev                # the one stage that also renders the Workload (a Component may have exactly one)
+
+# --- binding mode (all required, no defaults: a binding never recomputes or guesses its release)
+environment: ""                   # OpenChoreo Environment = worker cluster name
+releaseName: ""                   # the Kargo-rendered ComponentRelease to bind

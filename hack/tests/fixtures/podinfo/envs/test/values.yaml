@@ -1,0 +1,2 @@
+container:
+  env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ test" }]

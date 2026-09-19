@@ -872,6 +872,20 @@ assert_yq "$t" '[select(.kind=="ClusterComponentType")] | length' 4
 
 **Step 4:** PASS; `make lint`. Commit.
 
+**As built (#15, after review):** `env` only selects the Kargo values files; the chart itself uses `stage` (required,
+the Kargo branch: `dev-canary` renders `env=dev` too) to name the release, and only `workloadStage` (dev) renders the
+Workload. Workload container fields live under `container:` (`container.env: [{key, value}]`, `command`, `args`,
+`files`). `name`/`project`/`stage`/`environment` must be DNS-1123 labels. Releases and Workloads carry
+`openchoreo.dev/{project,component}`. `traits` fail (not supported yet).
+**Binding contract (coordinator, #17):** Kargo does **not** render bindings. A hub ApplicationSet (matrix of worker
+clusters x a files generator on `rendered/<branch>/apps/*/release/*componentrelease*.yaml`, branches incl.
+`dev-canary`) renders this chart from main with `mode=binding` and exactly these parameters: `name` =
+`spec.owner.componentName`, `project` = `spec.owner.projectName`, `releaseName` = `metadata.name`, `environment` =
+cluster name. All four are required; the release name is never recomputed. The binding is identity only (no
+`componentTypeEnvironmentConfigs` / `workloadOverrides`): env-specific config is frozen in the promoted release.
+Schema check: `hack/tests/test_openchoreo_app_schema.sh` (kubeconform against the real CRDs; `REQUIRE_SCHEMA=1` in CI).
+A golden release name in `test_openchoreo_app.sh` catches hash drift (tests use Helm 4, Kargo embeds Helm 3).
+
 ### Task 3.2: App definition for podinfo
 
 **Files:** Create `repos/apps/podinfo/app.yaml`; Modify `repos/apps/podinfo/envs/*/values.yaml` (drop `image.tag`,
@@ -885,8 +899,8 @@ image: { repository: ghcr.io/stefanprodan/podinfo }
 endpoints:
   http: { type: HTTP, port: 9898, visibility: [external] }
 ```
-envs/dev/values.yaml: `env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ dev" }]` (map to the Workload env schema
-at v1.2.5). Run Task 3.1 tests. Commit.
+envs/dev/values.yaml: `container: { env: [{ key: PODINFO_UI_MESSAGE, value: "podinfo @ dev" }] }` (Workload env schema
+at v1.2.5; `env` itself is the stage's values env). Run Task 3.1 tests. Commit.
 
 ### Task 3.3: `render-app` ClusterPromotionTask + app pipelines
 
