@@ -1,0 +1,65 @@
+suite: ClusterSecretStores - openbao (hub writer, argocd only) and default (OpenChoreo, read-only)
+release:
+  name: openbao
+  namespace: openbao
+templates:
+  - templates/hub-writer.yaml
+  - templates/openchoreo.yaml
+tests:
+  - it: renders exactly the stores openbao and default
+    asserts:
+      - hasDocuments: { count: 1, filterAware: true }
+        documentSelector: { path: kind, value: ClusterSecretStore, matchMany: true, skipEmptyTemplates: true }
+      - equal: { path: metadata.name, value: openbao }
+        template: templates/hub-writer.yaml
+        documentSelector: { path: kind, value: ClusterSecretStore }
+      - equal: { path: metadata.name, value: default }
+        template: templates/openchoreo.yaml
+        documentSelector: { path: kind, value: ClusterSecretStore }
+
+  - it: openbao - writes as role hub-writer, from argocd only (the cluster chart's PushSecrets)
+    template: templates/hub-writer.yaml
+    documentSelector: { path: metadata.name, value: openbao }
+    asserts:
+      - equal: { path: spec.conditions, value: [{ namespaces: [argocd] }] }
+      - equal:
+          path: spec.provider.vault
+          value:
+            server: http://openbao.openbao.svc:8200
+            path: secret
+            version: v2
+            auth:
+              kubernetes:
+                mountPath: kubernetes
+                role: hub-writer
+                serviceAccountRef: { name: openbao-hub-writer, namespace: openbao }
+
+  # openchoreo-control-plane: backstage-secrets; thunder: the Backstage app's client secret (#10)
+  - it: default - reads as role openchoreo-reader, from the OpenChoreo namespaces only
+    template: templates/openchoreo.yaml
+    documentSelector: { path: metadata.name, value: default }
+    asserts:
+      - equal: { path: spec.conditions, value: [{ namespaces: [openchoreo-control-plane, thunder] }] }
+      - equal:
+          path: spec.provider.vault
+          value:
+            server: http://openbao.openbao.svc:8200
+            path: secret
+            version: v2
+            auth:
+              kubernetes:
+                mountPath: kubernetes
+                role: openchoreo-reader
+                serviceAccountRef: { name: openbao-openchoreo-reader, namespace: openbao }
+
+  - it: renders the store ServiceAccounts in the openbao namespace
+    asserts:
+      - equal: { path: metadata.namespace, value: openbao }
+        template: templates/hub-writer.yaml
+        documentSelector: { path: kind, value: ServiceAccount }
+      - equal: { path: metadata.namespace, value: openbao }
+        template: templates/openchoreo.yaml
+        documentSelector: { path: metadata.name, value: openbao-openchoreo-reader }
+      - equal: { path: metadata.namespace, value: openbao }
+        template: templates/openchoreo.yaml
+        documentSelector: { path: metadata.name, value: openbao-openchoreo-seeder }

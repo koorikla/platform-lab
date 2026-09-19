@@ -1,0 +1,56 @@
+suite: fleet-sync CronJob (auth/k8s-<name> per worker) - schedule, image, least-privilege RBAC
+release:
+  name: openbao
+  namespace: openbao
+templates:
+  - templates/fleet-sync.yaml
+  - templates/fleet-ca.yaml
+tests:
+  - it: runs every two minutes as openbao-fleet-sync, from a digest-pinned image
+    template: templates/fleet-sync.yaml
+    documentSelector: { path: kind, value: CronJob }
+    asserts:
+      - equal: { path: spec.schedule, value: "*/2 * * * *" }
+      - equal: { path: spec.jobTemplate.spec.template.spec.serviceAccountName, value: openbao-fleet-sync }
+      - matchRegex:
+          path: 'spec.jobTemplate.spec.template.spec.containers[0].image'
+          pattern: '^alpine/k8s:[0-9.]+@sha256:[0-9a-f]{64}$'
+
+  # fleet namespace: CAPI Clusters only (kubeconfigs and CA keys live there); CAs come from <name>-ca-public in openbao
+  # documents of fleet-sync.yaml: 0 SA, 1+2 Role/RoleBinding in fleet, 3+4 Role/RoleBinding in openbao
+  - it: may only read CAPI Clusters in fleet
+    template: templates/fleet-sync.yaml
+    documentIndex: 1
+    asserts:
+      - isKind: { of: Role }
+      - equal: { path: metadata.namespace, value: fleet }
+      - equal: { path: rules, value: [{ apiGroups: [cluster.x-k8s.io], resources: [clusters], verbs: [get, list] }] }
+
+  - it: may only get Secrets in openbao (the <name>-ca-public projections)
+    template: templates/fleet-sync.yaml
+    documentIndex: 3
+    asserts:
+      - isKind: { of: Role }
+      - equal: { path: metadata.namespace, value: openbao }
+      - equal: { path: rules, value: [{ apiGroups: [""], resources: [secrets], verbs: [get] }] }
+
+  - it: binds both Roles to openbao/openbao-fleet-sync only
+    template: templates/fleet-sync.yaml
+    documentSelector: { path: kind, value: RoleBinding, matchMany: true }
+    asserts:
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: openbao-fleet-sync, namespace: openbao }] }
+      - equal: { path: roleRef.name, value: openbao-fleet-sync }
+
+  - it: ships fleet-sync.sh in its ConfigMap
+    template: templates/fleet-sync.yaml
+    documentSelector: { path: kind, value: ConfigMap }
+    asserts:
+      - matchRegex: { path: 'data["fleet-sync.sh"]', pattern: '^#!/usr/bin/env bash' }
+
+  - it: projects worker CAs through SecretStore fleet-ca as the projector SA
+    template: templates/fleet-ca.yaml
+    documentSelector: { path: kind, value: SecretStore }
+    asserts:
+      - equal: { path: metadata.name, value: fleet-ca }
+      - equal: { path: spec.provider.kubernetes.auth.serviceAccount.name, value: fleet-ca-projector }
+      - equal: { path: spec.provider.kubernetes.remoteNamespace, value: fleet }

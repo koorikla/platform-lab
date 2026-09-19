@@ -1,0 +1,63 @@
+suite: OpenBao server on the hub - dev mode, API on NodePort 30820 (workers via mgmt-lb)
+release:
+  name: openbao
+  namespace: openbao
+templates:
+  - charts/openbao/templates/server-statefulset.yaml
+  - templates/nodeport.yaml
+  - charts/openbao/templates/server-service.yaml
+tests:
+  - it: runs one server
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - hasDocuments: { count: 1 }
+      - isKind: { of: StatefulSet }
+
+  # no root token literal in git: dev mode generates one per start (kept in the pod's ~/.vault-token for postStart)
+  - it: sets no dev root token
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - isNullOrEmpty: { path: 'spec.template.spec.containers[0].env[?(@.name == "VAULT_DEV_ROOT_TOKEN_ID")].value' }
+
+  - it: rolls the pod when postStart changes
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - equal: { path: spec.updateStrategy.type, value: RollingUpdate }
+
+  # postStart seeds the roles the hub-writer store and the fleet-sync CronJob log in with
+  - it: seeds the hub-writer and fleet-sync roles in postStart
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - matchRegex: { path: 'spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]', pattern: 'role/hub-writer' }
+      - matchRegex: { path: 'spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]', pattern: 'role/fleet-sync' }
+
+  # values only, no KV data: every secret value is generated in-cluster (openchoreo_test.yaml)
+  - it: never writes KV data in postStart
+    template: charts/openbao/templates/server-statefulset.yaml
+    asserts:
+      - notMatchRegex:
+          path: 'spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]'
+          pattern: 'kv put|kv patch|/v1/secret/data'
+
+  # only the API port is published (the chart's own Service also carries 8201, cluster-internal)
+  - it: publishes only the API port as NodePort 30820
+    template: templates/nodeport.yaml
+    asserts:
+      - equal: { path: spec.type, value: NodePort }
+      - equal: { path: spec.ports, value: [{ name: http, port: 8200, targetPort: 8200, nodePort: 30820 }] }
+
+  - it: selects the server pods exactly like the StatefulSet
+    asserts:
+      - equal:
+          path: spec.selector
+          value: { app.kubernetes.io/name: openbao, app.kubernetes.io/instance: openbao, component: server }
+        template: templates/nodeport.yaml
+      - equal:
+          path: spec.selector.matchLabels
+          value: { app.kubernetes.io/name: openbao, app.kubernetes.io/instance: openbao, component: server }
+        template: charts/openbao/templates/server-statefulset.yaml
+
+  - it: the upstream chart's Services stay ClusterIP (one NodePort in the release)
+    template: charts/openbao/templates/server-service.yaml
+    asserts:
+      - notEqual: { path: spec.type, value: NodePort }
