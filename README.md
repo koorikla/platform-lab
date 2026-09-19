@@ -62,7 +62,7 @@ in the canary ring. Rings replace per-cluster pins: nothing is rendered per clus
 | one cluster's identity | CAAPH birth kit (`fleet/base/helmchartproxies.yaml`, cluster name via `valuesTemplate`) |
 | apps | `repos/apps/<app>/app.yaml` (fleet) and `envs/<env>/values.yaml` (env); version = the Freight (image tag) promoted to the stage, rendered to `rendered/<stage>:apps/<app>/`; clusters ahead via the ring, as above |
 
-Enable/disable anything file-driven by renaming `*.yaml` ⇄ `*.yaml.disabled` (test1, prod1, OpenChoreo, Istio ship disabled).
+Enable/disable anything file-driven by renaming `*.yaml` ⇄ `*.yaml.disabled` (nit1, sit1, prod1, OpenChoreo, Istio ship disabled).
 
 ## Run
 

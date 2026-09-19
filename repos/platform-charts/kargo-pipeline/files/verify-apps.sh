@@ -3,7 +3,7 @@
 # stage's clusters (worker-addons labels addon + env + ring; status mirrored from the workers by argocd-agent) must be
 # Synced + Healthy at the promoted rendered commit REVISION, or at a later commit of rendered/BRANCH that contains it
 # (every addon pipeline pushes to the same branch). Exit 0 = measurement Successful. Read-only on the hub.
-# No matching Applications (no clusters in this stage, e.g. test/prod today) = nothing to verify = success, unless
+# No matching Applications (no clusters in this stage, e.g. nit/sit/prod today) = nothing to verify = success, unless
 # REQUIRE_APPS=true (canary stages: an empty canary ring proves nothing and must not open the gate for the next stage).
 set -euo pipefail
 : "${ADDON:?}" "${ENV:?}" "${RING:?}" "${BRANCH:?}" "${REPO_URL:?}" "${ARGOCD_NS:?}" "${HOME:?}"

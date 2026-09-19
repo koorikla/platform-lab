@@ -4,7 +4,7 @@
 Enterprise-style GitOps lab. Management cluster (hub) runs Argo CD, argocd-agent principal, Cluster API, Kargo
 (bundling Argo Rollouts for its verification), OpenChoreo control plane and manages itself — including its own CAPI
 `Cluster` (self-hosted after a `clusterctl move` pivot from a throw-away k3d cluster). CAPI (k3s bootstrap/control-plane
-provider; CAPD infra now, OpenStack and EKS later) creates worker clusters per env (dev/test/prod, N clusters per env).
+provider; CAPD infra now, OpenStack and EKS later) creates worker clusters per env (dev/nit/sit/prod, N clusters per env).
 Everything is k3s. Workers get argocd-agent injected at birth and are then driven from the hub. Everything declarative;
 `bootstrap/` is the only imperative entrypoint.
 
@@ -53,7 +53,7 @@ builds k3s cluster → `openbao-fleet-sync` CronJob adds `auth/k8s-<name>` → C
 worker ESO pulls the cert via `mgmt-lb:30820` → agent dials `mgmt-lb:30443` (hub CAPD LB, `fleet/base/hub-lb.yaml`) →
 ESO-rendered cluster secret makes the cluster selectable → `worker-addons` / `workloads` appsets generate labelled Applications → principal
 ships them → worker reconciles. Worker addon content: a `main` commit touching the addon → Freight of Kargo project
-`addon-<name>` (`kargo-addon-pipelines` appset) → stages `dev-canary → dev → test → prod` render fleet < env values into
+`addon-<name>` (`kargo-addon-pipelines` appset) → stages `dev-canary → dev → nit → sit → prod` render fleet < env values into
 `rendered/<stage>:addons/<name>/` → `worker-addons` syncs that folder by the cluster's env + ring. App content:
 `repos/apps/<app>/app.yaml` → Kargo project `app-<app>` (`kargo-app-pipelines` appset), Freight = image tag x `main`
 commit → same stages, task `render-app` renders `openchoreo-app` (mode=release) into

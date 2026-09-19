@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Orphan branches rendered/<env>, written only by Kargo (rendered manifests pattern). Idempotent; Argo references them
-# from day one. Plumbing only: no worktree, no local branch, no minimum git version.
+# Orphan branches rendered/<stage>, written only by Kargo (rendered manifests pattern). Idempotent; Argo references them
+# from day one (Kargo's render task would create a missing one too, but only at that stage's first promotion).
+# Plumbing only: no worktree, no local branch, no minimum git version, no yq.
 # REMOTE (remote name, path or URL) must be the repo Argo CD pulls, i.e. the repoURL in bootstrap/root-app.yaml.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 remote=${REMOTE:-origin}
 keep=$(git hash-object -w --stdin </dev/null)
 keep_tree=$(printf '100644 blob %s\t.keep\n' "$keep" | git mktree)
-for b in dev-canary dev test prod; do
+# = kargo-pipeline values.yaml stages[].name, in order (hack/tests/test_envs.sh keeps them equal)
+for b in dev-canary dev nit sit prod; do
   rc=0; git ls-remote --exit-code --heads "$remote" "refs/heads/rendered/$b" >/dev/null || rc=$?
   case $rc in
     0) continue ;;   # exists: never touch it, Kargo owns it

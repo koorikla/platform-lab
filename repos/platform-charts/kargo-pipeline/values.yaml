@@ -14,15 +14,16 @@ repoURL: git@github.com:koorikla/platform-lab.git   # SSH: Kargo's credential is
 stages:                     # order = promotion order; the first stage takes Freight straight from the Warehouse
   - { name: dev-canary, env: dev,  pr: false }   # name = stage + rendered/<name> branch; env = values overlay
   - { name: dev,        env: dev,  pr: false }   # optional `soak: 15m`: minimum time in the previous stage (below)
-  - { name: test,       env: test, pr: false }
+  - { name: nit,        env: nit,  pr: false }   # environments: dev, nit, sit, prod (#81), each with N clusters
+  - { name: sit,        env: sit,  pr: false }
   - { name: prod,       env: prod, pr: false }   # pr: true needs a token that can open PRs (deploy key can't)
 # dev follows its canary ring automatically, but only with Freight that passed verification in dev-canary (below): the
 # canary's Applications Synced + Healthy at the promoted commit for `consecutiveSuccesses` measurements in a row. A
 # canary that doesn't get there within `count` measurements fails verification, and dev never takes that Freight.
 # No soak by default: `soak` (Kargo requiredSoakTime) only adds a minimum dwell counted from the promotion, without
 # looking at health; the worker Argo CD's <= 4 min repo poll plus the healthy streak already keep dev minutes behind.
-# Skip the gate by approving the Freight for dev (a manual approval supersedes verification and soak). test and prod
-# stay manual.
+# Skip the gate by approving the Freight for dev (a manual approval supersedes verification and soak). nit, sit and
+# prod stay manual.
 autoPromote: [dev-canary, dev]
 # Apps (kind=app) render no verification: it reads an addon's worker Applications, and an app's releases have none
 # until #17 binds them on the hub (app verification: #17/#18). Instead the stage fed by a canary stage (dev) takes

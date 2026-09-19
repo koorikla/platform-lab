@@ -51,10 +51,11 @@ assert_yq "$o" '[select(.kind=="Stage") | .spec | has("verification")] | any' fa
 assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.stages[0]" dev-canary
 assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.requiredSoakTime" "$(yq .appSoak $kp/values.yaml)"
 [ "$(yq .appSoak $kp/values.yaml)" != null ] || fail "appSoak must have a default"
-assert_yq "$o" "[$(stage dev-canary), $(stage test), $(stage prod)] | map(.spec.requestedFreight[0].sources
+assert_yq "$o" "[$(stage dev-canary), $(stage nit), $(stage sit), $(stage prod)] | map(.spec.requestedFreight[0].sources
   | has(\"requiredSoakTime\")) | any" false
-assert_yq "$o" "$(stage test) | .spec.requestedFreight[0].sources.stages[0]" dev
-assert_yq "$o" "$(stage prod) | .spec.requestedFreight[0].sources.stages[0]" test
+assert_yq "$o" "$(stage nit) | .spec.requestedFreight[0].sources.stages[0]" dev
+assert_yq "$o" "$(stage sit) | .spec.requestedFreight[0].sources.stages[0]" nit
+assert_yq "$o" "$(stage prod) | .spec.requestedFreight[0].sources.stages[0]" sit
 # an explicit stage soak wins over appSoak
 printf 'stages:\n  - { name: dev-canary, env: dev }\n  - { name: dev, env: dev, soak: 1h }\n' > "$tmp/soak.yaml"
 x=$(render p $kp --set kind=app --set name=foo --set image=example.org/foo -f "$tmp/soak.yaml")

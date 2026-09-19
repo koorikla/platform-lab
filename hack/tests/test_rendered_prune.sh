@@ -47,12 +47,12 @@ out=$(run --apply) || fail "second run failed"
 grep -q '^rendered/dev: nothing to prune$' <<<"$out" || fail "second run output: $out"
 
 # a rejected push (e.g. Kargo pushed in between) is retried from a fresh fetch
-seed rendered/test addons/.keep addons/cert-manager/a.yaml addons/kgateway/b.yaml
+seed rendered/sit addons/.keep addons/cert-manager/a.yaml addons/kgateway/b.yaml
 printf '#!/bin/sh\n[ -f "$GIT_DIR/rejected" ] && exit 0\ntouch "$GIT_DIR/rejected"; exit 1\n' > "$remote/hooks/pre-receive"
 chmod +x "$remote/hooks/pre-receive"
 err=$(run --apply 2>&1 >/dev/null) || fail "--apply with one rejected push failed: $err"
-grep -q '^rendered/test: push rejected' <<<"$err" || fail "no retry: $err"
-[ "$(files rendered/test)" = "addons/.keep,addons/cert-manager/a.yaml" ] || fail "rendered/test: $(files rendered/test)"
+grep -q '^rendered/sit: push rejected' <<<"$err" || fail "no retry: $err"
+[ "$(files rendered/sit)" = "addons/.keep,addons/cert-manager/a.yaml" ] || fail "rendered/sit: $(files rendered/sit)"
 rm "$remote/hooks/pre-receive"
 
 # the last addon goes: addons/ keeps its .keep, so the folder Argo/Kargo expect still exists

@@ -47,7 +47,7 @@ assert_yq "$tmp/dropin.yaml" 'keys | sort | join(",")' \
 # clusters not born yet get it at birth, when it costs no rollout. Named, not every *.disabled: renaming a file to
 # .disabled keeps its Cluster running, and such a file would roll that control plane when re-enabled (dev2 is decided
 # in the #76 rollout plan).
-for ff in test/test1 prod/prod1; do
+for ff in nit/nit1 sit/sit1 prod/prod1; do
   assert_yq "$config/fleet/clusters/$ff.yaml.disabled" '.variables[] | select(.name=="slowHostTolerance") | .value' true
 done
 shopt -s nullglob

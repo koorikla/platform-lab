@@ -73,8 +73,8 @@ r2=$(render podinfo $c "${dev[@]}" --set mode=release --set image.tag=6.16.0)
 r3=$(render podinfo $c "${dev[@]}" --set mode=release --set image.tag=6.15.0 --set 'container.env[0].key=X' --set 'container.env[0].value=y')
 n3=$(yq "$rel | .metadata.name" "$r3")
 [[ "$n3" =~ ^podinfo-dev-6-15-0- && "$n3" != "$name" ]] || fail "config change must change the hash: $n3"
-r4=$(render podinfo $c -f $a/app.yaml -f $a/envs/test/values.yaml --set env=test --set stage=test --set mode=release --set image.tag=6.15.0)
-[[ "$(yq "$rel | .metadata.name" "$r4")" =~ ^podinfo-test-6-15-0-[0-9a-f]{8}$ ]] || fail "test release name"
+r4=$(render podinfo $c -f $a/app.yaml -f $a/envs/nit/values.yaml --set env=nit --set stage=nit --set mode=release --set image.tag=6.15.0)
+[[ "$(yq "$rel | .metadata.name" "$r4")" =~ ^podinfo-nit-6-15-0-[0-9a-f]{8}$ ]] || fail "nit release name"
 assert_yq "$r4" '[select(.kind=="Workload")] | length' 0
 # stage (Kargo branch), not env, names the release: dev-canary renders env=dev too and must not share dev's objects
 r5=$(render podinfo $c -f $a/app.yaml -f $a/envs/dev/values.yaml --set env=dev --set stage=dev-canary --set mode=release --set image.tag=6.15.0)
