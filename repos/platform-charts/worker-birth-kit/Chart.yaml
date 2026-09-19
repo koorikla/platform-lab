@@ -2,7 +2,7 @@ apiVersion: v2
 name: worker-birth-kit
 description: What CAPI (CAAPH) installs on every worker at birth - Argo CD worker profile, argocd-agent, ESO and the per-cluster OpenBao pull wiring
 type: application
-version: 0.2.0
+version: 0.2.1
 # Invariant 4 exception (CLAUDE.md): three upstream charts in one umbrella because they must land together, as one
 # CAAPH release per worker (HelmChartProxy worker-birth-kit, valuesTemplate `clusterName: {{ .Cluster.metadata.name }}`):
 # the agent needs argo-cd's redis and the secrets ESO pulls from the hub; ESO needs its CRDs before the store and

@@ -20,7 +20,7 @@ spec:
       platform.lab/role: worker
   repoURL: oci://ghcr.io/koorikla/platform-charts
   chartName: worker-birth-kit
-  version: 0.2.0                       # = repos/platform-charts/worker-birth-kit/Chart.yaml (hack/tests/test_birth_kit.sh)
+  version: 0.2.1                       # = repos/platform-charts/worker-birth-kit/Chart.yaml (hack/tests/test_birth_kit.sh)
   releaseName: worker-birth-kit        # = the owner written into the chart's crds/ (hack/birth-kit-crds.sh)
   namespace: argocd                    # argo-cd + agent; ESO goes to external-secrets (the chart creates that one)
   options:

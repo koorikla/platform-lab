@@ -1,0 +1,22 @@
+suite: worker Argo CD load (#76) - a small profile for a handful of apps per worker
+release:
+  name: worker-birth-kit
+  namespace: argocd
+values:
+  - values/dev1.yaml
+templates:
+  - charts/argo-cd/templates/argocd-configs/argocd-cm.yaml
+  - charts/argo-cd/templates/argocd-configs/argocd-cmd-params-cm.yaml
+tests:
+  # the worker's slowest repo poll (reconciliation + jitter) bounds Kargo's verification window: hack/tests/test_hub_load.sh
+  - it: refreshes every 3 min with 1 min jitter
+    template: charts/argo-cd/templates/argocd-configs/argocd-cm.yaml
+    asserts:
+      - equal: { path: 'data["timeout.reconciliation"]', value: 180s }
+      - equal: { path: 'data["timeout.reconciliation.jitter"]', value: 60s }
+
+  - it: runs 5 status and 3 operation processors
+    template: charts/argo-cd/templates/argocd-configs/argocd-cmd-params-cm.yaml
+    asserts:
+      - equal: { path: 'data["controller.status.processors"]', value: "5" }
+      - equal: { path: 'data["controller.operation.processors"]', value: "3" }

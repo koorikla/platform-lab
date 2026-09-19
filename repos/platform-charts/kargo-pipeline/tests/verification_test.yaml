@@ -76,15 +76,16 @@ tests:
             - { name: REVISION, value: "{{args.revision}}" }
             - { name: REQUIRE_APPS, value: "{{args.requireApps}}" }
 
-  # one measurement = one Job; wait for convergence, then require consecutive successes; give up after count
-  - it: waits, then requires a healthy streak, and gives up after count measurements
+  # one measurement = one Job (one pod on the hub): every 60 s (#76); wait for convergence, then require consecutive
+  # successes; give up after count. The window vs the worker's repo poll: hack/tests/test_hub_load.sh
+  - it: measures every minute, requires a healthy streak, and gives up after count measurements
     template: verification.yaml
     documentSelector: { path: kind, value: AnalysisTemplate }
     asserts:
       - equal: { path: 'spec.metrics[0].failureLimit', value: -1 }
-      - equal: { path: 'spec.metrics[0].consecutiveSuccessLimit', value: 4 }
-      - equal: { path: 'spec.metrics[0].count', value: 20 }
-      - matchRegex: { path: 'spec.metrics[0].interval', pattern: '^[0-9]+[sm]$' }
+      - equal: { path: 'spec.metrics[0].interval', value: 60s }
+      - equal: { path: 'spec.metrics[0].consecutiveSuccessLimit', value: 3 }
+      - equal: { path: 'spec.metrics[0].count', value: 10 }
 
   - it: runs the Job once per measurement, bounded, as verify-apps, non-root with a read-only root fs
     template: verification.yaml

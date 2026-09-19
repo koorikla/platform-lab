@@ -1,0 +1,26 @@
+suite: hub Argo CD load (#76) - fewer periodic refreshes, bounded processor concurrency
+release:
+  name: argocd
+  namespace: argocd
+templates:
+  - charts/argo-cd/templates/argocd-configs/*.yaml
+  - charts/argo-cd/templates/argocd-application-controller/statefulset.yaml
+tests:
+  - it: refreshes every 5 min with 1 min jitter
+    template: charts/argo-cd/templates/argocd-configs/argocd-cm.yaml
+    asserts:
+      - equal: { path: 'data["timeout.reconciliation"]', value: 300s }
+      - equal: { path: 'data["timeout.reconciliation.jitter"]', value: 60s }
+
+  - it: runs 10 status and 5 operation processors
+    template: charts/argo-cd/templates/argocd-configs/argocd-cmd-params-cm.yaml
+    asserts:
+      - equal: { path: 'data["controller.status.processors"]', value: "10" }
+      - equal: { path: 'data["controller.operation.processors"]', value: "5" }
+
+  # argo-helm checksum annotations: a params/cm change restarts the controller, else it would wait for a restart
+  - it: restarts the application controller when its config changes
+    template: charts/argo-cd/templates/argocd-application-controller/statefulset.yaml
+    asserts:
+      - exists: { path: 'spec.template.metadata.annotations["checksum/cmd-params"]' }
+      - exists: { path: 'spec.template.metadata.annotations["checksum/cm"]' }
