@@ -33,6 +33,8 @@ spec:
     - { group: kargo.akuity.io, kind: Project }                      # kargo-pipelines, kargo-addon-*
     - { group: kargo.akuity.io, kind: ClusterPromotionTask }         # render-addon, render-app
     - { group: openchoreo.dev, kind: ClusterDataPlane }              # cluster chart: a worker registered in OpenChoreo
+    - { group: openchoreo.dev, kind: ClusterComponentType }          # mgmt-openchoreo-types (#78)
+    - { group: openchoreo.dev, kind: ClusterProjectType }            # mgmt-openchoreo-types (#78)
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
