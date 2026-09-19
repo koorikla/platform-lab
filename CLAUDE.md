@@ -58,11 +58,21 @@ argo-helm NetworkPolicy blocks principal/agent → redis; PushSecret split (tls 
 argocd-server https NodePort stole 30443; `curl get.k3s.io | sh` races kindest DNS (preK3sCommands wait);
 k3s-agent Type=notify deadlocks CAPD bootstrap until timeout (~5 min, Type=exec drop-in); CRD-default drift
 (server-side diff). `grep -rn VERIFY repos/` lists what is still inferred (mostly OpenChoreo).
+Pull model (Phase 1b, 2026-09-19, dev1 reborn by deleting `Cluster/dev1`): OpenBao 2.6.2 dev mode on the hub,
+`openbao-fleet-sync` ensured `auth/k8s-dev1`; birth kit only, no hub→worker writes. Timings from `Cluster` re-created
+(00:43:27): CP node +30s, worker ESO Available +61s, agent ExternalSecrets synced +84s, agent authenticated to the
+principal +89s, first workload pod (podinfo) +4m. Worker ESO token: reads `clusters/dev1/*` (200), `clusters/dev2/*`
+and `clusters/mgmt/*` 403, write 403; other SAs can't log in. CAAPH retries `secret-bootstrap` (failed install →
+upgrade) until ESO CRDs/webhook exist: ~40 revisions within a minute at birth, history capped at 10 — harmless.
 
 ## Known lab constraints
 - All CAPD nodes share the Docker VM disk: >90% used → DiskPressure evictions everywhere. Keep ≥25 GB free.
 - CAPD nodes publish no host ports: `make ui` port-forwards; hub API via `mgmt-lb`'s published 6443 (context `mgmt`).
 - k3s is downloaded at node boot (get.k3s.io) → workers need internet.
+- CAPD renders the hub LB template (`fleet/base/hub-lb.yaml`) only on control-plane machine create/delete: after
+  editing it on a running hub run `hack/hub-lb-reload.sh`.
+- OpenBao is in-memory (dev mode): a pod restart empties it; postStart, fleet-sync (≤2 min) and PushSecrets (1 min)
+  refill it. Workers keep their already-synced secrets meanwhile.
 
 ## Backlog (ordered)
 1. Harden the boot: `make up` should be re-runnable after partial failure (bootstrap cluster already has `mgmt`;
@@ -95,7 +105,8 @@ k3s-agent Type=notify deadlocks CAPD bootstrap until timeout (~5 min, Type=exec 
 7. Providers: `k3s-openstack` ClusterClass (CAPO + k3s), EKS ClusterClass (CAPA managed control plane, no k3s);
    only `clusterClass`, `provider`, `variables` change in a cluster file. (Hub pivot/self-hosting: done.)
 8. Hardening: Kargo admin secret, principal `jwt.allowGenerate`, AppProject `sourceRepos`, RBAC, NetworkPolicies,
-   AppSet progressive sync (RollingSync by `platform.lab/env`) as a guard rail besides Kargo.
+   AppSet progressive sync (RollingSync by `platform.lab/env`) as a guard rail besides Kargo. OpenBao prod mode (raft
+   PVC, auto-unseal, TLS on :30820 or a gateway); fleet-sync reads whole CAPI kubeconfigs (only server + CA needed).
 
 9. Team template (see docs/plans/ addendum): CI (lint/test/kubeconform), CODEOWNERS, CONTRIBUTING recipes, Renovate,
    provider extension points; **Backstage template "new Helm chart repo"** (pre-commit helm lint + conventional
