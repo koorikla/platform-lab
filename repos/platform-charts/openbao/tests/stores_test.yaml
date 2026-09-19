@@ -1,4 +1,4 @@
-suite: ClusterSecretStores - openbao (hub writer, argocd only) and default (OpenChoreo, read-only)
+suite: ClusterSecretStores - openbao (hub writer, cluster chart namespaces only) and default (OpenChoreo, read-only)
 release:
   name: openbao
   namespace: openbao
@@ -17,11 +17,11 @@ tests:
         template: templates/openchoreo.yaml
         documentSelector: { path: kind, value: ClusterSecretStore }
 
-  - it: openbao - writes as role hub-writer, from argocd only (the cluster chart's PushSecrets)
+  - it: openbao - writes as role hub-writer, only from the namespaces of the cluster chart's PushSecrets
     template: templates/hub-writer.yaml
     documentSelector: { path: metadata.name, value: openbao }
     asserts:
-      - equal: { path: spec.conditions, value: [{ namespaces: [argocd] }] }
+      - equal: { path: spec.conditions, value: [{ namespaces: [argocd, openchoreo-control-plane] }] }
       - equal:
           path: spec.provider.vault
           value:
