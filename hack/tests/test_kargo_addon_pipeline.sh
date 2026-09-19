@@ -39,6 +39,12 @@ done
 # the first stage takes Freight from the Warehouse: there is nothing to soak in
 printf 'stages:\n  - { name: a, env: dev, soak: 5m }\n' > "$tmp/soak-first.yaml"
 assert_fails helm template p $charts/kargo-pipeline --set name=foo -f "$tmp/soak-first.yaml"
+# soak must be a Kargo duration (CRD pattern): a bare number fails the render, not the Kargo webhook after an Argo sync
+printf 'stages:\n  - { name: a, env: dev }\n  - { name: b, env: dev, soak: %s }\n' 15 > "$tmp/soak-bad.yaml"
+assert_fails helm template p $charts/kargo-pipeline --set name=foo -f "$tmp/soak-bad.yaml"
+printf 'stages:\n  - { name: a, env: dev }\n  - { name: b, env: dev, soak: %s }\n' 1h30m > "$tmp/soak-ok.yaml"
+s=$(render p $charts/kargo-pipeline --set name=foo -f "$tmp/soak-ok.yaml")
+assert_yq "$s" "$(stage b) | .spec.requestedFreight[0].sources.requiredSoakTime" 1h30m
 # dev-canary renders dev values into its own branch
 assert_yq "$o" "$(var dev-canary env)" dev
 assert_yq "$o" "$(var dev-canary branch)" dev-canary

@@ -202,7 +202,8 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
 `hack/kargo-deploy-key.sh` after a fresh hub. Promotions change the lab: hold the lab lock.
 
 - **Worker addons** (project `addon-<name>`): Freight = a `main` commit touching the addon. `dev-canary`
-  auto-promotes, `dev` after a soak in `dev-canary` (see canary ring); `test` and `prod` are promoted by hand (UI: pick the Freight on the stage → Promote). Each promotion
+  auto-promotes, `dev` after a soak in `dev-canary` (see canary ring); `test` and `prod` are promoted by hand
+  (UI: pick the Freight on the stage → Promote). Each promotion
   commits plain YAML to `rendered/<stage>`; the diff of that commit is the change. Prod through a PR (`pr: true`)
   needs a token that can open PRs (#6).
 - **podinfo** (project `podinfo`, `kargo/podinfo/`): Warehouse on `ghcr.io/stefanprodan/podinfo` (semver `^6`).
@@ -223,7 +224,9 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
     promoting non-latest Freight puts an auto-promotion hold on `dev-canary` (newer Freight no longer lands there by
     itself) until you promote the latest Freight to it again.
   - **Skip the wait**: approve the Freight for `dev` (UI: Freight → Approve, or `kargo approve --project
-    addon-<name> --freight <id> --stage dev`); a manual approval supersedes the soak.
+    addon-<name> --freight <id> --stage dev`); a manual approval supersedes the soak. Commits to one addon less than
+    15 min apart restart the soak (each new Freight replaces the last in `dev-canary` before it soaked), so dev
+    follows 15 min after the last of them unless you approve.
   - **Hold dev longer** (a canary that needs a day): drop `dev` from `autoPromote` and promote it by hand.
   For apps (until #16/#17), one cluster can still run ahead with `repos/apps/<app>/clusters/<cluster>/values.yaml`.
 - Never edit `rendered/*` by hand (the one documented exception is `make rendered-prune`). There is no pin file on
