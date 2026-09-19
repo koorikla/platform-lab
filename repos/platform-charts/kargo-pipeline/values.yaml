@@ -24,6 +24,10 @@ stages:                     # order = promotion order; the first stage takes Fre
 # Skip the gate by approving the Freight for dev (a manual approval supersedes verification and soak). test and prod
 # stay manual.
 autoPromote: [dev-canary, dev]
+# Apps (kind=app) render no verification: it reads an addon's worker Applications, and an app's releases have none
+# until #17 binds them on the hub (app verification: #17/#18). Instead the stage fed by a canary stage (dev) takes
+# only Freight that has been in that canary stage this long (requiredSoakTime; a stage's own `soak` wins).
+appSoak: 15m
 # Verification after every promotion, every stage (AnalysisTemplate argocd-apps; Argo Rollouts runs it in the project
 # namespace). One measurement = one Job (files/verify-apps.sh) reading the hub Applications of this addon on the
 # stage's clusters; a stage without clusters passes, except a canary stage (an empty ring must not open the gate).

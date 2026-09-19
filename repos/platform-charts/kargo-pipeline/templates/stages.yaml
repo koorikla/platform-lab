@@ -16,8 +16,14 @@ spec:
         {{- if $s.soak }}{{ fail (printf "stages[0] (%s) takes Freight from the Warehouse: no upstream stage to soak in" $s.name) }}{{ end }}
         direct: true
         {{- else }}
-        stages: [{{ (index $.Values.stages (sub $i 1)).name }}]
-        {{- with $s.soak }}
+        {{- $prev := index $.Values.stages (sub $i 1) }}
+        stages: [{{ $prev.name }}]
+        {{- /* apps have no verification (verification.yaml): the stage fed by a canary stage soaks there instead */}}
+        {{- $soak := $s.soak }}
+        {{- if and (not $soak) (eq $.Values.kind "app") (eq (include "kargo-pipeline.ring" $prev) "canary") }}
+        {{- $soak = $.Values.appSoak }}
+        {{- end }}
+        {{- with $soak }}
         {{- if not (regexMatch "^([0-9]+(\\.[0-9]+)?(s|m|h))+$" (toString .)) }}
         {{- fail (printf "stages[].soak of %s: %v is not a duration like 15m or 1h30m (Kargo requiredSoakTime)" $s.name .) }}
         {{- end }}
@@ -45,6 +51,7 @@ spec:
                 name: {{ $s.name }}
                 values:
                   renderedCommit: {{ `'${{ quote(outputs.render.commit) }}'` }}
+  {{- if eq $.Values.kind "addon" }}
   # Freight is verified here (and may move on) once this stage's Applications are Synced + Healthy at renderedCommit
   # for a streak of measurements (templates/verification.yaml). No Applications = passes, except on a canary stage.
   verification:
@@ -57,4 +64,5 @@ spec:
       - { name: requireApps, value: {{ eq (include "kargo-pipeline.ring" $s) "canary" | toString | quote }} }
       - { name: branch, value: {{ $s.name | quote }} }
       - { name: revision, value: {{ `'${{ quote(stageMetadata(ctx.stage)?.renderedCommit ?? "") }}'` }} }
+  {{- end }}
 {{- end }}

@@ -56,9 +56,10 @@ spec:
         setValues:
           - { key: mode, value: release }
           - { key: stage, value: "${{ vars.branch }}" }   # dev-canary and dev (both env=dev) cut distinct releases
-          # A tag like 1.10 must reach the chart as the string "1.10", twice over: quote() because Kargo parses an
-          # expression result that looks like a number into a float (pkg/expressions/json_templates.go
-          # EvaluateTemplate), literal (--set-literal) because helm's --set would do the same.
+          # Cheap defence: the tag reaches the chart as a string even if it looks like a number. With SemVer +
+          # strictSemvers (default) only x.y.z tags are selected today, but a looser selection could yield e.g. 1.10,
+          # which Kargo (pkg/expressions/json_templates.go EvaluateTemplate) and helm --set would both turn into the
+          # float 1.1: hence quote() and literal (--set-literal).
           - { key: image.tag, value: "${{ quote(imageFrom(vars.image).Tag) }}", literal: true }
         outPath: ./out/apps/${{ vars.app }}/release
         outLayout: flat   # one file per resource: the contract above

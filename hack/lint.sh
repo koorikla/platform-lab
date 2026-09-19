@@ -43,7 +43,10 @@ done
 for f in repos/apps/*/app.yaml; do
   d=$(dirname "$f")
   [ "$(yq '.name' "$f")" = "$(basename "$d")" ] || { echo "FAIL: $f: name != folder"; exit 1; }
-  [ -n "$(yq '.image.repository // ""' "$f")" ] || { echo "FAIL: $f: image.repository is required"; exit 1; }
+  repo=$(yq '.image.repository // ""' "$f")
+  [ -n "$repo" ] || { echo "FAIL: $f: image.repository is required"; exit 1; }
+  # no version on main (invariant 5): a tag or digest in the repository would pin every stage
+  [[ ! ${repo##*/} =~ [:@] ]] || { echo "FAIL: $f: image.repository $repo carries a tag/digest (Kargo's Freight does)"; exit 1; }
   render "$(basename "$d")" $charts/openchoreo-app -f "$f" --set mode=component
   for e in "$d"/envs/*/; do
     render "$(basename "$d")" $charts/openchoreo-app -f "$f" -f "$e/values.yaml" --set mode=release \

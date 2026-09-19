@@ -938,7 +938,8 @@ at v1.2.5; `env` itself is the stage's values env). Run Task 3.1 tests. Commit.
 `helm-template` step, into `apps/<app>/release/` (flat layout) after a `delete` of `apps/<app>/`; no kustomization.
 setValues `mode=release`, `stage=<branch>`, `image.tag=${{ quote(imageFrom(vars.image).Tag) }}` with `literal: true`
 (Kargo and `--set` both turn a number-like tag such as `1.10` into a float otherwise). Stages = the addon stages
-(`dev-canary` included). Appset `kargo-app-pipelines` lives in its own file (`appset-kargo-app-pipelines.yaml`);
+(`dev-canary` included); the #26 verification is addon-only, apps' `dev` soaks `appSoak` (15m) in `dev-canary`
+until app verification lands with #17/#18. Appset `kargo-app-pipelines` lives in its own file (`appset-kargo-app-pipelines.yaml`);
 `app.yaml` `image.constraint` feeds the Warehouse. `repos/apps/podinfo/chart/` and a `podinfo:` block in the env values
 stay for the `workloads` appset until #17 retires both. Contract for #17: header of `kargo/shared/render-app.yaml` and
 the design doc addendum "rendered app contract".

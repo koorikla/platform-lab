@@ -42,6 +42,30 @@ assert_yq "$o" '[select(.kind=="Stage") | .spec.promotionTemplate.spec.steps[0].
 # the image var names the Warehouse subscription imageFrom() looks the Freight up by
 assert_yq "$o" "[select(.kind==\"Stage\") | .spec.promotionTemplate.spec.steps[0].vars[] | select(.name==\"image\")
   | .value] | unique | join(\",\")" "$(yq eval-all "${w}[0].image.repoURL" "$o")"
+# promotion gate: the #26 verification reads an addon's worker Applications; an app has none until #17 (its
+# releases are bound on the hub), so kind=app renders no verification at all (it would fail every canary stage)...
+assert_yq "$o" '[select(.kind=="AnalysisTemplate" or .kind=="Role" or .kind=="RoleBinding" or .kind=="ServiceAccount"
+  or .kind=="ConfigMap")] | length' 0
+assert_yq "$o" '[select(.kind=="Stage") | .spec | has("verification")] | any' false
+# ...and dev follows its canary stage after a soak instead; the other stages chain without one
+assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.stages[0]" dev-canary
+assert_yq "$o" "$(stage dev) | .spec.requestedFreight[0].sources.requiredSoakTime" "$(yq .appSoak $kp/values.yaml)"
+[ "$(yq .appSoak $kp/values.yaml)" != null ] || fail "appSoak must have a default"
+assert_yq "$o" "[$(stage dev-canary), $(stage test), $(stage prod)] | map(.spec.requestedFreight[0].sources
+  | has(\"requiredSoakTime\")) | any" false
+assert_yq "$o" "$(stage test) | .spec.requestedFreight[0].sources.stages[0]" dev
+assert_yq "$o" "$(stage prod) | .spec.requestedFreight[0].sources.stages[0]" test
+# an explicit stage soak wins over appSoak
+printf 'stages:\n  - { name: dev-canary, env: dev }\n  - { name: dev, env: dev, soak: 1h }\n' > "$tmp/soak.yaml"
+x=$(render p $kp --set kind=app --set name=foo --set image=example.org/foo -f "$tmp/soak.yaml")
+assert_yq "$x" "$(stage dev) | .spec.requestedFreight[0].sources.requiredSoakTime" 1h
+# addons keep verification and get no appSoak
+ad=$(render p $kp --set name=cert-manager)
+assert_yq "$ad" '[select(.kind=="AnalysisTemplate")] | length' 1
+assert_yq "$ad" "$(stage dev) | .spec.requestedFreight[0].sources | has(\"requiredSoakTime\")" false
+# the one stage that renders the Component's Workload (openchoreo-app workloadStage) must be a pipeline stage, or no
+# Workload is ever rendered and the Component never becomes Ready
+assert_yq "$o" "[select(.kind==\"Stage\") | .metadata.name] | contains([\"$(yq .workloadStage $charts/openchoreo-app/values.yaml)\"])" true
 # no constraint: any semver tag (no empty constraint field)
 n=$(render p $kp --set kind=app --set name=foo --set image=example.org/foo)
 assert_yq "$n" "${w}[0].image | has(\"constraint\")" false
@@ -64,8 +88,8 @@ assert_yq "$ra" '[.spec.steps[].uses] | (to_entries | map(select(.value=="delete
 assert_yq "$ra" "$h | .outPath" './out/apps/${{ vars.app }}/release'
 assert_yq "$ra" "$h | .outLayout" flat
 assert_yq "$ra" "$h | .ignoreMissingValueFiles" true                  # envs/<env>/values.yaml is optional
-# a tag like 1.10 must stay a string: Kargo turns a number-like expression result into a float unless quote()d, and
-# helm's --set does the same unless literal
+# the tag stays a string even if it looks like a number (strict SemVer selects only x.y.z today; defence for a looser
+# selection): Kargo turns a number-like expression result into a float unless quote()d, helm --set unless literal
 assert_yq "$ra" "$h | .setValues[] | select(.key==\"image.tag\") | .value" '${{ quote(imageFrom(vars.image).Tag) }}'
 assert_yq "$ra" "$h | .setValues[] | select(.key==\"image.tag\") | .literal" true
 # every custom if keeps the implicit "previous steps succeeded" guard (see render-addon.yaml)
@@ -102,6 +126,8 @@ for af in repos/apps/*/app.yaml; do
   # main holds no versions for promoted things: the tag is the Freight's
   for f in "$af" $(find "$(dirname "$af")/envs" -name values.yaml 2>/dev/null); do
     assert_yq "$f" '[.. | select(tag == "!!map" and has("tag"))] | length' 0
+    # ...nor embedded in a reference: repo:6.15.0 or repo@sha256:... (a ':' after the last '/', or any '@')
+    assert_yq "$f" '[.. | select(tag == "!!str") | select(test("^[^ ]+/[^/ ]*(:[^/ ]+|@[^ ]+)$"))] | length' 0
   done
   for s in $(yq '.stages[].name' $kp/values.yaml); do
     env=$(yq ".stages[] | select(.name==\"$s\") | .env" $kp/values.yaml)
