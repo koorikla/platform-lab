@@ -2,7 +2,7 @@ apiVersion: v2
 name: thunder
 description: Thunder (WSO2/Asgardeo) identity provider on the hub - OpenChoreo's IdP, later OIDC for Argo CD and Kargo
 type: application
-version: 0.1.0
+version: 0.1.1
 dependencies:
   - name: thunder
     # = THUNDER_VERSION in OpenChoreo v1.2.5 install/k3d/k3d-install.sh (appVersion/image 0.28.0)

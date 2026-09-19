@@ -22,9 +22,10 @@ assert_yq "$o" 'select(.kind=="HTTPRoute") | .spec.rules[0].backendRefs[0] | .na
 cfg=$(yq 'select(.kind=="ConfigMap" and .metadata.name=="thunder-config-map") | .data["deployment.yaml"]' "$o")
 assert_yq - '.server.public_url' http://thunder.openchoreo.localhost:8080 <<<"$cfg"
 assert_yq - '.database | [.config.type, .runtime.type, .user.type] | unique | join(",")' sqlite <<<"$cfg"
-# browser-side token exchange (PKCE) needs CORS for Backstage + the Argo CD/Kargo UI ports of `make ui` (#19)
+# browser-side token exchange (PKCE) needs CORS for Backstage + the Kargo UI port of `make ui` (#19); Argo CD
+# exchanges its code server-side (v3.5), so no origin for it
 assert_yq - '.cors.allowed_origins | sort | join(",")' \
-  http://localhost:7007,http://localhost:8090,http://localhost:8091,http://openchoreo.localhost:8080 <<<"$cfg"
+  http://localhost:7007,http://localhost:8091,http://openchoreo.localhost:8080 <<<"$cfg"
 
 # Helm hooks become Argo sync hooks; exactly these. hook-failed (Argo: HookFailed) on the PVC and the ExternalSecret
 # keeps them across SUCCESSFUL syncs (BeforeHookCreation would re-create them every sync = empty PVC). Caveat: a FAILED
@@ -96,13 +97,13 @@ rm -f "$OUT"
 assert_fails backstage ""
 [ ! -e "$OUT" ] || fail "51-backstage-app.sh posted without a secret"
 # Argo CD / Kargo (#19): public PKCE clients, no secret anywhere; groups + email in the ID token
-for c in argocd:http://localhost:8090/pkce/verify kargo:http://localhost:8091/login; do
-  j=$(app "${c%%:*}")
-  [ "$(jq -r '.redirect_uris | join(",")' <<<"$j")" = "${c#*:}" ] || fail "${c%%:*} redirect_uris"
+# (redirect URIs: test_sso_oidc.sh, against the Argo CD / Kargo configs)
+for c in argocd kargo; do
+  j=$(app "$c")
   [ "$(jq -c '[.public_client, .pkce_required, .token_endpoint_auth_method, has("client_secret")]' <<<"$j")" = '[true,true,"none",false]' ] ||
-    fail "${c%%:*}: not a public PKCE client"
+    fail "$c: not a public PKCE client"
   [ "$(jq -c '[.token.id_token.user_attributes | index("groups", "email") != null] | all' <<<"$j")" = true ] ||
-    fail "${c%%:*}: id_token lacks groups/email"
-  [ "$(jq -c '.scope_claims.groups' <<<"$j")" = '["groups"]' ] || fail "${c%%:*}: no groups scope claim"
+    fail "$c: id_token lacks groups/email"
+  [ "$(jq -c '.scope_claims.groups' <<<"$j")" = '["groups"]' ] || fail "$c: no groups scope claim"
 done
 

@@ -105,8 +105,8 @@ thunder:
       allowedOrigins:
         - "http://openchoreo.localhost:8080"
         - "http://localhost:7007"
-        # lab (#19): Argo CD and Kargo UIs exchange the PKCE code in the browser (`make ui` ports after #11)
-        - "http://localhost:8090"
+        # lab (#19): the Kargo UI does discovery + the PKCE code exchange in the browser (`make ui` port after #11).
+        # Argo CD needs no origin: v3.5 exchanges the code server-side (argocd-server -> Thunder).
         - "http://localhost:8091"
 
     passkey:
@@ -505,9 +505,11 @@ thunder:
         fi
 
 
-      # lab (#19, research §G/§H): OIDC clients for Argo CD and Kargo, seeded now so #19 only flips their configs.
+      # lab (#19, research §G/§H): OIDC clients for Argo CD and Kargo (their configs: addons/management/{argo-cd,kargo}).
       # Public clients with PKCE -> no client secret exists anywhere. Redirect URIs follow `make ui` after #11
       # (Argo CD :8090, Kargo :8091). email + groups in the ID token: Kargo's usernameClaim is email, both map groups.
+      # Argo CD v3.5 runs PKCE server-side: redirect = argocd-cm url + /auth/callback (the upstream docs' /pkce/verify
+      # is the removed browser flow); :8085 = `argocd login --sso` (default --sso-port).
       62-argocd-app.sh: |
         #!/bin/bash
         set -e
@@ -532,7 +534,8 @@ thunder:
               "config": {
                 "client_id": "argocd",
                 "redirect_uris": [
-                  "http://localhost:8090/pkce/verify"
+                  "http://localhost:8090/auth/callback",
+                  "http://localhost:8085/auth/callback"
                 ],
                 "grant_types": [
                   "authorization_code", "refresh_token"

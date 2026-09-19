@@ -5,3 +5,30 @@ argo-cd:
       # argocd-agent hybrid mode: all redis traffic goes through the principal's redis proxy, which serves
       # agent-owned keys (resource trees of remote apps) and forwards the rest to argocd-redis.
       redis.server: argocd-agent-redis-proxy:6379
+    cm:
+      # SSO via Thunder (#19). url = where browsers reach Argo CD (`make ui` port-forward); the OIDC redirect is
+      # url + /auth/callback (v3.5 does PKCE server-side). Local admin (admin.enabled, chart default true) is break-glass.
+      url: http://localhost:8090
+      # Public client, PKCE, no secret. The issuer must resolve from the browser (*.localhost + the gateway forward on
+      # 8080) AND from argocd-server (hub CoreDNS rewrite to the OpenChoreo gateway, #11/#12). The provider is queried
+      # lazily: while Thunder is unreachable the SSO button fails, local admin keeps working.
+      oidc.config: |
+        name: Thunder
+        issuer: http://thunder.openchoreo.localhost:8080
+        clientID: argocd
+        enablePKCEAuthentication: true
+        # groups: Thunder puts the groups claim in the ID token only for this scope (app scope_claims). VERIFY: live
+        # discovery lists scopes_supported without "groups"; the first login proves Thunder accepts it.
+        requestedScopes: [openid, profile, email, groups]
+    rbac:
+      # Thunder groups (the names OpenChoreo's authz already binds). No policy.default: a Thunder user in none of these
+      # groups sees nothing. Per-project least privilege is #20.
+      policy.csv: |
+        g, admins, role:admin
+        # operate Applications/ApplicationSets everywhere; clusters, repos, projects, accounts, certs stay in git/admin
+        p, role:platform-engineer, applications, *, */*, allow
+        p, role:platform-engineer, applicationsets, *, */*, allow
+        g, role:platform-engineer, role:readonly
+        g, platform-engineers, role:platform-engineer
+        g, developers, role:readonly
+        g, sres, role:readonly

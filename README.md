@@ -95,6 +95,13 @@ Kargo needs git push credentials: `hack/kargo-deploy-key.sh` (repo-scoped deploy
 `kargo-platform-lab` key, so on a shared repo (e.g. without `make set-repo` to your fork) it cuts off every other lab's
 Kargo: log out of `gh` or skip it if that isn't yours to rotate.
 
+SSO: Argo CD and Kargo log in via Thunder (OIDC, public clients with PKCE, no client secret). Thunder groups map to
+roles: `admins` → admin in both; `platform-engineers` → Argo CD `role:platform-engineer` (operate every
+Application/ApplicationSet, read the rest) and Kargo admin; `developers`, `sres` → read-only in both. SSO needs
+the OpenChoreo gateway, because the issuer `http://thunder.openchoreo.localhost:8080` must resolve in the browser
+(through `make ui`'s 8080 forward) and in the hub pods (through the CoreDNS rewrite). The local `admin` accounts stay
+as break-glass, with the passwords above, and keep working when Thunder is down.
+
 ## Working on this repo
 
 Backlog = [GitHub issues](https://github.com/koorikla/platform-lab/issues). How work flows (claim → worktree branch →
