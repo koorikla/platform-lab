@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Backstage software template "helm-chart-repo" (#25): render the skeleton offline the way the scaffolder would,
-# then lint the result like its own CI does (helm lint/template, yamllint). BACKSTAGE_TEMPLATE_PRECOMMIT=1 also runs
-# the rendered repo's `pre-commit run --all-files` (slow: fetches hook repos on first run).
+# Backstage software template "helm-chart-repo" (#25): render the skeleton locally the way the scaffolder would,
+# then lint the result like its own CI does (helm lint/template, yamllint). Needs node + npm (nunjucks from the npm
+# registry), yamllint, and network for helm (the umbrella case pulls podinfo from ghcr.io).
+# BACKSTAGE_TEMPLATE_PRECOMMIT=1 also runs the rendered repo's `pre-commit run --all-files` (slow: fetches hook repos).
 source "$(dirname "$0")/lib.sh"
 t=repos/platform-config/backstage/templates/helm-chart-repo
-command -v node >/dev/null || fail "need node (renders the template with nunjucks, like Backstage)"
-command -v yamllint >/dev/null || fail "need yamllint"
+# skipped locally without its tools (like test_argocd_pvc_health.sh); CI (CI=true) must run it
+for c in node npm yamllint; do
+  command -v $c >/dev/null && continue
+  [ -z "${CI:-}" ] || fail "need $c (node/npm render the template with nunjucks like Backstage; yamllint lints it)"
+  echo "skip: $c not on PATH (test_backstage_template.sh needs node, npm and yamllint)"; exit 0
+done
 # nunjucks is the scaffolder's template engine (scaffolder-backend 4.0.0 depends on ^3.2.3); cached like helm's deps
 nj="${XDG_CACHE_HOME:-$HOME/.cache}/platform-lab/nunjucks"
 [ -d "$nj/node_modules/nunjucks" ] || npm install --silent --no-save --prefix "$nj" nunjucks@3.2.4 >/dev/null ||
@@ -40,8 +45,8 @@ assert_yq $t/template.yaml '.spec.steps[0].input.url' ./skeleton
 # credentials never pass through the template: only the (non-secret) repo URL becomes a project variable
 assert_yq $t/template.yaml '[.spec.steps[] | select(.action=="publish:gitlab") | .input.projectVariables[].key] | join(",")' \
   ARTIFACTORY_URL
-! grep -rnE '^[[:space:]]*ARTIFACTORY_(USER|TOKEN|PASSWORD)[A-Z_]*:[[:space:]]+[^[:space:]]' $t ||
-  fail "Artifactory credentials must not be set in the template or skeleton"
+! grep -rnE '^[[:space:]]*(ARTIFACTORY_(USER|TOKEN|PASSWORD)[A-Z_]*|RELEASE_TOKEN):[[:space:]]+[^[:space:]]' $t ||
+  fail "Artifactory credentials / RELEASE_TOKEN must not be set in the template or skeleton"
 
 # --- plain chart, GitLab (the intended target)
 g=$(scaffold plain-gitlab '
@@ -62,7 +67,8 @@ assert_yq $g/steps.yaml '.[] | select(.id=="publish-gitlab") | .input.defaultBra
 assert_yq $g/steps.yaml '.[] | select(.id=="publish-gitlab") | .input.settings.visibility' internal
 assert_yq $g/steps.yaml '.[] | select(.id=="publish-gitlab") | .input.projectVariables[0].value' \
   oci://artifactory.example.com/helm-local
-# the initial commit is a conventional `feat`, so the first pipeline on main releases 0.0.0 -> 0.1.0
+# the initial commit is a conventional `feat`, so the first release is 0.0.0 -> 0.1.0 (once RELEASE_TOKEN is set and
+# the first pipeline's release job is retried: publish:gitlab pushes before it creates variables)
 assert_yq $g/steps.yaml '.[] | select(.id=="publish-gitlab") | .input.gitCommitMessage | test("^feat: ")' true
 assert_yq $g/steps.yaml '.[] | select(.id=="register-gitlab") | .input.repoContentsUrl' \
   'https://gitlab.example.com/platform/helm-charts/payments-chart/-/blob/main'
@@ -123,9 +129,12 @@ description: throwaway chart to prove the template in the lab
 owner: group:default/openchoreo-users
 chartType: plain
 publishTarget: github
-githubOwner: koorikla
-artifactoryUrl: oci://artifactory.example.com/helm-local')
+githubOwner: koorikla')
 bundled='fetch:template,publish:github,catalog:register'
+# the Artifactory URL is asked only for GitLab (publish:gitlab stores it as a CI/CD variable; GitHub would drop it)
+assert_yq $t/template.yaml '[.spec.parameters[].required[]] | contains(["artifactoryUrl"])' false
+assert_yq $t/template.yaml '.spec.parameters[1].dependencies.publishTarget.oneOf[] | select(.properties.publishTarget.enum[0]=="gitlab") | .required | contains(["artifactoryUrl"])' true
+assert_yq $t/template.yaml '.spec.parameters[1].dependencies.publishTarget.oneOf[] | select(.properties.publishTarget.enum[0]=="github") | .properties | has("artifactoryUrl")' false
 assert_yq $h/steps.yaml '[.[] | select(.skipped == false) | .action] | join(",")' "$bundled"
 assert_yq $h/steps.yaml '.[] | select(.id=="publish-github") | .input.repoUrl' 'github.com?owner=koorikla&repo=lab-chart'
 assert_yq $h/steps.yaml '.[] | select(.id=="register-github") | .input.repoContentsUrl' \

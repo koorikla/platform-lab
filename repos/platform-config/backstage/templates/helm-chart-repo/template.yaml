@@ -68,7 +68,7 @@ spec:
                   type: string
 
     - title: Repository and publishing
-      required: [publishTarget, artifactoryUrl]
+      required: [publishTarget]
       properties:
         publishTarget:
           title: Git host
@@ -79,18 +79,11 @@ spec:
           enum: [gitlab, github]
           enumNames: [GitLab, 'GitHub (fallback)']
           default: gitlab
-        artifactoryUrl:
-          title: Artifactory repository URL
-          description: >-
-            oci://<host>/<repo> for an OCI Helm repository (helm push), or
-            https://<host>/artifactory/<repo> for a classic Helm repository (HTTP upload).
-            Stored as the project's CI/CD variable ARTIFACTORY_URL; credentials are never asked for here.
-          type: string
-          pattern: '^(oci|https)://'
       dependencies:
         publishTarget:
           oneOf:
-            - required: [gitlabHost, gitlabGroup]
+            # only publish:gitlab can create CI/CD variables; on GitHub the URL would be dropped
+            - required: [gitlabHost, gitlabGroup, artifactoryUrl]
               properties:
                 publishTarget: { enum: [gitlab] }
                 gitlabHost:
@@ -107,12 +100,22 @@ spec:
                   type: string
                   enum: [private, internal, public]
                   default: private
+                artifactoryUrl:
+                  title: Artifactory repository URL
+                  description: >-
+                    oci://<host>/<repo> for an OCI Helm repository (helm push), or
+                    https://<host>/artifactory/<repo> for a classic Helm repository (HTTP upload).
+                    Stored as the project's CI/CD variable ARTIFACTORY_URL; credentials are never asked for here.
+                  type: string
+                  pattern: '^(oci|https)://'
             - required: [githubOwner]
               properties:
                 publishTarget: { enum: [github] }
                 githubOwner:
                   title: GitHub owner
-                  description: Organization or user; also the CODEOWNERS entry
+                  description: >-
+                    Organization or user. CODEOWNERS gets `* @<owner>`, which GitHub accepts only for a user:
+                    for an organization, change it to a team (`* @<org>/<team>`) after creation.
                   type: string
 
   steps:
@@ -142,7 +145,9 @@ spec:
       input:
         repoUrl: ${{ parameters.gitlabHost }}?owner=${{ parameters.gitlabGroup }}&repo=${{ parameters.name }}
         defaultBranch: main
-        # a conventional `feat` commit: the first pipeline on main releases 0.0.0 -> 0.1.0
+        # a conventional `feat` commit, so the first release is 0.1.0. publish:gitlab pushes it before it creates
+        # the project variables and RELEASE_TOKEN is added by an admin afterwards: the first pipeline's release job
+        # fails until someone retries it with RELEASE_TOKEN set (skeleton README, "First release").
         gitCommitMessage: 'feat: scaffold ${{ parameters.name }} from the helm-chart-repo template'
         settings:
           description: ${{ parameters.description }}
@@ -150,7 +155,7 @@ spec:
           topics: [helm-chart]
           only_allow_merge_if_pipeline_succeeds: true
         projectVariables:
-          # not a secret; ARTIFACTORY_USER / ARTIFACTORY_TOKEN / RELEASE_TOKEN are set by an admin (README)
+          # not a secret; ARTIFACTORY_USER / ARTIFACTORY_TOKEN / RELEASE_TOKEN are set by an admin (skeleton README)
           - key: ARTIFACTORY_URL
             value: ${{ parameters.artifactoryUrl }}
             description: Artifactory Helm repository the publish job pushes to (oci:// or https://)

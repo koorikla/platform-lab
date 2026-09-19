@@ -3,7 +3,7 @@
 ${{ values.description }}
 
 {% if values.chartType == 'umbrella' -%}
-Umbrella chart around [`${{ values.upstreamChart }}`](${{ values.upstreamRepository }}) `${{ values.upstreamVersion }}`:
+Umbrella chart around `${{ values.upstreamChart }}` `${{ values.upstreamVersion }}` from `${{ values.upstreamRepository }}`:
 the upstream chart is the only dependency (`Chart.yaml`), its settings live under `${{ values.upstreamChart }}:` in
 `values.yaml`, and anything the platform adds (policies, secrets, dashboards) goes into `templates/`.
 {%- else -%}
@@ -38,6 +38,8 @@ else). They decide the next version:
 | `feat!: …` or a `BREAKING CHANGE:` footer | major; minor while the version is 0.x (`major_version_zero` in `.cz.toml`) |
 | `chore:`, `docs:`, `ci:`, `test:`, … | no release |
 
+`git revert` writes `Revert "…"`, which the hook rejects: reword it to `revert: …`.
+
 Never edit `version` in `Chart.yaml` by hand. On every merge to `main` the **release** job runs `cz bump`: it computes
 the version from the commits since the last tag, writes it to `Chart.yaml` and `.cz.toml`, updates `CHANGELOG.md`,
 commits `bump: release X.Y.Z` (pushed with `ci.skip`) and pushes the tag `vX.Y.Z`. The tag pipeline's **publish** job
@@ -54,17 +56,33 @@ To release 1.0.0, set `major_version_zero = false` in `.cz.toml` and merge a `fe
 | release | `main` | `cz bump` → release commit + tag `vX.Y.Z` |
 | publish | tag `vX.Y.Z` | `helm package`; `helm push` to `oci://…` or HTTP upload to `https://…/artifactory/<repo>` |
 
-CI/CD variables (Settings → CI/CD → Variables, usually inherited from the group; never committed):
+CI/CD variables (Settings → CI/CD → Variables of this project, or of a parent group so every chart repository below
+it inherits them; never committed):
 
 | Variable | Set by | Notes |
 |---|---|---|
-| `ARTIFACTORY_URL` | the Backstage template | `oci://<host>/<repo>` for an OCI Helm repository, `https://<host>/artifactory/<repo>` for a classic one |
-| `ARTIFACTORY_USER` | an admin | masked, protected |
+| `ARTIFACTORY_URL` | the Backstage template (GitLab target; set it yourself otherwise) | `oci://<host>/<repo>` for an OCI Helm repository, `https://<host>/artifactory/<repo>` for a classic one |
+| `ARTIFACTORY_USER` | an admin | protected; masked if possible (GitLab masks only values of 8 or more characters) |
 | `ARTIFACTORY_TOKEN` | an admin | masked, protected; access/identity token with deploy permission on the repository |
-| `RELEASE_TOKEN` | an admin | masked, protected; project access token, role Maintainer, scope `write_repository` |
+| `RELEASE_TOKEN` | an admin | masked, protected; group or project access token, role Maintainer, scope `write_repository` |
+
+`RELEASE_TOKEN` is one of:
+- a **group access token** created once on the parent group and stored as a group variable: every repository below
+  the group inherits it;
+- a **project access token** created on this project and stored as a project variable.
+
+Both need GitLab Premium on gitlab.com; self-managed GitLab has them in every tier. `CI_JOB_TOKEN` cannot push.
 
 Protected variables are only visible to protected refs: protect `main` and the tag pattern `v*`, and allow the
-`RELEASE_TOKEN` bot to push to `main`.
+token's bot user (role Maintainer) to push to `main`.
+
+### First release
+
+The scaffolder pushes the initial `feat:` commit before anyone can set `RELEASE_TOKEN`, so the release job of the
+first pipeline on `main` fails with `RELEASE_TOKEN: is not set`. Set the variables above, then retry that job
+(Build → Pipelines → the first pipeline → release → Retry): it releases 0.1.0 and the tag pipeline publishes it. If
+`main` has moved on meanwhile, retry the release job of the newest pipeline on `main` instead (an older one can no
+longer push).
 
 ## Install
 

@@ -3,11 +3,14 @@
 #
 # CI/CD variables (Settings > CI/CD > Variables, or inherited from the group). Never put their values in this repo.
 #   ARTIFACTORY_URL    oci://<host>/<repo> (helm push) or https://<host>/artifactory/<repo> (HTTP upload);
-#                      created by the Backstage template, not secret
-#   ARTIFACTORY_USER   masked, protected: Artifactory user / service account with deploy permission
+#                      created by the Backstage template (GitLab target), not secret
+#   ARTIFACTORY_USER   protected, masked if possible (GitLab masks only 8+ characters): Artifactory user / service
+#                      account with deploy permission
 #   ARTIFACTORY_TOKEN  masked, protected: its access or identity token
-#   RELEASE_TOKEN      masked, protected: project access token (role Maintainer, scope write_repository) that may
-#                      push to main; CI_JOB_TOKEN cannot push
+#   RELEASE_TOKEN      masked, protected: group access token (group variable, inherited) or project access token,
+#                      role Maintainer, scope write_repository, may push to main; CI_JOB_TOKEN cannot push.
+#                      Both token kinds need Premium on gitlab.com. Until it is set the release job fails: retry the
+#                      first pipeline's release job afterwards (README, "First release").
 # Protected variables reach only protected refs: protect `main` and the tag pattern `v*`.
 
 workflow:
@@ -61,13 +64,18 @@ test:
       echo "$(curl -fsSL "${base}/CHECKSUMS" | grep " ${file}$" | cut -d' ' -f1)  /tmp/kubeconform.tgz" | sha256sum -c -
       tar -xzf /tmp/kubeconform.tgz -C /usr/local/bin kubeconform
     - helm dependency build .
-    # default values plus every ci/*-values.yaml (add one per configuration worth guarding)
+    # default values plus every ci/*-values.yaml (add one per configuration worth guarding).
+    # -ignore-missing-schemas lets CRDs through, but also everything when KUBERNETES_VERSION has no schemas: a run
+    # that validated nothing fails.
     - |
       for f in values.yaml ci/*-values.yaml; do
         [ -f "$f" ] || continue
         echo "--- helm template -f $f | kubeconform"
-        helm template ci . -f "$f" |
-          kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version "$KUBERNETES_VERSION"
+        helm template ci . -f "$f" > /tmp/rendered.yaml
+        out=$(kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version "$KUBERNETES_VERSION" \
+          /tmp/rendered.yaml) || { echo "$out"; exit 1; }
+        echo "$out"
+        case "$out" in *" Valid: 0,"*) echo "kubeconform validated nothing: check KUBERNETES_VERSION"; exit 1 ;; esac
       done
 
 release:

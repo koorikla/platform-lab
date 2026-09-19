@@ -26,6 +26,7 @@
   ],
   "ignorePaths": [
     "repos/apps/*/envs/**",
+    "repos/platform-config/backstage/templates/*/skeleton/**",
     "docs/**"
   ],
   "customManagers": [

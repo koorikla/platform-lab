@@ -57,8 +57,10 @@ CD applies, `kubectl apply/patch/delete`, Kargo promotions, `docker` on lab cont
 ## Local checks
 
 Needs `helm` and [mikefarah `yq` v4](https://github.com/mikefarah/yq) (python-yq has a different syntax and fails the
-tests on purpose). Running the lab also needs `docker`, `k3d`, `kubectl`, `clusterctl` (see README). The `hack/`
-scripts also need `jq` (`lab-lock.sh`, taking over an expired lock), `gh` (`kargo-deploy-key.sh`, and issues/PRs in
+tests on purpose). `test_backstage_template.sh` also needs `node` + `npm` with access to the npm registry (it installs
+nunjucks, the scaffolder's template engine, into `~/.cache/platform-lab`) and `yamllint`; without them it prints
+`skip:` locally, while CI (`CI=true`) always runs it. Running the lab also needs `docker`, `k3d`, `kubectl`,
+`clusterctl` (see README). The `hack/` scripts also need `jq` (`lab-lock.sh`, taking over an expired lock), `gh` (`kargo-deploy-key.sh`, and issues/PRs in
 general) and `go` (`hub-lb-reload.sh` renders the CAPD LB template with it).
 
 | Command | What it proves |

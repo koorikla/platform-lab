@@ -34,7 +34,8 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
-      # jq comes with the runner image; the runner's yq/shellcheck are not pinned, ours go first on PATH
+      # jq, node/npm and yamllint (test_backstage_template.sh) come with the runner image, unpinned (versions below);
+      # its yq/shellcheck are not pinned either, so ours go first on PATH
       - name: Install yq, kubeconform, actionlint, shellcheck
         run: |
           bin="$HOME/.local/bin"; dl=$(mktemp -d); mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
@@ -49,7 +50,9 @@ jobs:
           fetch "$gh/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.xz" "$SHELLCHECK_SHA256" sc.txz
           tar -xJf "$dl/sc.txz" -C "$bin" --strip-components=1 "shellcheck-$SHELLCHECK_VERSION/shellcheck"
       - name: Tool versions
-        run: helm version && yq --version && kubeconform -v && shellcheck --version && jq --version && actionlint -version
+        run: |
+          helm version && yq --version && kubeconform -v && shellcheck --version && jq --version && actionlint -version
+          node --version && npm --version && yamllint --version
       - name: actionlint
         run: actionlint
       # PR: vs the base branch. Push to main: vs the previous tip, so a stale-green PR merge or a direct push that
