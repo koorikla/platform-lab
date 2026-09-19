@@ -241,8 +241,7 @@ A cluster file picks `clusterClass`, `provider`, `region` and `variables`; every
 class and in the provider toggle. Where things are:
 - **ClusterClasses**: `fleet/base/clusterclasses/<class>.yaml`, one file per class with all its templates, namespace
   `fleet`, file name = class name. `fleet-base` syncs `fleet/base` recursively; `*.yaml.disabled` never syncs.
-  (`k3s-docker` still sits at `fleet/base/clusterclass-k3s-docker.yaml`; it moves into `clusterclasses/` in a
-  separate PR, because one push must not change `fleet-base`'s spec and its content.)
+  The lab's class is `clusterclasses/k3s-docker.yaml` (`bootstrap.sh` applies it to the k3d bootstrap cluster too).
 - **Examples, disabled**: `clusterclasses/k3s-openstack.yaml.disabled` (CAPO + k3s) and `clusterclasses/eks.yaml.disabled`
   (CAPA, managed EKS, no k3s), with cluster files `fleet/clusters/dev/os-dev1.yaml.disabled` and
   `eks-dev1.yaml.disabled`. Each class file's header lists its hub prerequisites. Fields are checked against the

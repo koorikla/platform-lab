@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Provider extension points (#23): one ClusterClass per file, fleet/base/clusterclasses/<class>.yaml (disabled examples
-# as .yaml.disabled; the legacy fleet/base/clusterclass-<class>.yaml until it moves there), synced by fleet-base.
+# as .yaml.disabled), synced by fleet-base (directory.recurse); bootstrap.sh applies the lab's class by path.
 # Only what CAPI's own validation wouldn't tell us before a cluster exists: every template ref resolves to a document
 # of the file (and every document is used), patches read only declared variables (and every variable is used), no
 # Secrets in class files, an enabled cluster never names a disabled class, the provider label matches the class, and
@@ -19,16 +19,24 @@ assert_yq $config/argocd/apps.yaml 'select(.metadata.name=="fleet-base") | .spec
 
 class_file() {   # class_file <class> -> its file, enabled first; nothing if there is none
   local f
-  for f in "$base/clusterclasses/$1.yaml" "$base/clusterclass-$1.yaml" "$base/clusterclasses/$1.yaml.disabled"; do
+  for f in "$base/clusterclasses/$1.yaml" "$base/clusterclasses/$1.yaml.disabled"; do
     [ -f "$f" ] && { echo "$f"; return; }
   done
   return 0
 }
 
-files=("$base"/clusterclass-*.yaml "$base"/clusterclasses/*.yaml "$base"/clusterclasses/*.yaml.disabled)
+# every ClusterClass lives in clusterclasses/ (a class elsewhere in fleet/base would escape the checks below)
+stray=$(grep -rlE --include='*.yaml' --include='*.yaml.disabled' '^kind: ClusterClass\b' "$base" | grep -v "^$base/clusterclasses/" || true)
+[ -z "$stray" ] || fail "ClusterClass outside $base/clusterclasses/: $stray"
+# bootstrap.sh applies the lab's class (and other config files) to the k3d cluster by path
+for p in $(grep -oE '\$config/[A-Za-z0-9_./-]+\.yaml' bootstrap/bootstrap.sh); do
+  [ -f "$config/${p#\$config/}" ] || fail "bootstrap/bootstrap.sh applies $p, which doesn't exist"
+done
+
+files=("$base"/clusterclasses/*.yaml "$base"/clusterclasses/*.yaml.disabled)
 [ ${#files[@]} -ge 3 ] || fail "expected k3s-docker, k3s-openstack and eks ClusterClass files, got: ${files[*]}"
 for f in "${files[@]}"; do
-  n=$(basename "$f"); n=${n#clusterclass-}; n=${n%.disabled}; n=${n%.yaml}
+  n=$(basename "$f"); n=${n%.disabled}; n=${n%.yaml}
   [ "$(y "$cc | .metadata.name" "$f")" = "$n" ] || fail "$f: one ClusterClass, named after the file ($n)"
   [ "$(yq eval-all '[select(.kind == "Secret")] | length' "$f")" = 0 ] || fail "$f: no Secrets in git (credentials: OpenBao/ESO)"
 
