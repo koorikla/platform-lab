@@ -3,8 +3,9 @@
 # docs/plans/2026-09-19-phase2-4-research.md §F) and ships the CRDs under templates/, not crds/: Argo CD and Kargo's
 # helm-template therefore apply upgrades (crds/ would be install-only for helm).
 # httproutes is ~244 KB: the appsets' ServerSideApply=true is required (last-applied annotation limit is 256 KiB).
-# The chart has no knob for CRD annotations, so argocd.argoproj.io/sync-options: Delete=false cannot be set here:
-# deleting or disabling this addon deletes the CRDs and with them every Gateway/HTTPRoute on that cluster.
+# The chart has no knob for CRD annotations, so argocd.argoproj.io/sync-options: Delete=false cannot be set here.
+# Deleting or disabling the addon cascades (CRDs, then every Gateway/HTTPRoute on that cluster) unless the generating
+# appset sets preserveResourcesOnDeletion; a CRD that drops out of the render is pruned, and that always cascades.
 gateway-crds-helm:
   crds:
     gatewayAPI:
