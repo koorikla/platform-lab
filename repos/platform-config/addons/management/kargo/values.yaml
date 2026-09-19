@@ -1,1 +1,17 @@
 # Hub overrides for kargo (layered on top of the umbrella chart's values.yaml)
+kargo:
+  api:
+    # SSO via Thunder (#19). Kargo always does auth code + PKCE in the browser (no client secret); the UI redirect is
+    # <UI origin>/login, registered in Thunder together with CORS for that origin. additionalScopes (groups) and
+    # usernameClaim (email) are the chart defaults. Local admin (adminAccount.enabled, default true) is break-glass.
+    oidc:
+      enabled: true
+      # must resolve from the browser and from kargo-api (hub CoreDNS rewrite to the OpenChoreo gateway, #11/#12);
+      # key set fetched lazily: while Thunder is unreachable only SSO logins fail
+      issuerURL: http://thunder.openchoreo.localhost:8080
+      clientID: kargo          # api.host is the client id only with the bundled Dex
+      admins:
+        claims: { groups: [admins, platform-engineers] }
+      # read-only on all Kargo resources (no Secrets); promotion rights per project come with #20
+      viewers:
+        claims: { groups: [developers, sres] }

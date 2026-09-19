@@ -488,18 +488,19 @@ data:
   It's emitted only if the app lists `groups` in `token.id_token.user_attributes`, has `scope_claims.groups: [groups]`, and the client
   requests scope `groups`. Argo's default requestedScopes include `groups`. Include `email` in `user_attributes` too if Argo/Kargo should
   show emails (the upstream Backstage app does not).
-- Redirect URIs: server flow `<url>/auth/callback`; **PKCE UI flow `<url>/pkce/verify`**; CLI `http://localhost:8085/auth/callback`
-  (`keycloak.md:109-113`).
+- Redirect URIs: `<url>/auth/callback` (server flow, **PKCE included**: v3.5.3 does PKCE server-side, `util/oidc/oidc.go`
+  `usePKCE`, redirect `common.CallbackEndpoint`); CLI `http://localhost:8085/auth/callback`. Correction (#19): the
+  `<url>/pkce/verify` in `keycloak.md:109-113` is the old browser PKCE flow, and v3.5.3 has no such route.
 - **Non-https issuer:** Argo does not require https. go-oidc only checks that discovery `issuer` equals the configured string exactly, and
   Thunder's `iss` = publicUrl `http://thunder.openchoreo.localhost:8080`. `rootCA` and `oidc.tls.insecure.skip.verify` only matter for
   https. argocd-server must resolve that host in-cluster (the CoreDNS rewrite in §B). Session cookies over http already work in the lab
   (`server.insecure: true`). Not yet proven by a live login, so verify on first boot.
-- Recommended: **public client with PKCE**, so no client secret exists anywhere. Thunder must allow CORS for Argo's origin (the browser
-  exchanges the code).
+- Recommended: **public client with PKCE**, so no client secret exists anywhere. Argo's origin needs no Thunder CORS entry: argocd-server
+  exchanges the code (correction, #19).
   ```yaml
   # Thunder bootstrap script (add as 62-argocd-app.sh, same pattern as 54-cli-app.sh)
   "client_id": "argocd",
-  "redirect_uris": ["http://localhost:8090/pkce/verify", "http://localhost:8090/auth/callback", "http://localhost:8085/auth/callback"],
+  "redirect_uris": ["http://localhost:8090/auth/callback", "http://localhost:8085/auth/callback"],
   "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"],
   "token_endpoint_auth_method": "none", "pkce_required": true, "public_client": true,
   "token": { "id_token": { "user_attributes": ["username", "email", "given_name", "family_name", "groups"] }, "access_token": { ... same ... } },
