@@ -53,7 +53,7 @@ validate() {   # validate <what> <multi-doc yaml file>: every document valid, no
 }
 
 base=$config/fleet/base
-for f in $base/clusterclass-*.yaml $base/clusterclasses/*.yaml $base/clusterclasses/*.yaml.disabled; do
+for f in $base/clusterclasses/*.yaml $base/clusterclasses/*.yaml.disabled; do
   validate "$f" "$f"
   # jsonPatches: path must exist in the selected template's schema; valueFrom.variable must match its type there
   cc='select(.kind=="ClusterClass")'

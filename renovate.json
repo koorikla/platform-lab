@@ -112,7 +112,7 @@
       "managerFilePatterns": [
         "/^repos/platform-config/fleet/clusters/.+\\.yaml(\\.disabled)?$/",
         "/^repos/platform-charts/cluster/values\\.yaml$/",
-        "/^repos/platform-config/fleet/base/(clusterclass-|clusterclasses/).+\\.yaml$/"
+        "/^repos/platform-config/fleet/base/clusterclasses/.+\\.yaml$/"
       ],
       "matchStrings": [
         "name: kindImageVersion,?\\s*value: (?<currentValue>v\\d+\\.\\d+\\.\\d+)",

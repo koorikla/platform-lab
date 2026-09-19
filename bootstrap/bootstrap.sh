@@ -137,7 +137,7 @@ step_bootstrap_capi() {
   log "CAPI on the bootstrap cluster, request the hub"
   install_capi $BOOT
   kb apply -f $config/fleet/base/namespace.yaml
-  kb apply -f $config/fleet/base/clusterclass-k3s-docker.yaml -f $config/fleet/base/hub-lb.yaml
+  kb apply -f $config/fleet/base/clusterclasses/k3s-docker.yaml -f $config/fleet/base/hub-lb.yaml
   helm template $HUB $charts/cluster -f $config/fleet/clusters/mgmt/mgmt.yaml | kb apply -f -
 }
 step_hub_capi() {
