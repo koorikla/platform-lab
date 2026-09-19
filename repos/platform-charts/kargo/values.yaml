@@ -1,6 +1,6 @@
 kargo:
   api:
-    host: localhost:8081
+    host: localhost:8091   # `make ui` port-forward; 8080 is the OpenChoreo gateway
     tls:
       enabled: false
     service:

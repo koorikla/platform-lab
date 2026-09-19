@@ -197,7 +197,7 @@ unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-
   `argocd.argoproj.io/tracking-id: <app>:<group>/<kind>:<namespace>/<name>`.
 
 ### Promote and canary with Kargo
-Kargo UI: `make ui` → http://localhost:8081, user `admin`, password from `make kargo-password`. Kargo's git credential is a repo-scoped deploy key: run
+Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make kargo-password`. Kargo's git credential is a repo-scoped deploy key: run
 `hack/kargo-deploy-key.sh` after a fresh hub. Promotions change the lab: hold the lab lock.
 
 - **Worker addons** (project `addon-<name>`): Freight = a `main` commit touching the addon. `dev-canary` and `dev`

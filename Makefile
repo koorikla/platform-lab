@@ -13,9 +13,14 @@ doctor:          ## preflight + lab health: docker disk/memory, tool versions, i
 status:
 	kubectl $(CTX) get applications -n argocd
 	kubectl $(CTX) get clusters.cluster.x-k8s.io,machines -n fleet
-ui:              ## Argo CD on :8080, Kargo on :8081 (CAPD nodes publish no host ports)
-	kubectl $(CTX) -n argocd port-forward svc/argocd-server 8080:80 & \
-	kubectl $(CTX) -n kargo port-forward svc/kargo-api 8081:80 & wait
+# Port-forwards, because CAPD publishes no host ports we could use (its LB container maps only 6443 and 8404, hard-coded).
+# :8080 = OpenChoreo gateway: *.localhost is loopback in browsers, so http://openchoreo.localhost:8080 lands here and
+# the gateway routes by Host; pods use the same URLs through the hub CoreDNS rewrite (fleet/base/hub-coredns.yaml).
+ui:              ## OpenChoreo http://openchoreo.localhost:8080, Argo CD :8090, Kargo :8091
+	kubectl $(CTX) -n argocd port-forward svc/argocd-server 8090:80 & \
+	kubectl $(CTX) -n kargo port-forward svc/kargo-api 8091:80 & \
+	{ kubectl $(CTX) -n openchoreo-control-plane port-forward svc/gateway-default 8080:8080 || \
+	  echo "OpenChoreo gateway port-forward ended (not installed yet?): :8080 unavailable"; } & wait
 argocd-password:
 	@kubectl $(CTX) -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 kargo-password:  ## Kargo "admin" password: generated once in-cluster by ESO (repos/platform-charts/kargo/templates/admin-secret.yaml)

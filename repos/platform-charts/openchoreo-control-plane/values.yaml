@@ -14,6 +14,9 @@ openchoreo-control-plane:
     oidc:
       issuer: "https://thunder.openchoreo.localhost"
   gateway:
+    # Service gateway-default:8080 (kgateway names it after the Gateway). Upstream's public URLs carry :8080; pods reach
+    # it via the hub CoreDNS rewrite (fleet/base/hub-coredns.yaml), browsers via `make ui` (port-forward 8080:8080).
+    httpPort: 8080
     tls:
       enabled: false
   clusterGateway:

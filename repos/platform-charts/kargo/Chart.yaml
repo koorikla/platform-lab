@@ -2,7 +2,7 @@ apiVersion: v2
 name: kargo
 description: Kargo + Argo Rollouts (its verification engine)
 type: application
-version: 0.3.1
+version: 0.3.2
 dependencies:
   - name: kargo
     version: 1.11.4

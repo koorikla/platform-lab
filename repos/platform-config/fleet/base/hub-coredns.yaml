@@ -1,6 +1,12 @@
 # k3s imports *.server keys as extra CoreDNS server blocks. Registries and git hosts resolve through public resolvers
 # first: the Docker Desktop resolver behind /etc/resolv.conf times out now and then, and a failed lookup errors a
 # Kargo promotion or an Argo CD manifest fetch. Docker container names (mgmt-lb, <cluster>-lb) keep the default path.
+# *.override keys are imported into the default `.:53` block. openchoreo.override (upstream
+# install/k3d/common/coredns-custom.yaml @ v1.2.5, target swapped from host.k3d.internal to the Service, regex anchored
+# on the FQDN so look-alikes and search-path expansions pass through untouched): pods resolve
+# *.openchoreo.localhost to the OpenChoreo control-plane gateway, so http://thunder.openchoreo.localhost:8080 is the same
+# URL for pods and browsers (`make ui` port-forwards that Service on 8080). `rewrite` runs before `kubernetes`, so the
+# Service FQDN resolves; `answer auto` renames the answer back to the queried name.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,4 +20,9 @@ data:
       forward . 1.1.1.1 8.8.8.8 /etc/resolv.conf {
         policy sequential   # public resolvers first; Docker's resolver only when both fail
       }
+    }
+  openchoreo.override: |
+    rewrite stop {
+      name regex ^(.+\.)?openchoreo\.localhost\.$ gateway-default.openchoreo-control-plane.svc.cluster.local
+      answer auto
     }
