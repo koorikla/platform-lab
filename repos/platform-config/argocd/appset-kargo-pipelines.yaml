@@ -35,7 +35,7 @@ spec:
             releaseName: '{{ dig "releaseName" "" .addon }}'
       # only a default: every namespaced object sets its own addon-<name> namespace, the rest is cluster-scoped
       destination: { name: in-cluster, namespace: kargo }
-      syncPolicy:
+      syncPolicy:   # no preserveResourcesOnDeletion: a disabled addon's Kargo Project must go, or it keeps promoting
         automated: { prune: true, selfHeal: true }
         retry: { limit: 20, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
         syncOptions: [ServerSideApply=true]

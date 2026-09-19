@@ -94,3 +94,4 @@ go). Once Kargo project `addon-<addon>` is gone (a running promotion could re-pu
 (dry run) / `make rendered-prune APPLY=1` removes the stale `addons/<addon>` from every `rendered/*` branch — the one
 documented cleanup besides Kargo that writes those branches (it pushes directly, so prod needs a PR once PR-gated).
 A `ring: canary` cluster needs a `<env>-canary` stage in kargo-pipeline (`hack/lint.sh` checks).
+Disabling (`.disabled`) leaves an addon's/cluster's resources running; removal is manual: CONTRIBUTING.md "Disabling".

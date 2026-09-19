@@ -7,6 +7,9 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
+  # disabling an addon deletes only its Application; what it installed stays (e.g. capi-operator's CAPI CRDs, which
+  # would take every Cluster with them). Real removal is manual: CONTRIBUTING.md "Disabling".
+  syncPolicy: { preserveResourcesOnDeletion: true }
   generators:
     - git:
         repoURL: https://github.com/koorikla/platform-lab.git            # platform-config repo

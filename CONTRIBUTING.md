@@ -101,16 +101,30 @@ with `repos/`.
    with `make status`; get a kubeconfig with `make kubeconfig CLUSTER=<name> > <name>.kubeconfig`.
 4. Budget: each CAPD cluster runs as containers on the same Docker VM (memory and the shared disk).
 
-**Renaming a cluster file to `.yaml.disabled` deletes that cluster.** The ApplicationSet controller puts the
-resources finalizer on every Application it generates, and `fleet-clusters` doesn't set
-`preserveResourcesOnDeletion`. So the rename deletes `Application cluster-<name>` with cascade, which deletes
-`Cluster/<name>`, and CAPI tears the machines down. (`prune: false` only covers resources that drop out of the render,
-not the Application being deleted.) Tracked in #39.
-- **Never disable `fleet/clusters/mgmt/mgmt.yaml`.** It is the hub. Only the `Delete=false` sync option on its
-  `Cluster` object stands between that rename and deleting the hub.
-- To remove a worker (lab lock held, announced on the issue): make sure nothing still depends on it, rename its file
-  to `.yaml.disabled`, merge, then watch `kubectl --context mgmt -n fleet get cluster,machines` until it is gone. Its
-  OpenBao material goes too (PushSecret `deletionPolicy: Delete`, fleet-sync drops `auth/k8s-<name>`).
+**Renaming a cluster file to `.yaml.disabled` deletes only `Application cluster-<name>`.** `fleet-clusters` sets
+`preserveResourcesOnDeletion`, so the `Cluster` and everything else the `cluster` chart rendered keep running,
+unmanaged; renaming it back adopts them again. See [Disabling](#disabling-rules-for-every-applicationset).
+- **Never disable `fleet/clusters/mgmt/mgmt.yaml` or delete `Cluster/mgmt`.** It is the hub.
+- To remove a worker (lab lock held, announced on the issue), make sure nothing still depends on it, then:
+  1. Before disabling, list what the app owns (the list goes with the Application):
+     `kubectl --context mgmt -n argocd get app cluster-<name> -o jsonpath='{range .status.resources[*]}{.kind} {.namespace}/{.name}{"\n"}{end}'`
+  2. Rename the file to `.yaml.disabled`, merge, wait until `cluster-<name>` is gone from `kubectl -n argocd get app`.
+  3. Delete the leftovers by hand, in this order (all `kubectl --context mgmt`):
+     1. `-n fleet delete clusters.cluster.x-k8s.io <name>`, then watch `-n fleet get cluster,machines` until it is
+        gone. CAPI tears the machines down; `openbao-fleet-sync` then drops `auth/k8s-<name>` and policy
+        `cluster-<name>` (within 2 min).
+     2. `-n argocd delete pushsecret <name>-argocd-agent`: `deletionPolicy: Delete` removes the agent cert and key
+        from OpenBao (`secret/clusters/<name>/argocd-agent`).
+     3. `-n argocd delete externalsecret cluster-<name>`: its Secret is the Argo CD cluster secret (ESO owns it), so
+        `worker-addons` and `workloads` stop generating Applications for the cluster.
+     4. `-n argocd delete certificate <name>-agent-client-tls` and then `-n argocd delete secret
+        <name>-agent-client-tls`: otherwise the hub keeps renewing a valid agent client cert, and cert-manager leaves
+        the Secret behind.
+     5. `-n argocd delete role,rolebinding eso-in-cluster-<name>` (the in-cluster store's read on that cert),
+        `-n fleet delete role,rolebinding <name>-ca-projector`, `-n openbao delete externalsecret <name>-ca-public`,
+        and, if `openchoreo.enabled`, `delete dataplane <name>` in the OpenChoreo namespace.
+  4. Check nothing is left: `kubectl --context mgmt get certificate,externalsecret,pushsecret,role,rolebinding -A |
+     grep <name>`.
 - To rebuild a worker from scratch, delete `Cluster/<name>` while its file stays enabled. Argo CD re-creates the
   object and CAPI builds a fresh cluster (a "rebirth").
 
@@ -159,9 +173,28 @@ not the Application being deleted.) Tracked in #39.
    the hub**, so merge under the lab lock.
 4. cert-manager, capi-operator and capi-providers are also applied by `bootstrap/bootstrap.sh` from the same chart
    and values before Argo CD exists, with `helm template --no-hooks | kubectl apply`: they must work without hooks.
-5. **Don't disable a hub addon by renaming it until #39 lands.** `mgmt-addons` Applications carry the resources
-   finalizer, so `.disabled` deletes everything the addon installed, CRDs included. For `capi-operator` or
-   `capi-providers` that means the CAPI CRDs, so every `Cluster` goes and the workers are torn down.
+5. Switching it off means renaming `addon.yaml` → `addon.yaml.disabled`, under the lab lock. `mgmt-addons` sets
+   `preserveResourcesOnDeletion`, so only `Application mgmt-<name>` goes. What the addon installed (CRDs, controllers,
+   namespaces) keeps running unmanaged, and renaming it back adopts it again. To really remove it: list its resources
+   before disabling (`kubectl --context mgmt -n argocd get app mgmt-<name> -o jsonpath=…`, as for clusters), disable,
+   then delete them by hand: consumers first, CRDs last and only when no custom resources of them are left. Never
+   remove `capi-operator` or `capi-providers` (CAPI CRDs: every `Cluster` would go and the workers would be torn down),
+   and never remove `cert-manager` or `external-secrets` while anything uses them.
+
+### Disabling: rules for every ApplicationSet
+- Each appset either **preserves** (disabling deletes only the Application: `mgmt-addons`, `fleet-clusters`,
+  `worker-addons`) or **cascades** (the Application takes its resources along: `kargo-addon-pipelines`, `workloads`).
+  `hack/tests/test_appset_deletion.sh` holds the list; a new appset fails it until it is classified.
+- **Turn preserve on first, then disable, in separate merges.** The appset controller strips the resources finalizer
+  from existing Applications on its next reconcile, but only from apps it still generates. If one push both turns the
+  flag on and disables something, that app still cascades. So: merge the flag, check
+  `kubectl -n argocd get app <app> -o jsonpath='{.metadata.finalizers}'` is empty (on the hub, and for worker-addons
+  also on the worker's copy), and only then disable.
+- **Never `argocd app delete --cascade` a generated Application.** The server adds the resources finalizer and deletes
+  the app. The appset controller then strips the finalizer and re-creates the app, but the app controller may already
+  have deleted some or all of the app's resources by then. It is a race, not an undo.
+- Missed listing `.status.resources` before disabling? Leftovers still carry the Argo CD tracking annotation
+  `argocd.argoproj.io/tracking-id: <app>:<group>/<kind>:<namespace>/<name>`.
 
 ### Promote and canary with Kargo
 Kargo UI: `make ui` → http://localhost:8081, user `admin`, password from `make kargo-password`. Kargo's git credential is a repo-scoped deploy key: run

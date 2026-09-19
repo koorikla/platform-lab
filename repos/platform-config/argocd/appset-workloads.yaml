@@ -43,6 +43,6 @@ spec:
       destination:
         name: '{{ .name }}'
         namespace: '{{ .path.basename }}'
-      syncPolicy:
+      syncPolicy:   # no preserveResourcesOnDeletion: removing an app from repos/apps removes its workload
         automated: { prune: true, selfHeal: true }
         syncOptions: [CreateNamespace=true]
