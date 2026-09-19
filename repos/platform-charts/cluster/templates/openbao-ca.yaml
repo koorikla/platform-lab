@@ -30,7 +30,11 @@ metadata:
   name: {{ $n }}-ca-public
   namespace: {{ $ob.namespace }}
 spec:
-  refreshInterval: 10m          # the CA changes only when the cluster is reborn
+  # A reborn cluster gets a new <name>-ca; fleet-sync (every 2m) copies this projection into auth/k8s-<name> as is,
+  # so a stale copy locks the new worker's ESO out (birth kit `wait` times out). 1m = one small in-cluster GET per
+  # worker. Periodic (the default) is the only refreshPolicy that re-reads the source: OnChange reacts to changes of
+  # this ExternalSecret's spec/metadata only, CreatedOnce never updates.
+  refreshInterval: 1m
   secretStoreRef: { kind: SecretStore, name: {{ $ob.caStore }} }
   target:
     name: {{ $n }}-ca-public
