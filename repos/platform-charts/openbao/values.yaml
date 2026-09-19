@@ -22,6 +22,10 @@
 #   - Humans: `make bao` = a shell in openbao-0 logged in as role `operator` (secret/hub/*: hand-written hub material,
 #     e.g. cloud provider credentials). Break-glass admin: a token of SA openbao (`kubectl -n openbao create token
 #     openbao`) logs in as openbao-config, which may write any policy/role.
+#   - Recovery, last resort (unseal key lost, self-init failed, raft corrupt): `kubectl -n openbao delete pvc
+#     data-openbao-0 pod/openbao-0` (plus Secret openbao-unseal-key if the key is the problem). The pod starts empty,
+#     self-inits and the sidecar configures it; hub data refills by itself (PushSecrets <= 1 min, fleet-sync <= 2 min,
+#     workers keep their synced secrets meanwhile). Hand-written secret/hub/* is lost: re-enter it with `make bao`.
 #   - Still lab: plain HTTP (TLS + a routable name: #56), NodePort 30820 for workers, one replica (HA = ha.raft with
 #     3 replicas + retry_join; self-init needs a single voter at first start).
 openbao:
@@ -33,6 +37,11 @@ openbao:
     # auto-unseal: a restart needs no human, so config changes may roll the pod (checksum below)
     updateStrategyType: RollingUpdate
     configAnnotation: true
+    # modest share on a hub that runs CPU-starved at times (#76); raft + a few dozen logins/min stay far below this.
+    # No CPU limit (throttling only slows logins down); memory limit catches a leak before it hurts the node.
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 512Mi }
     dataStorage:
       enabled: true
       size: 1Gi

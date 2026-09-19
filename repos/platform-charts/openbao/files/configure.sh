@@ -1,7 +1,7 @@
 #!/bin/sh
 # configure: the hub's OpenBao configuration, applied idempotently by the `configure` sidecar of openbao-0 (every
 # 5 min, 20 s after a failure). Replaces dev mode's postStart; self-init only bootstraps the login used here.
-#   kv v2 at secret/, kubernetes auth config (hub API), every *.hcl next to this script as a policy of that name,
+#   kv v2 at secret/, every *.hcl next to this script as a policy of that name,
 #   and the hub roles below (each bound to exactly one ServiceAccount in this namespace).
 # Per-worker mounts/entities are fleet-sync's (files/fleet-sync.sh). Nothing is deleted: a policy or role removed from
 # the chart stays in OpenBao until removed by hand (break-glass: values.yaml header).
@@ -18,8 +18,8 @@ export BAO_TOKEN
 trap 'bao token revoke -self >/dev/null 2>&1 || true' EXIT
 
 bao secrets list | grep -q '^secret/' || bao secrets enable -path=secret -version=2 kv >/dev/null
-# the hub's own API; OpenBao reviews tokens with its pod SA (the chart binds system:auth-delegator)
-bao write auth/kubernetes/config kubernetes_host=https://kubernetes.default.svc >/dev/null
+# auth/kubernetes/config is self-init's (values.yaml) and deliberately not rewritten here: a wrong value would lock out
+# the very login this script depends on.
 
 for f in "$CONF_DIR"/*.hcl; do
   bao policy write "$(basename "$f" .hcl)" "$f" >/dev/null

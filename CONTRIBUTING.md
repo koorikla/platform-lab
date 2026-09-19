@@ -378,6 +378,9 @@ need internet egress.
   applies both within ~5 min, no restart). Hub-owned material still comes from PushSecrets (source of truth stays in
   the cluster; an emptied OpenBao refills itself). Only material with no cluster source is hand-written, under
   `secret/hub/*` via `make bao`. OpenChoreo's secrets and `ClusterSecretStore default`: #9. TLS/routable name: #56.
+  Recovery, last resort (unseal key lost, self-init failed, storage broken): `kubectl -n openbao delete pvc
+  data-openbao-0 pod/openbao-0` (and Secret `openbao-unseal-key` if the key is the problem). OpenBao comes back empty
+  and configured; hub data refills within minutes; hand-written `secret/hub/*` is lost (restore it with `make bao`).
 - Kargo pushes with a deploy key (`hack/kargo-deploy-key.sh` puts it straight into a hub Secret); a PR-capable token
   comes via OpenBao/ESO (#6).
 

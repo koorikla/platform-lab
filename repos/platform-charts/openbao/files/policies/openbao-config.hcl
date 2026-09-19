@@ -3,6 +3,5 @@
 # chart. Exactly the calls configure.sh makes (hack/tests/test_openbao.sh checks).
 path "sys/mounts"             { capabilities = ["read"] }
 path "sys/mounts/secret"      { capabilities = ["create", "update"] }
-path "auth/kubernetes/config" { capabilities = ["create", "update"] }
 path "auth/kubernetes/role/*" { capabilities = ["create", "update"] }
 path "sys/policies/acl/*"     { capabilities = ["create", "update"] }

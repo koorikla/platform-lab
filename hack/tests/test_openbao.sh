@@ -27,6 +27,10 @@ srv="$sts | .spec.template.spec.containers[] | select(.name==\"openbao\")"
 assert_yq "$o" "$srv | .args | join(\" \") | test(\"server -dev\")" false
 assert_yq "$o" "[$srv | .env[] | select(.name | test(\"DEV\"))] | length" 0
 assert_yq "$o" "$srv | .lifecycle.postStart" null
+# the hub runs CPU-starved at times (#76): every OpenBao container asks for a modest share
+for c in openbao configure; do
+  assert_yq "$o" "$sts | .spec.template.spec.containers[] | select(.name==\"$c\") | .resources.requests | keys | sort | join(\",\")" cpu,memory
+done
 assert_yq "$o" "$sts | .spec.updateStrategy.type" RollingUpdate
 assert_yq "$o" "$sts | .spec.replicas" 1
 assert_yq "$o" "$sts | .spec.template.metadata.annotations | has(\"openbao.hashicorp.com/config-checksum\")" true
@@ -187,6 +191,9 @@ for r in openbao-config hub-writer fleet-sync openchoreo-seeder openchoreo-reade
   grep -qx "POST auth/kubernetes/role/$r" "$tmp/bao-calls" || fail "configure: no role $r"
 done
 grep -qx 'POST auth/token/revoke-self' "$tmp/bao-calls" || fail "configure must revoke its token"
+# the hub's kubernetes auth config is self-init's alone: a wrong rewrite here would lock this very login out
+! grep -q 'auth/kubernetes/config' "$tmp/bao-calls" || fail "configure must not rewrite auth/kubernetes/config"
+! grep -q 'auth/kubernetes/config' "$cm/openbao-config.hcl" || fail "openbao-config must not be able to rewrite auth/kubernetes/config"
 ! grep -q 's.cfgtoken\|fake-jwt' "$tmp/bao-argv" || fail "token/JWT on bao's argv"
 # existing kv mount: not re-enabled
 crun 'Path Type\nsecret/ kv\nsys/ system\n'
