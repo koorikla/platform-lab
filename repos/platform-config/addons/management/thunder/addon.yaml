@@ -1,0 +1,6 @@
+addon:
+  name: thunder
+  chart: thunder
+  namespace: thunder
+  releaseName: thunder
+  chartRevision: main

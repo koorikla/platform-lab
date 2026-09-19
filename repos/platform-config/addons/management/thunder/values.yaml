@@ -1,0 +1,1 @@
+# Hub overrides for thunder (layered on top of the umbrella chart's values.yaml = upstream OpenChoreo k3d values).

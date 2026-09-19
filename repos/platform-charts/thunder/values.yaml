@@ -1,0 +1,661 @@
+# Thunder IdP on the hub = OpenChoreo v1.2.5 install/k3d/common/values-thunder.yaml nested under `thunder:`.
+# Upstream text is kept verbatim where possible (diffable against the next OpenChoreo release); deviations say "lab:".
+#
+# Hostnames/issuer are upstream's: http://thunder.openchoreo.localhost:8080 for browsers AND pods (OpenChoreo, Argo CD
+# and Kargo validate tokens against that exact issuer string). It resolves only with #11 (hub CoreDNS rewrite of
+# *.openchoreo.localhost to the control-plane gateway, `make ui` port-forward on 8080), and the HTTPRoute attaches only
+# once Gateway openchoreo-control-plane/gateway-default exists (#8 kgateway, #12 control plane). Until then Thunder runs
+# but is reachable only in-cluster (thunder-service.thunder.svc:8090) and Argo shows the HTTPRoute as Progressing.
+#
+# Under Argo CD every Helm hook of the chart is a PreSync hook (exact list: hack/tests/test_thunder.sh):
+# - PVC thunder-database-pvc (sqlite): Pending until its first consumer (local-path is WaitForFirstConsumer), and that
+#   consumer is the later setup Job -> needs the argocd-cm PVC health override (argo-cd umbrella) to not deadlock, and
+#   hook-delete-policy hook-failed (below) so later syncs re-apply it instead of deleting the in-use PVC (data loss).
+# - Job thunder-setup runs on every sync; all bootstrap scripts are check-then-create/update, so re-runs are safe.
+# - ServiceAccount + ConfigMaps are re-created on every sync (no chart knob; Thunder's API use is an endpoints read).
+#
+# LAB ONLY - literal/well-known credentials (all from upstream; follow-up in the spirit of #21 to generate them):
+# - users (script 50): admin@openchoreo.dev/Admin@123, developer@openchoreo.dev/Dev@123,
+#   platform-engineer@openchoreo.dev/PE@123, sre@openchoreo.dev/SRE@123
+# - Backstage client secret "backstage-portal-secret" (script 51); OpenChoreo's backstage-secrets client-secret (#9)
+#   must be the same value
+# - Thunder console admin admin/admin: not in this file, created by the image's bootstrap/01-default-resources.sh
+# - token signing + encryption keys: files shipped in the image (repository/resources/security/*); VERIFY whether they
+#   are per build (then shared by every install of 0.28.0) and mount per-install keys before trusting these tokens
+#
+# Footprint: one pod, requests 100m CPU / 50Mi, limits 200m / 100Mi (chart defaults = upstream); the setup Job the same
+# while it runs (per sync, ~1 min); PVC 1Gi on local-path (node-affine: Job and Deployment share the node).
+thunder:
+  fullnameOverride: thunder
+
+  # Thunder v0.23.0+ manages its own HTTPRoute
+  httproute:
+    enabled: true
+    parentRefs:
+      - name: gateway-default
+        namespace: openchoreo-control-plane
+    hostnames:
+      - thunder.openchoreo.localhost
+
+  # Not using nginx ingress in openchoreo
+  ingress:
+    enabled: false
+
+  # SQLite requires a single writer pod
+  deployment:
+    replicaCount: 1
+
+  hpa:
+    enabled: false
+
+  # lab: see the header - keep the PVC across syncs (Argo maps this to HookFailed, not BeforeHookCreation)
+  persistence:
+    annotations:
+      helm.sh/hook-delete-policy: hook-failed
+
+  configuration:
+    server:
+      httpOnly: true
+      publicUrl: "http://thunder.openchoreo.localhost:8080"
+
+    gateClient:
+      hostname: "thunder.openchoreo.localhost"
+      port: 8080
+      scheme: "http"
+
+    # lab: password "" - the chart default "asgthunder" is for postgres; with sqlite it only rendered an unused
+    # thunder-db-credentials Secret (another pre-install hook)
+    database:
+      config:
+        type: sqlite
+        sqliteOptions: "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)"
+        password: ""
+      runtime:
+        type: sqlite
+        sqliteOptions: "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)"
+        password: ""
+      user:
+        type: sqlite
+        sqliteOptions: "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)"
+        password: ""
+
+    cors:
+      allowedOrigins:
+        - "http://openchoreo.localhost:8080"
+        - "http://localhost:7007"
+        # lab (#19): Argo CD and Kargo UIs exchange the PKCE code in the browser (`make ui` ports after #11)
+        - "http://localhost:8090"
+        - "http://localhost:8091"
+
+    passkey:
+      allowedOrigins:
+        - "http://openchoreo.localhost:8080"
+
+  setup:
+    enabled: true
+
+  # Run by the setup Job against the Thunder it starts on localhost:8090. Upstream scripts 50, 51, 54 verbatim.
+  # lab: upstream's 52, 53, 55-61 dropped - service clients with well-known secrets for components the lab doesn't run
+  # (customer portal sample, RCA/FinOps agents, MCP, workload publisher, observer, e2e); service_mcp_client would even
+  # map to OpenChoreo admin. Add a client back together with the feature that uses it.
+  bootstrap:
+    scripts:
+      50-user-schema-and-users.sh: |
+        #!/bin/bash
+        set -e
+
+        THUNDER_URL="http://localhost:8090"
+
+        log_info "Checking if default organization unit exists..."
+        if ! curl -s --max-time 10 "${THUNDER_URL}/organization-units" | grep -q '"handle" *: *"default"'; then
+          log_info "Creating default organization unit..."
+          curl --location "${THUNDER_URL}/organization-units" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json' \
+            --data '{
+              "name": "Default",
+              "handle": "default",
+              "description": "Default organizational unit"
+            }' \
+            --fail-with-body \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5
+          log_info "Default organization unit created successfully"
+        else
+          log_info "Default organization unit already exists"
+        fi
+
+        ORG_UNIT_ID=$(curl -s --max-time 10 "${THUNDER_URL}/organization-units/tree/default" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+        if [ -z "$ORG_UNIT_ID" ]; then
+          log_error "Failed to resolve default organization unit ID from ${THUNDER_URL}"
+          exit 1
+        fi
+        log_info "Using organization unit ID: $ORG_UNIT_ID"
+
+        log_info "Checking if user schema 'openchoreo-user' already exists..."
+        existing_schemas=$(curl -s --max-time 10 "${THUNDER_URL}/user-schemas")
+
+        if echo "$existing_schemas" | grep -q '"name" *: *"openchoreo-user"'; then
+          log_info "User schema 'openchoreo-user' already exists, skipping creation"
+        else
+          log_info "User schema does not exist, creating user schema..."
+          curl --location "${THUNDER_URL}/user-schemas" \
+            --header 'accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --data "{
+              \"name\": \"openchoreo-user\",
+              \"ouId\": \"$ORG_UNIT_ID\",
+              \"allowSelfRegistration\": true,
+              \"systemAttributes\": {
+                \"display\": \"username\"
+              },
+              \"schema\": {
+                \"username\": {
+                  \"type\": \"string\",
+                  \"required\": true,
+                  \"displayName\": \"Username\"
+                },
+                \"password\": {
+                  \"type\": \"string\",
+                  \"required\": true,
+                  \"credential\": true,
+                  \"displayName\": \"Password\"
+                },
+                \"given_name\": {
+                  \"type\": \"string\",
+                  \"required\": true,
+                  \"displayName\": \"First Name\"
+                },
+                \"family_name\": {
+                  \"type\": \"string\",
+                  \"required\": true,
+                  \"displayName\": \"Last Name\"
+                },
+                \"email\": {
+                  \"type\": \"string\",
+                  \"required\": true,
+                  \"unique\": true,
+                  \"displayName\": \"Email\"
+                }
+              }
+            }" \
+            --fail-with-body \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5
+
+          log_info "User schema created successfully"
+        fi
+
+        # Returns the ID of an existing user by username, or creates and returns it.
+        # Usage: ensure_user <username> <password> <given_name> <family_name>
+        ensure_user() {
+          local username="$1" password="$2" given_name="$3" family_name="$4"
+          local existing_users user_id response
+
+          existing_users=$(curl -s --max-time 10 "${THUNDER_URL}/users")
+          if echo "$existing_users" | grep -q "\"username\" *: *\"${username}\""; then
+            log_info "User '${username}' already exists, getting ID..." >&2
+            user_id=$(echo "$existing_users" | tr '\n' ' ' | sed 's/" *: *"/":"/g' \
+              | grep -o "\"username\":\"${username}\"[^}]*\"id\":\"[^\"]*\"\|\"id\":\"[^\"]*\"[^}]*\"username\":\"${username}\"" \
+              | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+          else
+            log_info "Creating user '${username}'..." >&2
+            response=$(curl --location "${THUNDER_URL}/users" \
+              --header 'accept: application/json' \
+              --header 'Content-Type: application/json' \
+              --data "{
+                \"type\": \"openchoreo-user\",
+                \"organizationUnit\": \"$ORG_UNIT_ID\",
+                \"attributes\": {
+                  \"username\": \"${username}\",
+                  \"email\": \"${username}\",
+                  \"password\": \"${password}\",
+                  \"given_name\": \"${given_name}\",
+                  \"family_name\": \"${family_name}\"
+                }
+              }" \
+              --fail-with-body \
+              --max-time 30 \
+              --retry 3 \
+              --retry-delay 5)
+            log_info "User '${username}' created successfully" >&2
+            user_id=$(echo "$response" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+          fi
+          echo "$user_id"
+        }
+
+        # Creates a group with a single member if it does not already exist.
+        # Usage: ensure_group <group_name> <description> <member_user_id>
+        ensure_group() {
+          local group_name="$1" description="$2" member_id="$3"
+          local existing_groups group_members
+
+          existing_groups=$(curl -s --max-time 10 "${THUNDER_URL}/groups")
+          if echo "$existing_groups" | grep -q "\"name\" *: *\"${group_name}\""; then
+            log_info "Group '${group_name}' already exists, skipping creation"
+            return
+          fi
+
+          group_members=""
+          if [ -n "$member_id" ]; then
+            group_members="{\"type\":\"user\",\"id\":\"${member_id}\"}"
+          fi
+
+          log_info "Creating group '${group_name}'..."
+          curl --location "${THUNDER_URL}/groups" \
+            --header 'accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --data "{
+              \"name\": \"${group_name}\",
+              \"organizationUnitId\": \"$ORG_UNIT_ID\",
+              \"description\": \"${description}\",
+              \"members\": [${group_members}]
+            }" \
+            --fail-with-body \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5
+          log_info "Group '${group_name}' created successfully"
+        }
+
+        ADMIN_ID=$(ensure_user "admin@openchoreo.dev"            "Admin@123" "Admin"     "User")
+        DEVELOPER_ID=$(ensure_user "developer@openchoreo.dev"   "Dev@123"   "Developer" "User")
+        PE_ID=$(ensure_user "platform-engineer@openchoreo.dev"  "PE@123"    "Platform"  "Engineer")
+        SRE_ID=$(ensure_user "sre@openchoreo.dev"               "SRE@123"   "SRE"       "User")
+
+        ensure_group "admins"             "Openchoreo Admins group"             "$ADMIN_ID"
+        ensure_group "developers"         "Openchoreo Developers group"         "$DEVELOPER_ID"
+        ensure_group "platform-engineers" "Openchoreo Platform Engineers group" "$PE_ID"
+        ensure_group "sres"               "Openchoreo SREs group"               "$SRE_ID"
+
+      51-backstage-app.sh: |
+        #!/bin/bash
+        set -e
+
+        THUNDER_URL="http://localhost:8090"
+
+        log_info "Checking if application 'Backstage' already exists..."
+        existing_apps=$(curl -s --max-time 10 "${THUNDER_URL}/applications")
+
+        app_id=$(echo "$existing_apps" | tr '\n' ' ' | sed 's/" *: *"/":"/g' | grep -o '"name":"Backstage"[^}]*"id":"[^"]*"\|"id":"[^"]*"[^}]*"name":"Backstage"' | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+        APP_PAYLOAD='{
+          "name": "Backstage",
+          "description": "OpenChoreo Backstage Portal",
+          "logo_url": "https://cdn.statically.io/gh/openchoreo/openchoreo.github.io@main/static/img/openchoreo-logo.png",
+          "allowed_user_types": ["openchoreo-user"],
+          "assertion": {
+            "validity_period": 3600
+          },
+          "inbound_auth_config": [
+            {
+              "type": "oauth2",
+              "config": {
+                "client_id": "openchoreo-backstage-client",
+                "client_secret": "backstage-portal-secret",
+                "redirect_uris": [
+                  "http://openchoreo.localhost:8080/api/auth/openchoreo-auth/handler/frame"
+                ],
+                "grant_types": [
+                  "authorization_code",
+                  "client_credentials",
+                  "refresh_token"
+                ],
+                "response_types": [
+                  "code"
+                ],
+                "token_endpoint_auth_method": "client_secret_post",
+                "pkce_required": false,
+                "public_client": false,
+                "token": {
+                  "access_token": {
+                    "validity_period": 86400,
+                    "user_attributes": [
+                      "given_name",
+                      "family_name",
+                      "username",
+                      "groups"
+                    ]
+                  },
+                  "id_token": {
+                    "validity_period": 86400,
+                    "user_attributes": [
+                      "given_name",
+                      "family_name",
+                      "username",
+                      "groups"
+                    ]
+                  }
+                },
+                "scope_claims": {
+                  "email": [
+                    "email"
+                  ],
+                  "groups": [
+                    "groups"
+                  ],
+                  "profile": [
+                    "username",
+                    "given_name",
+                    "family_name",
+                    "picture"
+                  ]
+                }
+              }
+            }
+          ]
+        }'
+
+        if [ -n "$app_id" ]; then
+          log_info "Application 'Backstage' already exists (id: $app_id), updating..."
+          curl --location -X PUT "${THUNDER_URL}/applications/$app_id" \
+            --header 'Content-Type: application/json' \
+            --data "$APP_PAYLOAD" \
+            --fail-with-body \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5
+
+          log_info "Application updated successfully"
+        else
+          log_info "Application does not exist, creating default application..."
+          curl --location "${THUNDER_URL}/applications" \
+            --header 'Content-Type: application/json' \
+            --data "$APP_PAYLOAD" \
+            --fail-with-body \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5
+
+          log_info "Default application created successfully"
+        fi
+
+      54-cli-app.sh: |
+        #!/bin/bash
+        set -e
+
+        THUNDER_URL="http://localhost:8090"
+
+        log_info "Checking if application 'OpenChoreo CLI' already exists..."
+        existing_apps=$(curl -s --max-time 10 "${THUNDER_URL}/applications")
+
+        app_id=$(echo "$existing_apps" | tr '\n' ' ' | sed 's/" *: *"/":"/g' | grep -o '"name":"OpenChoreo CLI"[^}]*"id":"[^\"]*"\|"id":"[^\"]*"[^}]*"name":"OpenChoreo CLI"' | grep -o '"id":"[^\"]*"' | head -1 | cut -d'"' -f4)
+
+        APP_PAYLOAD='{
+          "name": "OpenChoreo CLI",
+          "description": "OpenChoreo CLI Default Application",
+          "logo_url": "https://cdn.statically.io/gh/openchoreo/openchoreo.github.io@main/static/img/openchoreo-logo.png",
+          "allowed_user_types": ["openchoreo-user"],
+          "assertion": {
+            "validity_period": 3600
+          },
+          "inbound_auth_config": [
+            {
+              "type": "oauth2",
+              "config": {
+                "client_id": "openchoreo-cli",
+                "redirect_uris": [
+                  "http://127.0.0.1:55152/auth-callback"
+                ],
+                "grant_types": [
+                  "authorization_code", "refresh_token"
+                ],
+                "response_types": [
+                  "code"
+                ],
+                "token_endpoint_auth_method": "none",
+                "pkce_required": true,
+                "public_client": true,
+                "token": {
+                  "access_token": {
+                    "validity_period": 3600,
+                    "user_attributes": [
+                      "given_name",
+                      "family_name",
+                      "username",
+                      "groups"
+                    ]
+                  },
+                  "id_token": {
+                    "validity_period": 3600,
+                    "user_attributes": [
+                      "given_name",
+                      "family_name",
+                      "username",
+                      "groups"
+                    ]
+                  }
+                },
+                "scope_claims": {
+                  "email": [
+                    "email"
+                  ],
+                  "groups": [
+                    "groups"
+                  ],
+                  "profile": [
+                    "username",
+                    "given_name",
+                    "family_name",
+                    "picture",
+                    "groups"
+                  ]
+                }
+              }
+            }
+          ]
+        }'
+
+        if [ -n "$app_id" ]; then
+          log_info "Application 'OpenChoreo CLI' already exists (id: $app_id), updating..."
+          curl --location -X PUT "${THUNDER_URL}/applications/$app_id" \
+            --header 'Content-Type: application/json' \
+            --data "$APP_PAYLOAD" \
+            --fail-with-body \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5
+
+          log_info "Application updated successfully"
+        else
+          log_info "Application does not exist, creating default CLI application..."
+          curl --location "${THUNDER_URL}/applications" \
+            --header 'Content-Type: application/json' \
+            --data "$APP_PAYLOAD" \
+            --fail-with-body \
+            --max-time 30 \
+            --retry 3 \
+            --retry-delay 5
+
+          log_info "Default CLI application created successfully"
+        fi
+
+
+      # lab (#19, research §G/§H): OIDC clients for Argo CD and Kargo, seeded now so #19 only flips their configs.
+      # Public clients with PKCE -> no client secret exists anywhere. Redirect URIs follow `make ui` after #11
+      # (Argo CD :8090, Kargo :8091). email + groups in the ID token: Kargo's usernameClaim is email, both map groups.
+      62-argocd-app.sh: |
+        #!/bin/bash
+        set -e
+
+        THUNDER_URL="http://localhost:8090"
+
+        log_info "Checking if application 'Argo CD' already exists..."
+        existing_apps=$(curl -s --max-time 10 "${THUNDER_URL}/applications")
+
+        app_id=$(echo "$existing_apps" | tr '\n' ' ' | sed 's/" *: *"/":"/g' | grep -o '"name":"Argo CD"[^}]*"id":"[^\"]*"\|"id":"[^\"]*"[^}]*"name":"Argo CD"' | grep -o '"id":"[^\"]*"' | head -1 | cut -d'"' -f4)
+
+        APP_PAYLOAD='{
+          "name": "Argo CD",
+          "description": "Argo CD on the hub (public client, PKCE)",
+          "allowed_user_types": ["openchoreo-user"],
+          "assertion": {
+            "validity_period": 3600
+          },
+          "inbound_auth_config": [
+            {
+              "type": "oauth2",
+              "config": {
+                "client_id": "argocd",
+                "redirect_uris": [
+                  "http://localhost:8090/pkce/verify"
+                ],
+                "grant_types": [
+                  "authorization_code", "refresh_token"
+                ],
+                "response_types": [
+                  "code"
+                ],
+                "token_endpoint_auth_method": "none",
+                "pkce_required": true,
+                "public_client": true,
+                "token": {
+                  "access_token": {
+                    "validity_period": 3600,
+                    "user_attributes": [
+                      "given_name",
+                      "family_name",
+                      "username",
+                      "email",
+                      "groups"
+                    ]
+                  },
+                  "id_token": {
+                    "validity_period": 3600,
+                    "user_attributes": [
+                      "given_name",
+                      "family_name",
+                      "username",
+                      "email",
+                      "groups"
+                    ]
+                  }
+                },
+                "scope_claims": {
+                  "email": [
+                    "email"
+                  ],
+                  "groups": [
+                    "groups"
+                  ],
+                  "profile": [
+                    "username",
+                    "given_name",
+                    "family_name",
+                    "picture"
+                  ]
+                }
+              }
+            }
+          ]
+        }'
+
+        if [ -n "$app_id" ]; then
+          log_info "Application 'Argo CD' already exists (id: $app_id), updating..."
+          curl --location -X PUT "${THUNDER_URL}/applications/$app_id" \
+            --header 'Content-Type: application/json' \
+            --data "$APP_PAYLOAD" \
+            --fail-with-body --max-time 30 --retry 3 --retry-delay 5
+          log_info "Application updated successfully"
+        else
+          log_info "Application 'Argo CD' does not exist, creating..."
+          curl --location "${THUNDER_URL}/applications" \
+            --header 'Content-Type: application/json' \
+            --data "$APP_PAYLOAD" \
+            --fail-with-body --max-time 30 --retry 3 --retry-delay 5
+          log_info "Application created successfully"
+        fi
+
+      63-kargo-app.sh: |
+        #!/bin/bash
+        set -e
+
+        THUNDER_URL="http://localhost:8090"
+
+        log_info "Checking if application 'Kargo' already exists..."
+        existing_apps=$(curl -s --max-time 10 "${THUNDER_URL}/applications")
+
+        app_id=$(echo "$existing_apps" | tr '\n' ' ' | sed 's/" *: *"/":"/g' | grep -o '"name":"Kargo"[^}]*"id":"[^\"]*"\|"id":"[^\"]*"[^}]*"name":"Kargo"' | grep -o '"id":"[^\"]*"' | head -1 | cut -d'"' -f4)
+
+        APP_PAYLOAD='{
+          "name": "Kargo",
+          "description": "Kargo on the hub (public client, PKCE - Kargo never uses a client secret)",
+          "allowed_user_types": ["openchoreo-user"],
+          "assertion": {
+            "validity_period": 3600
+          },
+          "inbound_auth_config": [
+            {
+              "type": "oauth2",
+              "config": {
+                "client_id": "kargo",
+                "redirect_uris": [
+                  "http://localhost:8091/login"
+                ],
+                "grant_types": [
+                  "authorization_code", "refresh_token"
+                ],
+                "response_types": [
+                  "code"
+                ],
+                "token_endpoint_auth_method": "none",
+                "pkce_required": true,
+                "public_client": true,
+                "token": {
+                  "access_token": {
+                    "validity_period": 3600,
+                    "user_attributes": [
+                      "given_name",
+                      "family_name",
+                      "username",
+                      "email",
+                      "groups"
+                    ]
+                  },
+                  "id_token": {
+                    "validity_period": 3600,
+                    "user_attributes": [
+                      "given_name",
+                      "family_name",
+                      "username",
+                      "email",
+                      "groups"
+                    ]
+                  }
+                },
+                "scope_claims": {
+                  "email": [
+                    "email"
+                  ],
+                  "groups": [
+                    "groups"
+                  ],
+                  "profile": [
+                    "username",
+                    "given_name",
+                    "family_name",
+                    "picture"
+                  ]
+                }
+              }
+            }
+          ]
+        }'
+
+        if [ -n "$app_id" ]; then
+          log_info "Application 'Kargo' already exists (id: $app_id), updating..."
+          curl --location -X PUT "${THUNDER_URL}/applications/$app_id" \
+            --header 'Content-Type: application/json' \
+            --data "$APP_PAYLOAD" \
+            --fail-with-body --max-time 30 --retry 3 --retry-delay 5
+          log_info "Application updated successfully"
+        else
+          log_info "Application 'Kargo' does not exist, creating..."
+          curl --location "${THUNDER_URL}/applications" \
+            --header 'Content-Type: application/json' \
+            --data "$APP_PAYLOAD" \
+            --fail-with-body --max-time 30 --retry 3 --retry-delay 5
+          log_info "Application created successfully"
+        fi
