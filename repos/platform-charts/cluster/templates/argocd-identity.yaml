@@ -14,7 +14,30 @@ spec:
   privateKey: { algorithm: ECDSA, size: 256 }
   issuerRef: { name: argocd-agent-ca, kind: Issuer }
 ---
-# 2. Argo CD cluster secret, rendered from that cert. Same shape as `argocd-agentctl agent create`, but declarative
+# 2. The hub's SecretStore argocd/in-cluster may read exactly this cert, nothing else in argocd (CA key, JWT key...).
+#    Store + SA are owned by platform-charts/argocd-agent-principal (templates/eso-in-cluster-store.yaml): the binding
+#    refers to its SA by name (values: inClusterStore) -> keep both in step.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: eso-in-cluster-{{ $n }}
+  namespace: {{ .Values.argocdNamespace }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $tls }}]
+    verbs: [get]              # ESO reads a remoteRef with a single GET
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: eso-in-cluster-{{ $n }}
+  namespace: {{ .Values.argocdNamespace }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: eso-in-cluster-{{ $n }} }
+subjects:
+  - { kind: ServiceAccount, name: {{ .Values.inClusterStore.serviceAccount }}, namespace: {{ .Values.argocdNamespace }} }
+---
+# 3. Argo CD cluster secret, rendered from that cert. Same shape as `argocd-agentctl agent create`, but declarative
 #    and carrying the fleet labels -> this is what ApplicationSet cluster generators select on.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -23,7 +46,7 @@ metadata:
   namespace: {{ .Values.argocdNamespace }}
 spec:
   refreshInterval: 1h
-  secretStoreRef: { kind: SecretStore, name: in-cluster }
+  secretStoreRef: { kind: SecretStore, name: {{ .Values.inClusterStore.name }} }
   target:
     name: cluster-{{ $n }}
     template:
@@ -45,7 +68,7 @@ spec:
     - { secretKey: key, remoteRef: { key: {{ $tls }}, property: tls.key } }
     - { secretKey: ca,  remoteRef: { key: {{ $tls }}, property: ca.crt } }
 ---
-# 3. Cert + CA to OpenBao (secret/clusters/<name>/argocd-agent). Pull model: the worker's ESO (CAAPH birth kit,
+# 4. Cert + CA to OpenBao (secret/clusters/<name>/argocd-agent). Pull model: the worker's ESO (CAAPH birth kit,
 #    fleet/base/helmchartproxies.yaml) reads only its own path and materialises argocd-agent-client-tls (tls) and
 #    argocd-agent-ca (ca.crt only). Nothing on the hub writes into the worker.
 apiVersion: external-secrets.io/v1alpha1

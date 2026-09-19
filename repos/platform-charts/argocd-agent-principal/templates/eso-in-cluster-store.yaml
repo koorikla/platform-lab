@@ -1,17 +1,29 @@
-# Lets ExternalSecrets in this namespace read cert-manager secrets and template them into Argo CD cluster secrets.
+# Lets ExternalSecrets in this namespace copy hub-minted secrets (cert-manager) into the shape their consumers need.
+# Least privilege: this namespace also holds the agent CA key, the JWT key and Argo CD credentials, so the SA may `get`
+# only Secrets named explicitly. ESO's kubernetes provider reads a remoteRef with one GET (no list/watch) and marks the
+# store Ready from a SelfSubjectRulesReview that accepts any get-on-secrets rule, name-scoped ones included.
+# Grants are split by owner:
+#   - here: argocd-agent-jwt-key (templates/jwt-key.yaml);
+#   - platform-charts/cluster (templates/argocd-identity.yaml): Role/RoleBinding eso-in-cluster-<name> per worker for
+#     <name>-agent-client-tls. It binds this SA *by name* (its values: inClusterStore.serviceAccount) -> rename both.
+# A new ExternalSecret on this store needs a matching resourceNames grant, or it fails with "forbidden".
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: eso-in-cluster
+  namespace: {{ .Release.Namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: eso-in-cluster
+  namespace: {{ .Release.Namespace }}
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    verbs: [get, list, watch]
+    resourceNames: [argocd-agent-jwt-key]
+    verbs: [get]
+  # store validation; system:basic-user allows it for everyone too, but the store must not depend on that default
   - apiGroups: [authorization.k8s.io]
     resources: [selfsubjectrulesreviews]
     verbs: [create]
@@ -20,6 +32,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: eso-in-cluster
+  namespace: {{ .Release.Namespace }}
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: eso-in-cluster }
 subjects:
   - { kind: ServiceAccount, name: eso-in-cluster, namespace: {{ .Release.Namespace }} }
@@ -28,6 +41,7 @@ apiVersion: external-secrets.io/v1
 kind: SecretStore
 metadata:
   name: in-cluster
+  namespace: {{ .Release.Namespace }}
 spec:
   provider:
     kubernetes:

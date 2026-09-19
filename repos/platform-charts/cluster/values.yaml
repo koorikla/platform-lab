@@ -23,6 +23,9 @@ network:                       # k3s defaults; the k3s provider does not derive 
   services: 10.43.0.0/16
 
 resourceProxy: argocd-agent-resource-proxy:9090
+inClusterStore:                # owned by platform-charts/argocd-agent-principal; we only grant its SA our client cert
+  name: in-cluster
+  serviceAccount: eso-in-cluster
 
 openbao:                       # platform-charts/openbao on the hub
   store: openbao                # ClusterSecretStore the hub writes with; workers pull secret/clusters/<name>/*
