@@ -1,0 +1,21 @@
+suite: hub budget and Argo hooks of the OpenChoreo control plane
+release:
+  name: openchoreo-control-plane
+  namespace: openchoreo-control-plane
+templates:
+  - charts/openchoreo-control-plane/templates/*.yaml
+  - charts/openchoreo-control-plane/templates/*/*.yaml
+tests:
+  # ~15 GB shared by every CAPD node: every long-running container requests cpu + memory
+  - it: requests cpu and memory for every Deployment container
+    documentSelector: { path: kind, value: Deployment, matchMany: true, skipEmptyTemplates: true }
+    asserts:
+      - notExists: { path: 'spec.template.spec.containers[?(!@.resources.requests.cpu)]' }
+      - notExists: { path: 'spec.template.spec.containers[?(!@.resources.requests.memory)]' }
+
+  # only upstream's authz bootstrap (post-install/upgrade -> Argo PostSync, idempotent kubectl apply): nothing PreSync
+  # that could wait on a not-yet-running control plane
+  - it: has no hooks but the post-install/post-upgrade authz bootstrap
+    documentSelector: { path: 'metadata.annotations["helm.sh/hook"]', matchMany: true, skipEmptyTemplates: true }
+    asserts:
+      - equal: { path: 'metadata.annotations["helm.sh/hook"]', value: "post-install,post-upgrade" }

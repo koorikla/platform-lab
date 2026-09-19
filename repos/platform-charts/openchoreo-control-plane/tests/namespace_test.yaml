@@ -1,0 +1,29 @@
+suite: org namespace default - labelled for OpenChoreo, never deleted or pruned by Argo
+# openchoreo-api/Backstage list only namespaces labelled control-plane=true (upstream labels `default` imperatively)
+release:
+  name: openchoreo-control-plane
+  namespace: openchoreo-control-plane
+templates:
+  - templates/namespace.yaml
+  - charts/openchoreo-control-plane/templates/*.yaml
+  - charts/openchoreo-control-plane/templates/*/*.yaml
+tests:
+  - it: labels default with openchoreo.dev/control-plane "true" (a string)
+    template: templates/namespace.yaml
+    asserts:
+      - isKind: { of: Namespace }
+      - equal: { path: metadata.name, value: default }
+      - equal: { path: 'metadata.labels["openchoreo.dev/control-plane"]', value: "true" }
+      - isType: { path: 'metadata.labels["openchoreo.dev/control-plane"]', type: string }
+
+  # server-side apply adds just the label
+  - it: never deletes or prunes default
+    template: templates/namespace.yaml
+    asserts:
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-options"]', value: "Delete=false,Prune=false,ServerSideApply=true" }
+
+  # default resources (Project, Environments, DeploymentPipeline) are not ours: per cluster (#13) and Phase 3
+  - it: renders no OpenChoreo resources of its own
+    asserts:
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: apiVersion, value: openchoreo.dev/v1alpha1, matchMany: true, skipEmptyTemplates: true }

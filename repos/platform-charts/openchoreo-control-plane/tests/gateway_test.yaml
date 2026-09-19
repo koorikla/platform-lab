@@ -1,0 +1,64 @@
+suite: Gateway gateway-default (ClusterIP, sized) and the cluster-gateway workers dial via mgmt-lb:30843
+release:
+  name: openchoreo-control-plane
+  namespace: openchoreo-control-plane
+templates:
+  - charts/openchoreo-control-plane/templates/*.yaml
+  - charts/openchoreo-control-plane/templates/*/*.yaml
+  - templates/gatewayparameters.yaml
+tests:
+  # upstream issuer/public URLs carry :8080, so the listener is 8080 inside the cluster too; make ui and the hub CoreDNS
+  # rewrite name the Service after the Gateway (hack/tests/test_hub_dns_ui.sh)
+  - it: listens on http:8080 only
+    template: charts/openchoreo-control-plane/templates/gateway/gateway.yaml
+    asserts:
+      - equal: { path: metadata.name, value: gateway-default }
+      - equal: { path: metadata.namespace, value: openchoreo-control-plane }
+      - equal: { path: 'spec.listeners[*].name', value: http }
+      - equal: { path: 'spec.listeners[*].port', value: 8080 }
+
+  # kgateway defaults to LoadBalancer = k3s servicelb pods binding hostPort 8080 on every hub node; make ui and the
+  # CoreDNS rewrite need only the ClusterIP. kgateway v2.3.1 deep-merges the GatewayParameters of parametersRef.
+  - it: points the Gateway at its GatewayParameters
+    template: charts/openchoreo-control-plane/templates/gateway/gateway.yaml
+    asserts:
+      - equal:
+          path: spec.infrastructure.parametersRef
+          value: { group: gateway.kgateway.dev, kind: GatewayParameters, name: gateway-default }
+
+  # modest requests, no limits (#67): envoy is the proxy pod's only container (sds only with istio integration)
+  - it: keeps the Gateway's Service ClusterIP and sizes envoy with requests only
+    template: templates/gatewayparameters.yaml
+    asserts:
+      - isAPIVersion: { of: gateway.kgateway.dev/v1alpha1 }
+      - equal: { path: metadata.name, value: gateway-default }
+      - equal: { path: metadata.namespace, value: openchoreo-control-plane }
+      - equal: { path: spec.kube.service.type, value: ClusterIP }
+      - exists: { path: spec.kube.envoyContainer.resources.requests.cpu }
+      - exists: { path: spec.kube.envoyContainer.resources.requests.memory }
+      - notExists: { path: spec.kube.envoyContainer.resources.limits }
+
+  # workers dial wss://mgmt-lb:30843/ws (hub CAPD LB frontend -> this NodePort), not a hostname route
+  - it: exposes the cluster-gateway on NodePort 30843, not through a TLSRoute
+    asserts:
+      - equal: { path: spec.type, value: NodePort }
+        template: charts/openchoreo-control-plane/templates/cluster-gateway/service.yaml
+        documentSelector: { path: metadata.name, value: cluster-gateway-external }
+      - equal:
+          path: spec.ports
+          value: [{ name: websocket, port: 8443, targetPort: 8443, protocol: TCP, nodePort: 30843 }]
+        template: charts/openchoreo-control-plane/templates/cluster-gateway/service.yaml
+        documentSelector: { path: metadata.name, value: cluster-gateway-external }
+      - hasDocuments: { count: 0, filterAware: true }
+        documentSelector: { path: kind, value: TLSRoute, matchMany: true, skipEmptyTemplates: true }
+
+  - it: issues the cluster-gateway certificate for mgmt-lb too
+    template: charts/openchoreo-control-plane/templates/cluster-gateway/certificate.yaml
+    asserts:
+      - equal: { path: metadata.name, value: cluster-gateway-tls }
+      - equal:
+          path: spec.dnsNames
+          value:
+            - cluster-gateway.openchoreo-control-plane.svc
+            - cluster-gateway.openchoreo-control-plane.svc.cluster.local
+            - mgmt-lb
