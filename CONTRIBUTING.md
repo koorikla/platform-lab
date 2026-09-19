@@ -372,7 +372,10 @@ need internet egress.
   openbao chart's `hubWriter.namespaces` may push. The worker's ESO reads it through `ClusterSecretStore hub-openbao`
   (birth kit), which authenticates as that worker (`auth/k8s-<name>`, maintained by the `openbao-fleet-sync` CronJob)
   and can read only its own path. Widen the store's namespaces (birth kit value `hubOpenbao.namespaces`) for a new
-  consumer namespace. Nothing on the hub writes into a worker with the CAPI admin kubeconfig. Example:
+  consumer namespace. If that namespace belongs to a worker addon (Argo creates it), use a `ClusterExternalSecret`
+  so the birth kit never owns or waits for it; a ConfigMap target needs ESO's generic target (`target.manifest`),
+  e.g. `worker-birth-kit/templates/openchoreo-agent-identity.yaml`.
+  Nothing on the hub writes into a worker with the CAPI admin kubeconfig. Example:
   `repos/platform-charts/cluster/templates/argocd-identity.yaml` (push) and
   `repos/platform-charts/worker-birth-kit/templates/` (pull).
 - OpenBao (#30) keeps its data on a PVC (raft), unseals itself (static key in Secret `openbao/openbao-unseal-key`,

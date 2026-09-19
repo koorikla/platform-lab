@@ -18,13 +18,15 @@ flowchart LR
     agent["argocd-agent (managed)"]
     weso["ESO (birth kit)"]
     ctrl["app-controller + repo-server + redis"]
-    dp["OpenChoreo data plane (phase 2)"]
+    dp["OpenChoreo cluster-agent + gateway (worker addon)"]
   end
   git[(git)] --> argo
   argo -->|"cluster chart"| capi -->|"Cluster + HelmChartProxy"| dev1
   eso -->|"PushSecret: agent client cert"| bao
   weso -->|"pulls its own path :30820"| bao
   weso -->|"argocd-agent-client-tls"| agent
+  weso -->|"cluster-agent-tls (cert + plane-id)"| dp
+  dp -->|"wss mTLS :30843"| oc
   agent -->|"gRPC mTLS :30443"| principal
   argo -->|"Applications labelled argocd-agent=true"| principal
   kargo -->|"render to rendered/<stage>"| git
