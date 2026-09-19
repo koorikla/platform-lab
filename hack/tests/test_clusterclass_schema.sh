@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ClusterClass files (enabled and disabled) and every fleet file's rendered Cluster, validated against the CRDs of the
 # provider versions capi-providers pins (openAPIV3Schema of served versions; CEL rules, webhooks and ClusterClass
-# patch semantics are not checked). Also: every jsonPatch path exists in the target template's schema, and a patch
-# fed straight from a variable has the type the schema expects there.
+# patch semantics are not checked). Also: every jsonPatch path exists in the target template's schema, a patch
+# fed straight from a variable has the type the schema expects there, and a literal object value only uses fields the
+# schema has there (one level deep).
 # CRDs come from the providers' release assets, cached under ~/.cache/platform-lab; skipped when kubeconform is missing
 # or GitHub can't be reached, unless REQUIRE_SCHEMA=1 turns the skip into a failure. REQUIRE_SCHEMA defaults to 1
 # under CI (GitHub Actions sets CI=true), so a network blip can't pass there as a SKIP; locally it skips.
@@ -69,6 +70,18 @@ for f in $base/clusterclasses/*.yaml $base/clusterclasses/*.yaml.disabled; do
       # /a/b/0/c -> .properties.a.properties.b.items.properties.c
       q=$(awk -F/ '{ for (i = 2; i <= NF; i++) printf ($i ~ /^([0-9]+|-)$/ ? ".items" : ".properties[\"%s\"]"), $i }' <<<"$path")
       [ "$(yq -p json -o yaml "$q | type" "$s")" = '!!map' ] || fail "$f: $op $path: no such field in $kind $ver"
+      # a literal object (or list of objects) value: its keys, one level deep, exist there too (pruned otherwise)
+      lit="$def | .jsonPatches[$p].value"
+      case $(yq eval-all "$lit | tag" "$f") in
+        '!!map') sq=$q; keys=$(yq eval-all "$lit | keys | .[]" "$f") ;;
+        '!!seq') sq=$q.items; keys=$(yq eval-all "[$lit | .[] | select(tag == \"!!map\") | keys | .[]] | unique | .[]" "$f") ;;
+        *) keys='' ;;
+      esac
+      for key in $keys; do
+        [ "$(yq -p json -o yaml "$sq.properties[\"$key\"] | type" "$s")" = '!!map' ] ||
+          [ "$(yq -p json -o yaml "${sq}[\"x-kubernetes-preserve-unknown-fields\"]" "$s")" = true ] ||
+          fail "$f: $op $path: value field '$key' not in $kind $ver"
+      done
       var=$(yq eval-all "$def | .jsonPatches[$p].valueFrom.variable // \"\"" "$f")
       # only whole variables; builtin.* and nested paths (a.b) are not resolved here
       [ -n "$var" ] && [ "$op" != remove ] && [ "$var" = "${var%%.*}" ] || continue

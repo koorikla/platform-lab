@@ -96,7 +96,8 @@ with `repos/`.
      worker class isn't `k3s-default-worker`.
    - optional `ring: canary` (label `platform.lab/ring`, default `stable`). See [canary](#promote-and-canary-with-kargo).
    - optional `extraLabels`, and `variables` (ClusterClass variables; this **replaces** the chart default list, so
-     keep `kindImageVersion` in it for `k3s-docker`).
+     keep `kindImageVersion` in it for `k3s-docker`). New `k3s-docker` clusters set `slowHostTolerance: true`: born
+     with relaxed leader-election timings (#76); turning it on later replaces the control-plane machine.
 2. `make lint && make test`. Merge; this is `needs-lab`: hold the lab lock when it merges.
 3. What happens: the `fleet-clusters` ApplicationSet renders the `cluster` chart into `fleet` on the hub: CAPI
    `Cluster`, agent client cert, labelled Argo CD cluster secret, and a PushSecret of the cert to OpenBao. CAPI builds

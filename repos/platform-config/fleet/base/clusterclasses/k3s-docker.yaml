@@ -49,6 +49,15 @@ spec:
         openAPIV3Schema:
           type: boolean
           default: false
+    # Tolerate a CPU-starved host (#76). Default false and opt-in per fleet file, because any change to the control
+    # plane's KThreesConfigSpec REPLACES the control-plane machine (KCP rollout: new node joins etcd, old one is
+    # removed). Default true would roll every existing cluster whenever its Cluster is next applied.
+    - name: slowHostTolerance
+      required: false
+      schema:
+        openAPIV3Schema:
+          type: boolean
+          default: false
   patches:
     - name: customImage
       definitions:
@@ -89,6 +98,34 @@ spec:
               path: /spec/template/spec/loadBalancer
               value:
                 customHAProxyConfigTemplateRef: { name: k3s-docker-hub-lb }
+    # k3s runs kube-controller-manager, kube-scheduler and cloud-controller-manager (started because servicelb is on)
+    # in its own process; when one of them can't renew its lease within renew-deadline (default 10 s) it exits with
+    # "leaderelection lost" and takes k3s down with it. On a saturated Docker VM the apiserver/etcd stall for longer.
+    # With one server there is no one to fail over to, so long timings cost nothing; with 3 servers a dead leader is
+    # replaced after ~60 s instead of ~15 s. retry-period 10 s also cuts lease writes 5x (3 leases every 2 s before).
+    # A k3s config drop-in because cluster-api-k3s v0.4.0 has serverConfig fields for the controller-manager and
+    # scheduler but none for the cloud-controller-manager; keys end in "+" to append to the lists in config.yaml.
+    # etcd is left alone: k3s already runs it with heartbeat 500 ms / election 5000 ms (5x etcd's defaults), and a
+    # single member has no elections; its slow-apply warnings are fixed by less write load, not by timeouts.
+    - name: slowHostTolerance
+      enabledIf: "{{ .slowHostTolerance }}"
+      definitions:
+        - selector:
+            apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+            kind: KThreesControlPlaneTemplate
+            matchResources:
+              controlPlane: true
+          jsonPatches:
+            - op: add
+              path: /spec/template/spec/kthreesConfigSpec/files   # the template has no files of its own (a test checks)
+              value:
+                - path: /etc/rancher/k3s/config.yaml.d/50-slow-host.yaml
+                  owner: root:root
+                  permissions: "0600"
+                  content: |
+                    kube-controller-manager-arg+: [leader-elect-lease-duration=60s, leader-elect-renew-deadline=40s, leader-elect-retry-period=10s]
+                    kube-scheduler-arg+: [leader-elect-lease-duration=60s, leader-elect-renew-deadline=40s, leader-elect-retry-period=10s]
+                    kube-cloud-controller-manager-arg+: [leader-elect-lease-duration=60s, leader-elect-renew-deadline=40s, leader-elect-retry-period=10s]
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: DockerClusterTemplate
