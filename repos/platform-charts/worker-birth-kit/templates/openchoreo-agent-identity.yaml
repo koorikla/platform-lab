@@ -1,0 +1,59 @@
+{{- $n := include "birth-kit.clusterName" . }}
+{{- $oc := .Values.openchoreoAgent }}
+# The OpenChoreo cluster-agent's identity, issued on the hub (cluster chart: per-cluster CA, client cert CN = cluster
+# name) and pushed to OpenBao; pulled here. The agent (worker addon openchoreo-data-plane) is cluster-agnostic: it reads
+# its plane ID from this Secret. Invariant 1: cluster name == planeID == client-cert CN.
+# ClusterExternalSecrets because the namespace is the addon's (Argo creates it): ESO creates the ExternalSecrets as soon
+# as it exists, and this release never owns or waits for it.
+# Restart on change (the agent loads its cert only at startup): Reloader in the addon, annotations on the agent's pods.
+apiVersion: external-secrets.io/v1
+kind: ClusterExternalSecret
+metadata:
+  name: openchoreo-agent-tls
+  labels:
+    {{- include "birth-kit.labels" . | nindent 4 }}
+spec:
+  namespaces: [{{ $oc.namespace }}]
+  externalSecretName: {{ $oc.tlsSecret }}
+  externalSecretSpec:
+    refreshInterval: 5m
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: hub-openbao
+    target:
+      name: {{ $oc.tlsSecret }}
+      template:
+        type: kubernetes.io/tls
+        mergePolicy: Merge             # the fetched tls.crt/tls.key plus the plane ID below
+        data:
+          plane-id: {{ $n }}           # the chart's extraEnvs take only secretKeyRef -> PLANE_ID -> --plane-id
+    data:
+      - secretKey: tls.crt
+        remoteRef: { key: clusters/{{ $n }}/openchoreo-agent, property: tls.crt }
+      - secretKey: tls.key
+        remoteRef: { key: clusters/{{ $n }}/openchoreo-agent, property: tls.key }
+---
+# The cluster-gateway's server CA (public). The chart mounts it from a ConfigMap only: ESO generic target, no template
+# -> ConfigMap .data = {ca.crt}.
+apiVersion: external-secrets.io/v1
+kind: ClusterExternalSecret
+metadata:
+  name: openchoreo-gateway-ca
+  labels:
+    {{- include "birth-kit.labels" . | nindent 4 }}
+spec:
+  namespaces: [{{ $oc.namespace }}]
+  externalSecretName: {{ $oc.gatewayCAConfigMap }}
+  externalSecretSpec:
+    refreshInterval: 5m
+    secretStoreRef:
+      kind: ClusterSecretStore
+      name: hub-openbao
+    target:
+      name: {{ $oc.gatewayCAConfigMap }}
+      manifest:
+        apiVersion: v1
+        kind: ConfigMap
+    data:
+      - secretKey: ca.crt
+        remoteRef: { key: clusters/{{ $n }}/openchoreo-gateway-ca, property: ca.crt }

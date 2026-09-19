@@ -11,7 +11,15 @@ hub:
 # Per-cluster OpenBao pull wiring (templates/). OpenBao side: auth/k8s-<name> + role eso + policy cluster-<name>
 # (openbao-fleet-sync CronJob, platform-charts/openbao); data: secret/clusters/<name>/* (hub PushSecrets).
 hubOpenbao:
-  namespaces: [argocd]                 # who may use store hub-openbao; widen per consumer (e.g. openchoreo-data-plane)
+  namespaces: [argocd, openchoreo-data-plane]   # who may use store hub-openbao; widen per consumer
+
+# OpenChoreo cluster-agent identity (#14; templates/openchoreo-agent-identity.yaml). The agent itself is the worker addon
+# openchoreo-data-plane (Kargo): its chart needs cert-manager, Gateway API and kgateway CRDs, which arrive only after
+# birth. Names = that addon's clusterAgent.tls.clientSecretName / serverCAConfigMap (hack/tests/test_openchoreo_data_plane.sh).
+openchoreoAgent:
+  namespace: openchoreo-data-plane     # the addon's namespace; created by Argo (CreateNamespace), not by this chart
+  tlsSecret: cluster-agent-tls         # client cert (CN = clusterName, issued on the hub) + key plane-id = clusterName
+  gatewayCAConfigMap: cluster-gateway-ca   # the hub cluster-gateway's server CA (public), a ConfigMap for the chart
 
 # Workload-cluster profile: application-controller + repo-server + redis only.
 argo-cd:
@@ -59,6 +67,10 @@ external-secrets:
   fullnameOverride: external-secrets   # SA external-secrets/external-secrets, bound in OpenBao role eso (fleet-sync)
   namespaceOverride: external-secrets  # one release has one namespace (argocd): templates/namespace.yaml creates this one
   installCRDs: true                    # templated CRDs own upgrades; crds/ only bootstraps the first install
+  # ConfigMap targets (target.manifest) for the gateway CA: the data-plane chart mounts it from a ConfigMap only.
+  # Lets ESO write ConfigMaps as well (it can already write every Secret).
+  genericTargets:
+    enabled: true
   webhook:
     # The store and ExternalSecrets are created in the same install as the webhook, before its pod and CA bundle are
     # ready: with Fail every birth would fail its first installs until the webhook serves. Ignore = no validation

@@ -1,13 +1,47 @@
-# Phase 2. Remote-plane settings per upstream multi-cluster guide.
+# Upstream values checked at openchoreo-data-plane 1.2.5 (helm show values; install/k3d/multi-cluster/values-dp.yaml).
+# The data plane has no controllers of its own (they run in the control plane on the hub): cluster-agent + Gateway.
 openchoreo-data-plane:
+  # Issuer + Certificate "webhook-server-cert" for a webhook this chart doesn't deploy: nothing uses them
+  security:
+    enabled: false
   gateway:
+    # gateway-default, listener http :80 = what the hub's ClusterDataPlane names (platform-charts/cluster values
+    # openchoreo.dataPlaneGateway). HTTPS would need a real hostname (validate.yaml rejects the .invalid default).
     tls:
       enabled: false
   clusterAgent:
-    enabled: true
-    serverUrl: "wss://mgmt-lb:30843/ws"   # VERIFY: needs fixed nodePort + frontend in fleet/base/hub-lb.yaml
+    # hub CAPD LB frontend (fleet/base/hub-lb.yaml) -> cluster-gateway NodePort; the gateway cert covers mgmt-lb
+    serverUrl: wss://mgmt-lb:30843/ws
+    # Cluster-agnostic render (Kargo, one per env): the kubelet expands $(PLANE_ID) from the env var below, i.e. the
+    # plane-id key the birth kit writes next to the client cert (= cluster name, invariant 1).
+    planeID: $(PLANE_ID)
+    extraEnvs:
+      - name: PLANE_ID
+        valueFrom:
+          secretKeyRef: { name: cluster-agent-tls, key: plane-id }
+    # Reloader (below) rolls the agent when the birth kit's ESO updates its cert or the gateway CA
+    podAnnotations:
+      secret.reloader.stakater.com/reload: cluster-agent-tls
+      configmap.reloader.stakater.com/reload: cluster-gateway-ca
+    resources:                         # one websocket + applies from the hub; upstream limits, smaller requests (#76)
+      requests: { cpu: 10m, memory: 64Mi }
+      limits: { cpu: 100m, memory: 256Mi }
     tls:
       enabled: true
+      clientSecretName: cluster-agent-tls     # mounted at /certs; pulled by the birth kit (ESO, ClusterExternalSecret)
+      serverCAConfigMap: cluster-gateway-ca   # mounted at /ca-certs; pulled by the birth kit (ESO generic target)
+      # With TLS on the chart always renders a self-signed Certificate (CN = the literal planeID). It must not write
+      # into clientSecretName (its default), or cert-manager and ESO fight over the agent's identity: park it aside.
       generateCerts: true
-      serverCAConfigMap: cluster-gateway-ca          # TODO: deliver declaratively (see CLAUDE.md -> OpenChoreo trust)
-      caSecretName: ""
+      secretName: cluster-agent-selfsigned-unused
+
+reloader:
+  fullnameOverride: reloader
+  reloader:
+    watchGlobally: false               # Roles + this namespace only: watches the agent's Secret/ConfigMap, nothing else
+    reloadStrategy: annotations        # a pod-template annotation (Argo ignores fields it doesn't manage), no env var
+    readOnlyRootFileSystem: true
+    deployment:
+      resources:
+        requests: { cpu: 5m, memory: 32Mi }
+        limits: { cpu: 100m, memory: 128Mi }

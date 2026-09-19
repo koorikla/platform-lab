@@ -2,5 +2,8 @@ dependencies:
 - name: openchoreo-data-plane
   repository: oci://ghcr.io/openchoreo/helm-charts
   version: 1.2.5
-digest: sha256:61ed491c428b1a4d8c076af6f97e03009579ee37b804851fb159067ee54fe966
-generated: "2026-09-18T23:20:32.734259+03:00"
+- name: reloader
+  repository: oci://ghcr.io/stakater/charts
+  version: 2.2.17
+digest: sha256:42db0de33a7b5ac6075966a92df4cade3d0b5f99397371a0c4e0bc32eeaf1738
+generated: "2026-09-19T14:05:54.551905+03:00"
