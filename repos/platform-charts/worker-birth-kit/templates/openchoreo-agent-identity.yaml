@@ -13,7 +13,8 @@ metadata:
   labels:
     {{- include "birth-kit.labels" . | nindent 4 }}
 spec:
-  namespaces: [{{ $oc.namespace }}]
+  namespaceSelectors:             # (spec.namespaces is deprecated in ESO v2.10.0; this is what it expanded to)
+    - matchLabels: { kubernetes.io/metadata.name: {{ $oc.namespace }} }
   externalSecretName: {{ $oc.tlsSecret }}
   externalSecretSpec:
     refreshInterval: 5m
@@ -42,7 +43,8 @@ metadata:
   labels:
     {{- include "birth-kit.labels" . | nindent 4 }}
 spec:
-  namespaces: [{{ $oc.namespace }}]
+  namespaceSelectors:             # (spec.namespaces is deprecated in ESO v2.10.0; this is what it expanded to)
+    - matchLabels: { kubernetes.io/metadata.name: {{ $oc.namespace }} }
   externalSecretName: {{ $oc.gatewayCAConfigMap }}
   externalSecretSpec:
     refreshInterval: 5m

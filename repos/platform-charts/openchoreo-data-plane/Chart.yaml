@@ -8,6 +8,8 @@ version: 0.2.0
 # Invariant 4 exception: Reloader lands with the agent because the agent is not correct without it: upstream
 # cluster-agent loads its client cert once at startup (internal/cluster-agent/agent.go:83), so a renewed cert
 # (1y, renewed 30d before expiry on the hub) must restart it, or the gateway rejects the expired one on reconnect.
+# Scoped to this namespace (a separate addon would be one more Kargo pipeline on the saturated hub, #76). When a second
+# namespace needs Reloader (e.g. Phase 3 apps with ESO-fed secrets), lift it into its own worker addon.
 dependencies:
   - name: openchoreo-data-plane
     version: 1.2.5

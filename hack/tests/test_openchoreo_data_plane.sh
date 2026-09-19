@@ -21,12 +21,13 @@ assert_yq $config/addons/workers/kgateway/addon.yaml '.addon.namespace' "$ns"
 k=$(render worker-birth-kit $kit -n argocd --set clusterName=dev1)
 tlsES='select(.kind=="ClusterExternalSecret" and .metadata.name=="openchoreo-agent-tls")'
 caES='select(.kind=="ClusterExternalSecret" and .metadata.name=="openchoreo-gateway-ca")'
-assert_yq "$k" "$tlsES | .spec.namespaces[0]" "$ns"
-assert_yq "$k" "$caES | .spec.namespaces[0]" "$ns"
+assert_yq "$k" "$tlsES | .spec.namespaceSelectors[0].matchLabels[\"kubernetes.io/metadata.name\"]" "$ns"
+assert_yq "$k" "$caES | .spec.namespaceSelectors[0].matchLabels[\"kubernetes.io/metadata.name\"]" "$ns"
 tlsSecret=$(yq "$tlsES | .spec.externalSecretSpec.target.name" "$k")
 caConfigMap=$(yq "$caES | .spec.externalSecretSpec.target.name" "$k")
 
-for env in dev test prod; do
+# every environment Kargo renders (the envs of the kargo-pipeline stages, like hack/lint.sh)
+for env in $(yq "[.stages[].env] | unique | .[]" $charts/kargo-pipeline/values.yaml); do
   f=(-f "$a/values.yaml"); [ ! -f "$a/envs/$env.values.yaml" ] || f+=(-f "$a/envs/$env.values.yaml")
   # as Kargo's render-addon renders it (includeCRDs, skipTests, release/namespace from addon.yaml)
   o=$(render "$(yq '.addon.releaseName' $a/addon.yaml)" $charts/"$(yq '.addon.chart' $a/addon.yaml)" -n "$ns" \
@@ -66,6 +67,17 @@ for env in dev test prod; do
   gw='select(.kind=="Gateway")'
   assert_yq "$o" "$gw | .metadata.name" "$(yq '.openchoreo.dataPlaneGateway.name' $charts/cluster/values.yaml)"
   assert_yq "$o" "$gw | [.spec.listeners[] | .name + \":\" + .port] | join(\",\")" http:80
+  # its proxy like the hub's (test_openchoreo_control_plane.sh): ClusterIP (no servicelb pod binding :80 on every
+  # worker node), sized envoy, requests only; the chart's own infrastructure label survives the merge
+  ref=$(yq "$gw | .spec.infrastructure.parametersRef | .group + \"/\" + .kind + \"/\" + .name" "$o")
+  [ "${ref%/*}" = gateway.kgateway.dev/GatewayParameters ] || fail "Gateway parametersRef = '$ref'"
+  assert_yq "$o" "$gw | .spec.infrastructure.labels[\"openchoreo.dev/system-component\"]" gateway
+  gwp="select(.kind==\"GatewayParameters\" and .metadata.name==\"${ref##*/}\")"
+  assert_yq "$o" "[$gwp] | length" 1
+  assert_yq "$o" "$gwp | .apiVersion + \" \" + .metadata.namespace" "gateway.kgateway.dev/v1alpha1 $ns"
+  assert_yq "$o" "$gwp | .spec.kube.service.type" ClusterIP
+  assert_yq "$o" "$gwp | .spec.kube.envoyContainer.resources.requests | keys | sort | join(\",\")" cpu,memory
+  assert_yq "$o" "$gwp | .spec.kube.envoyContainer.resources | has(\"limits\")" false
 
   # --- nothing optional (#76: the Docker VM is CPU-bound): no webhook cert for a webhook the data plane doesn't run,
   # agent + reloader only, both with small requests and bounded limits

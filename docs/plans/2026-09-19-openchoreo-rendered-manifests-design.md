@@ -269,3 +269,17 @@ addon. Details: plan Task 2.8 "As built (#14)".
 - **Restart on renewal:** Reloader (stakater, bundled in the umbrella, namespace-scoped, `reloadStrategy: annotations`)
   rolls `cluster-agent-dataplane` when `cluster-agent-tls` or `cluster-gateway-ca` changes. The annotations sit on the
   pod template, which Reloader v1.4.22 reads when the Deployment itself has none.
+- **Gateway proxy:** GatewayParameters `gateway-default` (ClusterIP, envoy requests only), the same shape as the hub's.
+  With kgateway's default LoadBalancer, k3s servicelb would bind :80 on every worker node. Exposing worker apps is
+  Phase 3's decision (#17/#18).
+- **ClusterExternalSecret side effects** (ESO v2.10.0 `ensureNamespaceFinalizer`):
+  - ESO puts a finalizer `externalsecrets.external-secrets.io/ces-<name>` on `openchoreo-data-plane`. Deleting that
+    namespace therefore needs the worker's ESO running, which it always is while the birth kit is installed.
+  - Rolling the birth kit back to a version without the CESs deletes them in the same Helm upgrade that restarts ESO.
+    Afterwards, check that the namespace keeps no stale `ces-*` finalizer:
+    `kubectl get ns openchoreo-data-plane -o jsonpath='{.metadata.finalizers}'`.
+  - `openchoreo-data-plane` also exists when only kgateway is enabled. On a hub without OpenChoreo nothing is pushed,
+    so both ExternalSecrets sit in `SecretSyncedError`. That is noise, not harm.
+- **Trust boundary: the OpenChoreo control plane is worker admin.** Upstream's agent ClusterRole grants `*` on secrets,
+  RBAC and core resources cluster-wide. Whoever controls the hub's OpenChoreo can do anything on every connected
+  worker, including reading the argocd-agent client key in `argocd`.

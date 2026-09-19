@@ -9,6 +9,12 @@ openchoreo-data-plane:
     # openchoreo.dataPlaneGateway). HTTPS would need a real hostname (validate.yaml rejects the .invalid default).
     tls:
       enabled: false
+    # ClusterIP + sized envoy (templates/gatewayparameters.yaml). Merged with the chart's default infrastructure.labels.
+    infrastructure:
+      parametersRef:
+        group: gateway.kgateway.dev
+        kind: GatewayParameters
+        name: gateway-default
   clusterAgent:
     # hub CAPD LB frontend (fleet/base/hub-lb.yaml) -> cluster-gateway NodePort; the gateway cert covers mgmt-lb
     serverUrl: wss://mgmt-lb:30843/ws
@@ -34,6 +40,13 @@ openchoreo-data-plane:
       # into clientSecretName (its default), or cert-manager and ESO fight over the agent's identity: park it aside.
       generateCerts: true
       secretName: cluster-agent-selfsigned-unused
+
+# Envoy of gateway-default (templates/gatewayparameters.yaml): kgateway sets none. Requests only, no limits, like the
+# hub (#67); the hub's envoy idles at ~12m / 37Mi, the worker's routes less (#76).
+gatewayEnvoyResources:
+  requests:
+    cpu: 10m
+    memory: 48Mi
 
 reloader:
   fullnameOverride: reloader

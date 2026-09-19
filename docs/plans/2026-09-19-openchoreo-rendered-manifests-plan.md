@@ -852,7 +852,8 @@ until 2.8). Commit.
   `hub-openbao` admits `openchoreo-data-plane`; crds/ gains the ClusterExternalSecret CRD (first install).
 - Addon `openchoreo-data-plane` 0.2.0 enabled. No `hubGatewayCA` value (the CA is pulled from OpenBao), no
   `$(CLUSTER_NAME)` appset patch: `planeID: $(PLANE_ID)` with `PLANE_ID` from `cluster-agent-tls#plane-id`. Reloader
-  2.2.17 in the umbrella restarts the agent on Secret/ConfigMap change.
+  2.2.17 in the umbrella restarts the agent on Secret/ConfigMap change. GatewayParameters `gateway-default` makes the
+  proxy Service ClusterIP (as on the hub) and sizes envoy.
 - Test `hack/tests/test_openchoreo_data_plane.sh` (contract between the two halves, per env render);
   `test_birth_kit.sh` covers the kit side.
 - dev2 (the dev canary ring) is disabled (#76): `dev-canary` verification can't pass with an empty ring, so the first

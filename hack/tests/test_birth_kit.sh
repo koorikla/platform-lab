@@ -80,8 +80,10 @@ ces() { echo "select(.kind==\"ClusterExternalSecret\" and .metadata.name==\"$1\"
 assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .metadata.name] | sort | join(",")' \
   openchoreo-agent-tls,openchoreo-gateway-ca
 assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .apiVersion] | unique | join(",")' external-secrets.io/v1
-assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .spec.namespaces | join(",")] | unique | join(";")' \
+# namespaceSelectors on the name label (spec.namespaces is deprecated in ESO v2.10.0)
+assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .spec.namespaceSelectors[].matchLabels["kubernetes.io/metadata.name"]] | unique | join(";")' \
   openchoreo-data-plane
+assert_yq "$o" '[select(.kind=="ClusterExternalSecret") | .spec | has("namespaces") or has("namespaceSelector") or (.namespaceSelectors | length != 1)] | unique | join(",")' false
 assert_yq "$o" '[select(.kind=="Namespace") | .metadata.name] | join(",")' external-secrets   # not openchoreo-data-plane
 # client cert (CN = dev1, issued on the hub) + the plane ID next to it: one identity, one Secret. The agent reads
 # plane-id through an env var (the chart's extraEnvs only take secretKeyRef).
