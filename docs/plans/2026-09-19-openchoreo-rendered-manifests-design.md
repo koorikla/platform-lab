@@ -207,3 +207,23 @@ Replaces "hub PushSecret writes into the worker with the CAPI admin kubeconfig".
   minimum dwell on top of verification.
 - **Empty stages pass** (no clusters in test/prod today): the Stage can't know the fleet without breaking invariant 2.
   Except `<env>-canary` stages (arg `requireApps`): an empty canary ring must not open the gate for `<env>`.
+
+## Addendum: rendered app contract (#16, 2026-09-19)
+Kargo renders only what is versioned: the ComponentRelease (and the one Workload). Components come from `main`,
+ReleaseBindings are stamped per cluster by a hub appset (#17). What #17 consumes:
+- **Branches:** `rendered/<stage>` for every `kargo-pipeline` stage (`dev-canary`, `dev`, `test`, `prod`). A cluster
+  binds from `rendered/<env>`, or `rendered/<env>-canary` in the canary ring (worker-addons' rule).
+- **Folder:** `apps/<app>/release/`, `<app>` = folder under `repos/apps` = Component name. Project `app-<app>` owns
+  `apps/<app>/`: each promotion deletes it and renders it again (task `render-app`).
+- **Files** (Kargo v1.11.4 flat layout, `<group . -> _>-<kind>-<namespace>-<name>.yaml`, lowercase):
+  `openchoreo_dev-componentrelease-default-<app>-<stage>-<tag>-<hash8>.yaml`, exactly one per folder (glob
+  `apps/*/release/openchoreo_dev-componentrelease-*.yaml`); binding parameters come from its `metadata.name` and
+  `spec.owner.{projectName,componentName}`. `openchoreo_dev-workload-default-<app>-workload.yaml` only on `dev`.
+- **Lifecycle:** a new tag or config is a new release name, so a promotion replaces the file and the previous release
+  leaves the branch. ComponentReleases are immutable; whether the hub keeps them (no prune) is #17's decision.
+- **Transition:** until #17 nothing syncs `apps/`; podinfo keeps running from the `workloads` appset
+  (`repos/apps/podinfo/chart` at its default tag + a legacy `podinfo:` block in `envs/<env>/values.yaml`). #17 removes
+  both with the appset (spec change and content removal in separate merges).
+- **Promotion gate:** the #26 verification (hub Applications of an addon) exists only for `kind: addon`. App
+  pipelines have nothing deployed to verify until #17, so their `dev` follows `dev-canary` after a soak
+  (`appSoak`, 15 min). App verification (Components/ReleaseBindings Ready on the hub) belongs to #17/#18.

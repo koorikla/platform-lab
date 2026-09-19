@@ -209,9 +209,14 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
   (UI: pick the Freight on the stage → Promote). Each promotion
   commits plain YAML to `rendered/<stage>`; the diff of that commit is the change. Prod through a PR (`pr: true`)
   needs a token that can open PRs (#6).
-- **podinfo** (project `podinfo`, `kargo/podinfo/`): Warehouse on `ghcr.io/stefanprodan/podinfo` (semver `^6`).
-  `dev` auto-promotes, `test`/`prod` by hand. A promotion commits `podinfo.image.tag` into
-  `repos/apps/podinfo/envs/<env>/values.yaml` on `main`.
+- **Apps** (project `app-<name>`, e.g. `app-podinfo`): Freight = the newest image tag (`image.constraint` in
+  `app.yaml`, podinfo `^6.0.0`) x the newest `main` commit touching `repos/apps/<app>/` or the `openchoreo-app` chart.
+  Same stages and auto-promotion as addons, but **no verification yet**: nothing deploys app releases until #17, so
+  there is no health to check; `dev` instead follows Freight that soaked 15 min in `dev-canary` (`appSoak` in the
+  kargo-pipeline values). App verification (ReleaseBindings/Components on the hub) comes with #17/#18. Each promotion
+  (task `render-app`) commits the stage's ComponentRelease `<app>-<stage>-<tag>-<hash8>` to
+  `rendered/<stage>:apps/<app>/release/`; nothing writes `main`. Until #17 nothing deploys from there: the running
+  podinfo still comes from the `workloads` appset (below).
 - **Canary ring** (worker addons): rings replace per-cluster version pins. To run a cluster ahead of its env, set
   `ring: canary` in its fleet file (label `platform.lab/ring=canary`): its Applications follow `rendered/<env>-canary`,
   which the `<env>-canary` stage renders before `<env>`. Only `dev-canary` exists today (a canary cluster needs that
@@ -249,27 +254,27 @@ Kargo UI: `make ui` → http://localhost:8091, user `admin`, password from `make
     `requiredSoakTime`, counted from the promotion to `dev-canary`, on top of verification), or drop `dev` from
     `autoPromote` and promote it by hand. dev has no soak by default: a timer doesn't look at health, and the poll +
     healthy streak already keep dev a few minutes behind the canary.
-  For apps (until #16/#17), one cluster can still run ahead with `repos/apps/<app>/clusters/<cluster>/values.yaml`.
+  Apps have no per-cluster values any more: a cluster runs ahead through the ring (`rendered/dev-canary`, bound by
+  #17), like addons.
 - Never edit `rendered/*` by hand (the one documented exception is `make rendered-prune`). There is no pin file on
   `main` to edit for a break-glass: roll back by promoting older Freight to the stage (Kargo UI, stage → Freight).
 
 ### Add an app
-Today (the `workloads` appset; every folder in `repos/apps/` is an app):
-1. `repos/apps/<app>/chart/`: a chart (typically an umbrella over the upstream chart, as `repos/apps/podinfo/chart`).
-2. `repos/apps/<app>/envs/{dev,test,prod}/values.yaml`: per-env values; the image tag here is written by Kargo.
-   Optional `clusters/<cluster>/values.yaml` for one cluster.
-3. Result: Application `<app>-<cluster>` on every worker, namespace `<app>`, project `workloads` (which allows only
-   `Namespace` as a cluster-scoped kind).
-4. Promotion: copy `kargo/podinfo/` to `kargo/<app>/` and replace every `podinfo` (`grep -rn podinfo kargo/<app>/`):
-   - `project.yaml`: Namespace, Project and ProjectConfig names;
-   - `warehouse.yaml`: Warehouse name, image `repoURL` and semver `constraint`;
-   - `stages.yaml`: `namespace` and the Warehouse name in `requestedFreight[].origin.name`;
-   - `promotion-task.yaml`: `namespace`, the `image` var default, the `yaml-update` path/key and the commit message.
-5. Chart bumps in `repos/apps/<app>/chart/Chart.yaml` (yours or Renovate's) **are not promoted by Kargo**: `workloads`
-   syncs `main`, so every env gets them at merge. Only the image tag goes through Kargo.
+An app is an OpenChoreo Component, described by values of the `openchoreo-app` chart (`repos/apps/podinfo` is the
+example):
+1. `repos/apps/<app>/app.yaml`: `name` (== folder name), `project`, `componentType` (`<workloadType>/<type>` from
+   `openchoreo-app/files/types`), `image.repository`, optional `image.constraint` (semver range for new tags),
+   `endpoints`, optional `container` (command/args/env/files) and `parameters`. **No tag**: the tag is the Kargo Freight.
+2. Optional `repos/apps/<app>/envs/<env>/values.yaml`: env config (e.g. `container.env`), frozen into that env's
+   release. Nothing per cluster.
+3. Result on merge: `kargo-app-pipelines` creates Kargo project `app-<app>`; promotions render
+   `rendered/<stage>:apps/<app>/release/` (`make test` renders every app for every stage, as `render-app` does).
+   Deploying it (Component, releases, a ReleaseBinding per worker cluster on the hub) is #17.
+4. Disable = rename `app.yaml` → `app.yaml.disabled`: the Kargo project goes; what it rendered stays on `rendered/*`.
 
-Planned: apps become OpenChoreo Components with `repos/apps/<app>/app.yaml`, rendered by an `openchoreo-app` chart
-and promoted by a `render-app` Kargo task, visible in Backstage; the `workloads` appset is retired (#15–#18).
+Until #17 retires it, the `workloads` appset still deploys every `repos/apps/<app>/chart` from `main` (Application
+`<app>-<cluster>`, project `workloads`), with `envs/<env>/values.yaml` as values: podinfo keeps a `podinfo:` block
+there for that path and runs the legacy chart's default image tag. New apps don't need a `chart/`.
 
 ### Add a CAPI provider or ClusterClass
 A cluster file picks `clusterClass`, `provider`, `region` and `variables`; everything provider-specific lives in the
